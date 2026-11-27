@@ -86,46 +86,20 @@ library TokenLedgerLib {
         uint8 decimals;
         /// @dev Positions delegated to satellites, keyed by the canonical ERC-7930 wallet key. Separate from the
         ///  native mapping, which stays OpenZeppelin's.
-        mapping(bytes32 walletKey => uint256) bridgedBalance;
+        mapping(bytes32 walletKey => uint256) awayBalance;
         /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
-        uint256 totalBridged;
-        /// @dev Amounts a satellite burned for a cross-chain validation whose mint leg has not landed, keyed by
-        ///  the validation. Debited from the sender's position, still counted in `totalBridged`, still owned by
-        ///  the sender the validation names.
-        mapping(bytes32 validationId => uint256) inTransit;
-        /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
-        uint256 totalInTransit;
+        uint256 totalAwayBalance;
+        /// @dev The money on hold between the two halves of a move, keyed by its ticket: what left the sender's
+        ///  wallet, an away wallet or a home wallet, and has not reached the wallet it ends on. Counted in
+        ///  `totalAwayBalance`, still owned by the sender the ticket names.
+        mapping(bytes32 ticketId => uint256) inTransit;
+        /// @dev Sum of every in-transit hold: the part of `totalAwayBalance` no wallet currently holds.
+        uint256 totalOnHold;
         /// @dev What open validations may still draw from each satellite wallet. Kept here, beside the balance
         ///  it reserves against, so `availableOf` is one subtraction rather than two contracts agreeing: the
-        ///  compliance reserves at issuance and gives back at settlement or discard, and `holdInTransit` turns a
-        ///  reservation straight into a hold, which is why nothing has to be released in between.
-        mapping(bytes32 walletKey => uint256) reservedForValidations;
-        /// @dev Recall instructions waiting for their proof, keyed by id. A settling proof deletes its record.
-        mapping(uint256 recallId => PendingRecall) recalls;
-        /// @dev The last recall id issued. Ids start at 1.
-        uint256 lastRecallId;
-        /// @dev The one recall open on each satellite wallet, zero when none.
-        mapping(bytes32 walletKey => uint256 recallId) openRecall;
-        /// @dev `keccak256(abi.encode(originChainKey, body))` of the proof that settled each recall, kept after the
-        ///  record is gone so the same proof delivered again is recognised as a duplicate, not a replay.
-        mapping(uint256 recallId => bytes32) settledProofs;
-        /// @dev The last delegation id issued. Ids start at 1.
-        uint256 lastDelegationId;
-        /// @dev `keccak256(abi.encode(chainKey, peerKey, toWallet, amount, holder))` of each delegation's mint
-        ///  instruction, so a resend can prove it repeats it exactly.
-        mapping(uint256 delegationId => bytes32) delegations;
-    }
-
-    /// @dev What a burn proof is matched against, and where it may come from: the wallet and chain the recall
-    ///  named, the native wallet it credits, the ceiling on what the satellite may prove, and the gateway and
-    ///  peer it was dispatched to. `gateway` and `peerKey` come last so the layout before them is unchanged.
-    struct PendingRecall {
-        bytes32 walletKey;
-        bytes32 chainKey;
-        address nativeWallet;
-        uint256 amount;
-        address gateway;
-        bytes32 peerKey;
+        ///  compliance reserves at issuance and gives back when the ticket leaves its open row, a receipt or a
+        ///  cancel.
+        mapping(bytes32 walletKey => uint256) reservedForTickets;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));
@@ -134,27 +108,23 @@ library TokenLedgerLib {
 
     /* ----- Views ----- */
 
-    /// @dev See {IToken-bridgedBalanceOf}.
-    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
-        return layout().bridgedBalance[WalletKeyLib.canonicalKey(wallet)];
+    /// @dev See {IToken-awayBalanceOf}.
+    function awayBalanceOf(bytes calldata wallet) external view returns (uint256) {
+        return layout().awayBalance[WalletKeyLib.canonicalKey(wallet)];
     }
 
     /// @dev See {IToken-reservedOf}.
     function reservedOf(bytes calldata wallet) external view returns (uint256) {
-        return layout().reservedForValidations[WalletKeyLib.canonicalKey(wallet)];
+        return layout().reservedForTickets[WalletKeyLib.canonicalKey(wallet)];
     }
 
-    /// @dev See {IToken-availableOf}. The open recall's amount is read off its record rather than kept as a
-    ///  second reservation, so it counts from the instruction and stops counting the moment the proof that
-    ///  settles the recall deletes the record; `recalls[0]` is never written, so a wallet without one adds zero.
+    /// @dev See {IToken-availableOf}. An open bring home reserves in the same table as every ticket.
     function availableOf(bytes calldata wallet) external view returns (uint256) {
-        TokenStorage storage s = layout();
+        TokenStorage storage tokenStorage = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
-        uint256 balance = s.bridgedBalance[key];
-        uint256 reservedForValidations = s.reservedForValidations[key];
-        uint256 recalledAmount = s.recalls[s.openRecall[key]].amount;
-        uint256 heldBack = reservedForValidations + recalledAmount;
-        return heldBack < balance ? balance - heldBack : 0;
+        uint256 balance = tokenStorage.awayBalance[key];
+        uint256 reservedForTickets = tokenStorage.reservedForTickets[key];
+        return reservedForTickets < balance ? balance - reservedForTickets : 0;
     }
 
     /* ----- Reservations ----- */
@@ -162,7 +132,7 @@ library TokenLedgerLib {
     /// @dev Records that an open validation may draw `amount` from a satellite `wallet`.
     function reserve(bytes calldata wallet, uint256 amount) external {
         bytes32 key = WalletKeyLib.satelliteKey(wallet);
-        layout().reservedForValidations[key] += amount;
+        layout().reservedForTickets[key] += amount;
 
         emit EventsLib.ReservedForValidation(key, wallet, amount);
     }
@@ -174,84 +144,66 @@ library TokenLedgerLib {
 
     /* ----- Transitions ----- */
 
-    /// @dev Takes `amount` out of `fromWallet`'s bridged position and holds it against `validationId`: the burn
-    ///  leg of a cross-chain validation landed, the mint leg has not. The amount stays bridged and stays the
-    ///  sender's; only the wallet no longer holds it, so nothing can be issued or recalled against tokens the
-    ///  satellite already burned. One hold per validation.
-    /// @dev Turns what a validation reserved against the wallet into an in-transit hold, in one step: the
-    ///  tokens leave the wallet, so the reservation that was standing in for them is given back at the same
-    ///  time and there is nothing to release separately.
-    /// @param reserved what this validation had reserved against the wallet, released as the hold is taken
-    function holdInTransit(bytes calldata fromWallet, uint256 amount, bytes32 validationId, uint256 reserved) external {
+    /// @dev Takes `amount` out of `fromWallet`'s away balance and holds it against `ticketId`: the first half of a
+    ///  move landed, its away chain burned the amount, and the second half has not. The amount stays counted in
+    ///  `totalAwayBalance` and stays the sender's; only the wallet no longer holds it. A hold may grow: money on hold
+    ///  that carried another's credit holds that part too once the other is taken.
+    function putOnHold(bytes calldata fromWallet, uint256 amount, bytes32 ticketId) external {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
 
-        TokenStorage storage s = layout();
-        require(s.inTransit[validationId] == 0, ErrorsLib.TransitAlreadyHeld(validationId));
-        if (reserved != 0) _release(fromKey, fromWallet, reserved);
-        _debit(s, fromWallet, fromKey, amount);
-        s.inTransit[validationId] = amount;
-        s.totalInTransit += amount;
+        TokenStorage storage tokenStorage = layout();
+        _debit(tokenStorage, fromWallet, fromKey, amount);
+        tokenStorage.inTransit[ticketId] += amount;
+        tokenStorage.totalOnHold += amount;
 
-        emit EventsLib.HeldInTransit(fromKey, validationId, fromWallet, amount);
+        emit EventsLib.HeldInTransit(fromKey, ticketId, fromWallet, amount);
     }
 
-    /// @dev Puts a held amount back on the wallet it was burned from. The mirror of {holdInTransit}: the
-    ///  movement is unwound where it started instead of completed, so `totalSupply` and `totalBridged` do not
-    ///  move, only the hold becomes a balance again.
-    function returnHeldInTransit(bytes calldata toWallet, bytes32 validationId) external {
-        TokenStorage storage s = layout();
-        uint256 held = s.inTransit[validationId];
-        require(held != 0, ErrorsLib.NothingInTransit(validationId));
+    /// @dev Holds `amount` against `ticketId` for a home wallet that moves out: the token burns it from the wallet's
+    ///  native balance right after, so the amount leaves the native supply and joins `totalAwayBalance` on hold, and
+    ///  `totalSupply` does not move. One hold per ticket.
+    /// @return holder The home wallet the token burns from.
+    function holdFromHome(bytes calldata fromWallet, uint256 amount, bytes32 ticketId)
+        external
+        returns (address holder)
+    {
+        (, holder) = WalletKeyLib.isReferenceChain(fromWallet);
+        require(holder != address(0), ErrorsLib.ZeroAddress());
 
-        bytes32 toKey = WalletKeyLib.satelliteKey(toWallet);
-        delete s.inTransit[validationId];
-        s.totalInTransit -= held;
-        s.bridgedBalance[toKey] += held;
+        TokenStorage storage tokenStorage = layout();
+        require(tokenStorage.inTransit[ticketId] == 0, ErrorsLib.TransitAlreadyHeld(ticketId));
+        tokenStorage.inTransit[ticketId] = amount;
+        tokenStorage.totalOnHold += amount;
+        tokenStorage.totalAwayBalance += amount;
 
-        emit EventsLib.ReturnedInTransit(toKey, validationId, toWallet, held);
+        emit EventsLib.HeldInTransit(keccak256(fromWallet), ticketId, fromWallet, amount);
     }
 
-    /// @dev Routes a settled validation leg. A receiver on this chain is the token's to credit, so only the
-    ///  bridged half is applied here: the sender's position is debited and `toNative` tells the token to mint
-    ///  `amount` to `recipient` and name the movement. Any other receiver is a movement between two satellite
-    ///  wallets and is applied whole, see {_bridgedTransfer}.
+    /// @dev Ends a move: `amount` leaves the ticket's hold when it has one, `from`'s away balance otherwise, and
+    ///  lands on `to`. A receiver on this chain is the token's to credit, so only the bridged side is applied here
+    ///  and `toNative` tells the token to mint `amount` to `recipient`; any other receiver is credited here. A hold
+    ///  may be released in parts: the compliance never takes more from it than it put on it.
     /// @return toNative Whether the receiver is a wallet on this chain.
     /// @return recipient That wallet, when `toNative`.
-    /// @return fromKey The sender's key, when `toNative`.
-    function settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
+    /// @return fromKey The sender's key.
+    function settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId)
         external
         returns (bool toNative, address recipient, bytes32 fromKey)
     {
+        fromKey = WalletKeyLib.canonicalKey(from);
+        TokenStorage storage tokenStorage = layout();
+        _takeFromHoldOrWallet(tokenStorage, from, fromKey, amount, ticketId);
+
         (toNative, recipient) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
-            fromKey = _debitToNative(from, recipient, amount);
-        } else {
-            _bridgedTransfer(from, to, amount, validationId);
+            tokenStorage.totalAwayBalance -= amount;
+            return (toNative, recipient, fromKey);
         }
-    }
 
-    /// @dev The bridged half of every bridged-to-native transition: a bridged debit, `totalBridged` down. The
-    ///  token mints `amount` to `holder` afterwards and names the movement. Emits nothing.
-    function debitToNative(bytes calldata fromWallet, address holder, uint256 amount)
-        external
-        returns (bytes32 fromKey)
-    {
-        return _debitToNative(fromWallet, holder, amount);
-    }
+        bytes32 toKey = WalletKeyLib.satelliteKey(to);
+        tokenStorage.awayBalance[toKey] += amount;
 
-    /// @dev The bridged half of every native-to-bridged transition: a bridged credit, `totalBridged` up. The
-    ///  token burns `amount` from `holder` afterwards and names the movement. Emits nothing.
-    /// @param freeBalance `holder`'s free native balance, read by the token; `amount` may not exceed it
-    function creditFromNative(address holder, bytes calldata toWallet, uint256 amount, uint256 freeBalance)
-        external
-        returns (bytes32 toKey)
-    {
-        toKey = WalletKeyLib.satelliteKey(toWallet);
-        require(amount <= freeBalance, IERC20Errors.ERC20InsufficientBalance(holder, freeBalance, amount));
-
-        TokenStorage storage s = layout();
-        s.bridgedBalance[toKey] += amount;
-        s.totalBridged += amount;
+        emit EventsLib.BridgedTransfer(fromKey, toKey, ticketId, from, to, amount);
     }
 
     /* ----- Storage ----- */
@@ -265,45 +217,29 @@ library TokenLedgerLib {
 
     /* ----- Private ----- */
 
-    /// @dev Applies a settled movement between two satellite wallets, same-chain or cross-chain, in one atomic
-    ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
-    ///  When its burn leg already moved the amount in transit, the hold is what `to` is credited from, and it
-    ///  must be the settled amount exactly.
-    function _bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) private {
-        bytes32 fromKey = WalletKeyLib.satelliteKey(from);
-        bytes32 toKey = WalletKeyLib.satelliteKey(to);
-
-        TokenStorage storage s = layout();
-        uint256 held = s.inTransit[validationId];
-        if (held != 0) {
-            require(held == amount, ErrorsLib.TransitAmountMismatch(validationId, held, amount));
-            delete s.inTransit[validationId];
-            s.totalInTransit -= amount;
-        } else {
-            _debit(s, from, fromKey, amount);
+    /// @dev Takes `amount` off the ticket's hold when it has one: the second half of a move, or the end of a home
+    ///  wallet's move out. Off `from`'s away balance otherwise: a move inside one away chain.
+    function _takeFromHoldOrWallet(
+        TokenStorage storage tokenStorage,
+        bytes calldata from,
+        bytes32 fromKey,
+        uint256 amount,
+        bytes32 ticketId
+    ) private {
+        uint256 held = tokenStorage.inTransit[ticketId];
+        if (held == 0) {
+            _debit(tokenStorage, from, fromKey, amount);
+            return;
         }
-        s.bridgedBalance[toKey] += amount;
-
-        emit EventsLib.BridgedTransfer(fromKey, toKey, validationId, from, to, amount);
-    }
-
-    function _debitToNative(bytes calldata fromWallet, address holder, uint256 amount)
-        private
-        returns (bytes32 fromKey)
-    {
-        require(holder != address(0), ErrorsLib.ZeroAddress());
-        fromKey = WalletKeyLib.satelliteKey(fromWallet);
-
-        TokenStorage storage s = layout();
-        _debit(s, fromWallet, fromKey, amount);
-        s.totalBridged -= amount;
+        tokenStorage.inTransit[ticketId] = held - amount;
+        tokenStorage.totalOnHold -= amount;
     }
 
     /// @dev Gives back what a validation reserved against a wallet. Floors at zero rather than reverting: the
     ///  compliance is the only caller and releases each reservation once, so a shortfall would mean its own
     ///  bookkeeping is wrong, and blocking a settlement over it would strand the movement.
     function _release(bytes32 key, bytes calldata wallet, uint256 amount) private {
-        mapping(bytes32 => uint256) storage reserved = layout().reservedForValidations;
+        mapping(bytes32 => uint256) storage reserved = layout().reservedForTickets;
         uint256 held = reserved[key];
         uint256 released = held < amount ? held : amount;
         reserved[key] = held - released;
@@ -311,10 +247,10 @@ library TokenLedgerLib {
         emit EventsLib.ReleasedFromValidation(key, wallet, released);
     }
 
-    function _debit(TokenStorage storage s, bytes calldata wallet, bytes32 key, uint256 amount) private {
-        uint256 balance = s.bridgedBalance[key];
+    function _debit(TokenStorage storage tokenStorage, bytes calldata wallet, bytes32 key, uint256 amount) private {
+        uint256 balance = tokenStorage.awayBalance[key];
         require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
-        s.bridgedBalance[key] = balance - amount;
+        tokenStorage.awayBalance[key] = balance - amount;
     }
 
 }

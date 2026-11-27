@@ -55,7 +55,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -63,9 +63,9 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 30, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30);
-        assertEq(token.bridgedBalanceOf(satellite2), 30);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.awayBalanceOf(satellite1), 30);
+        assertEq(token.awayBalanceOf(satellite2), 30);
+        assertEq(token.totalAwayBalance(), 60);
         assertEq(token.totalSupply(), 100);
         _assertPartition();
     }
@@ -95,9 +95,9 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, satellite3, 60, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.bridgedBalanceOf(satellite3), 60);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.awayBalanceOf(satellite3), 60);
+        assertEq(token.totalAwayBalance(), 60);
         _assertPartition();
     }
 
@@ -107,9 +107,9 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         ledger.bridgedTransfer(satellite2, satellite3, 10, bytes32(uint256(VALIDATION_ID) + 1));
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellite1), 30);
-        assertEq(token.bridgedBalanceOf(satellite2), 20);
-        assertEq(token.bridgedBalanceOf(satellite3), 10);
+        assertEq(token.awayBalanceOf(satellite1), 30);
+        assertEq(token.awayBalanceOf(satellite2), 20);
+        assertEq(token.awayBalanceOf(satellite3), 10);
         _assertPartition();
     }
 
@@ -117,7 +117,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, satellite1, 30, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 60);
+        assertEq(token.awayBalanceOf(satellite1), 60);
         _assertPartition();
     }
 
@@ -125,19 +125,19 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 0, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 60);
-        assertEq(token.bridgedBalanceOf(satellite2), 0);
+        assertEq(token.awayBalanceOf(satellite1), 60);
+        assertEq(token.awayBalanceOf(satellite2), 0);
     }
 
-    function test_bridgedTransfer_ThenRecallFromTheReceiver() public {
+    function test_bridgedTransfer_ThenBringHomeFromTheReceiver() public {
         vm.startPrank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 30, VALIDATION_ID);
-        ledger.ledgerRecall(satellite2, user2, 30);
+        ledger.ledgerBringHome(satellite2, user2, 30);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 30);
-        assertEq(token.bridgedBalanceOf(satellite2), 0);
-        assertEq(token.totalBridged(), 30);
+        assertEq(token.awayBalanceOf(satellite2), 0);
+        assertEq(token.totalAwayBalance(), 30);
         _assertPartition();
     }
 
@@ -165,17 +165,19 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.bridgedTransfer(satellite1, native, 10, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 50);
+        assertEq(token.awayBalanceOf(satellite1), 50);
         assertEq(token.balanceOf(user2), 10);
         assertEq(token.totalSupply(), 100, "the supply never moves on a settlement");
         _assertPartition();
     }
 
+    /// @notice A home wallet holds no away balance: outside a hold of its own move out, the ledger has nothing to
+    ///         take from it.
     function test_bridgedTransfer_RevertWhen_SourceIsOnTheReferenceChain() public {
         bytes memory native = satelliteEnvelope(block.chainid, user1);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, native, 0, 1));
         vm.prank(agent);
-        ledger.bridgedTransfer(native, satellite2, 0, VALIDATION_ID);
+        ledger.bridgedTransfer(native, satellite2, 1, VALIDATION_ID);
     }
 
     function test_bridgedTransfer_RevertWhen_SourceEnvelopeIsNotCanonical() public {

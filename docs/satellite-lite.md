@@ -11,69 +11,114 @@ reference chain against it.
 
 | Direction | Type | Body | What the Lite does |
 |---|---|---|---|
-| in | `COMPLIANCE_VALIDATION` | `ComplianceValidation { validationId, salt, from, to, spender, amountMin, amountMax, token, expiry, reconciliationWindow }` | stores it under `validationId`, with `hashValidation` of it |
-| in | `MINT_INSTRUCTION` | `MintInstruction { delegationId, toWallet, amount, holder }` | mints `amount` to `toWallet`, once per `delegationId` |
-| in | `RECALL_INSTRUCTION` | `RecallInstruction { recallId, wallet, amount, nativeWallet }` | burns up to `amount` of `wallet` once, answers with a `BurnProof` |
-| out | `SETTLEMENT_NOTIFICATION` | `SettlementNotification { validationId, from, to, amount, hash }` | one per leg it executed, `hash` being the hash of the body it executed under |
-| out | `BURN_PROOF` | `BurnProof { recallId, burnedWallet, amount }` | one per recall id, resent unchanged on request |
+| in | `TICKET` | `TicketMessage { ticketId, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId`; a later copy is an ask for the receipt, see rule 3 |
+| in | `MOVE_OUT` | `MoveOutMessage { ticketId, half, toWallet, amount, validUntil }` | the second half of a move: mints `amount` to `toWallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
+| in | `BRING_HOME` | `BringHomeMessage { ticketId, half, wallet, amount, validUntil }` | the half of a bring home: burns `min(amount, balance)` of `wallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
+| out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, askBlockHash, seenMax, seenValidUntil, half, answer }` | one per ticket it executed, echoing the copy it executed under: its `askBlockHash`, its `amountMax` as `seenMax` and its `validUntil` as `seenValidUntil`; `half` is 0 and `answer` is `Executed`. One per move out it answered: `half` is the move out's, `from` is empty, `to` is `toWallet`, the ticket fields are zero, and either `amount` is the move out's and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired`. One per bring home half it answered: `half` is the bring home's, `from` is `wallet`, `to` is empty, the ticket fields are zero, and either `amount` is what it burned, possibly 0, and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired` |
 
-Every message travels through a gateway the network's `TrustedGatewayRegistry` trusts. The token accepts a settlement
-only from the chain's current peer, and a burn proof for an open recall only from the peer and through the gateway
-that recall was dispatched to.
+Every message carries the envelope version 2 (`MessageTypesLib.VERSION`); a message of any other version is refused,
+on both sides.
+
+The ticket id is built from the whole request: `keccak256(abi.encode(kind, fromKey, toKey, spenderKey, amountMin,
+requestedMax, salt))`, where the keys are `keccak256` of the canonical envelopes, `spenderKey` is zero when there is
+no spender, and `kind` is 0 for a move and 1 for a bring home. The same ask mined in any block gets the same id. The ask block hash,
+`keccak256(abi.encode(block.number, blockhash(block.number - 1), amountMax, validUntil))` read in the block that
+issued the ticket, names the copy: two copies of one ask mined in two blocks share the id and differ in it.
+
+`answer` says why a receipt says what it says, so a receipt of amount zero says why it is zero: `Executed` (the
+copy echoed was executed, for `amount`, possibly zero), `Expired` (never executed and past its valid until) or
+`StillOpen` (never executed, still before its valid until). A Lite reports `Executed` for every ticket it executed;
+home reads the other two once it asks a Lite for a receipt. A still open answer is not an answer to an ask: home
+raises the ticket's `seenValidUntil` up to its valid until plus the chain's full finality delivery and clock lead, and
+cancels only after an ask went unanswered for one waiting time. The Lite must ignore a ticket whose valid until is
+further ahead of its own clock than the validity window plus its lag budget, so a forged far valid until is never
+held.
+
+A move out of an away wallet toward another chain is one ticket, to the sender's away chain only. The Lite burns and
+sends its receipt; home puts the amount on hold, asks the rules again for the receiver and sends a `MOVE_OUT`, the
+second half, to the receiver's chain, or back to the sender's wallet when the rules refuse it. A move toward a home
+wallet is minted at home in the receipt's delivery. A home wallet that moves out to an away wallet is the same move
+with no first half: home burns at the ask and sends the `MOVE_OUT`. Away tokens never talk to each other.
+
+A bring home is a ticket too, of kind `BRING_HOME`, written by an agent with `bringHome(awayWallet, amount,
+homeWallet, salt)` on the compliance for two wallets of one identity. It reserves `amount` on the away wallet in the
+same table as every ticket, so no ticket and no bring home count on the same tokens, and at most one is open per
+away wallet. Its half is a `BRING_HOME` with its own valid until, sent on the receipt route. The Lite's receipt for
+that half is applied as any receipt: what was burned is minted at the home wallet, or sent back to the away wallet
+by a `MOVE_OUT` when the home wallet is no longer the identity's; a zero answer ends the bring home with nothing
+moved.
+
+Every message travels through a gateway the network's `TrustedGatewayRegistry` trusts. The token accepts a receipt
+from the pair its half was pinned to or from the chain's current peer. A move out's receipt must come from the chain of
+the wallet it minted to, and a bring home's from the chain of the wallet it burned: the compliance refuses one from any
+other chain, and blocks that chain.
 
 ## Rules
 
 ### Transport
 
 1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on a nonzero receive id, and also on
-   the operation id, since a resend arrives under a new receive id: `validationId` for a validation, see rule 3 for
-   what a second body under a known id means, and the instruction ids of rules 9 and 10. A zero receive id names
+   the operation id, since a resend arrives under a new receive id: `ticketId` for a validation, see rule 3 for
+   what a second body under a known id means, and the half of rules 9 and 10. A zero receive id names
    no delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
-2. **Accept only the reference token as author**, through its own gateway.
-2a. **Send every report on the final route.** A chain may have two routes on the reference side: a fast one, set
-   with `setFastRoute`, that carries validations out ahead of finality and nothing else, and the final one, set with
-   `setRoute`, that carries instructions out and is the only one settlements and burn proofs are taken from. The
-   token refuses a delivery from the fast route with `GatewayIsFastRoute`, and pins each validation leg to the final
-   route of the moment (`pinnedRouteFor`), so a validation that arrived on the fast gateway is settled through the
-   final one, not back through the gateway that delivered it.
+2. **Accept only the reference token as author**, through its own gateway; never act on a message from another away
+   token.
+2a. **Send every receipt on the receipt route, at full finality.** A chain may have two routes on the reference
+   side: a ticket route, set with `setTicketRoute` to a ticket bridge, that carries tickets out ahead of finality and
+   nothing else, and the receipt route, set with `setReceiptRoute` to a receipt bridge, that carries money messages out
+   and is the only one receipts are taken from. The token takes deliveries from receipt bridges only,
+   so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`), and it reads the receipt
+   bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
+   one that admits less than full finality (`ReceiptBridgeNotFullFinality`). Each half is pinned to the receipt route
+   and the peer it left through (`pinOf`), and its receipt is taken from that pair or the current one, so a ticket
+   that arrived on the ticket bridge is answered through the receipt route, not back through the bridge that
+   delivered it.
 
 ### Validations
 
-3. **Execute a validation once, and hold one body per id.** A validation delivered again under a known id with the
-   same `hashValidation` is a resend, ignored. One with another hash, while the id is not yet consumed, replaces
-   what the Lite holds: the reference chain re-issued it after a reorg, and the later body is the canonical one.
-   Once consumed, nothing changes whatever arrives: the report already names the hash executed under.
-4. Execute strictly before `expiry`.
+3. **Execute a ticket once, and keep the first copy per id.** A ticket delivered again under a known id is never
+   held in place of the first, whether home sent it again or it is a copy of the same ask mined again in another
+   block after a reorg (another `askBlockHash`, maybe another `amountMax` or `validUntil`): it is an ask for the
+   receipt. The Lite answers it with the receipt it stored, with a stored zero receipt (`Expired`) once the first
+   copy's valid until has passed, or with a still open answer before. A first copy that arrives at or after its
+   valid until is answered with a stored zero receipt and never executed. The receipt echoes the copy held, and the
+   reference chain tells which one it was. A ticket whose `ticketId` is not the id of its own terms (the formula
+   above, with `kind` 0) is refused (`TicketIdMismatch`) and never held, so nobody puts other terms under a known id.
+   Answers that send a stored receipt again, to later copies or repeated halves, are limited to six per half
+   (`MAX_ANSWERS_PER_HALF`): home sends at most three asks for a ticket's receipt and three sends of a half, so six
+   cover home and a redelivery of each; past the limit the delivery is consumed and nothing is sent
+   (`AnswerNotSent`). The first send of a stored receipt is not counted, and neither is a still open answer: home
+   gives its ask back on each one, so it must hear every one, and counting them would use up the answers home needs
+   once the ticket executed or passed its valid until.
+4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
 6. Execute only for the named wallets, by `from` or by the named `spender`.
-7. Report every leg it executed, exactly once, carrying the `hashValidation` of the body it executed under. One-leg
-   movements carry both wallets; on a two-leg movement the sending Lite reports the burn leg with `to` empty, the
-   receiving Lite the mint leg with `from` empty. A report lost on the way may be sent again byte for byte: the
-   reference chain recognises a leg it already consumed (`SettlementDuplicate`) and changes nothing.
-
-### The two-leg invariant
-
-8. **The receiving Lite mints only on the sending Lite's burn message**, carried by a trusted gateway and authored by
-   that Lite, for the amount it carries, never from the validation alone. This is what makes a range safe on a
-   two-leg validation, and what the token's `SettlementAmountMismatch` check backs up. The receiving Lite's own copy
-   of the validation is what it checks that message against: the recipient, the bounds and the token. A burn message
-   for a validation the Lite does not hold is refused, not minted, and redelivered once the leg arrives; rule 4 binds
-   the sending Lite, the mint follows the burn whatever the clock says, and the reference chain takes a late leg.
+7. Report every ticket it executed, exactly once, echoing the copy it executed under (`askBlockHash`, `seenMax`,
+   `seenValidUntil`) with `answer` `Executed`, and both wallets. A report lost on the way may be sent again byte for
+   byte: the reference chain keeps one receipt per half, recognises the same one again and changes nothing; another
+   receipt for a half that already has one blocks the Lite's chain. Anyone may ask the Lite to send a stored receipt
+   again (`resendReceipt(ticketId, half)`), at most three times per half (`MAX_RECEIPT_RESENDS`), the first one
+   `receiptResendWait` after its last send, the next after two waits, the next after four: every send is paid from
+   the bridge's fee balance. The resends are counted apart from the answers of rule 3, so a resend by anyone never
+   uses up the answers home needs.
 
 ### Instructions
 
-9. **A mint instruction mints at most once per `delegationId`.** The same id again with the same body is a no-op;
-   the same id with a different body is refused. The reference chain already burned the native balance and credited
-   the bridged position; a Lite that mints twice has inflated its chain.
-10. **A recall instruction burns at most once per `recallId`.** The Lite burns `min(amount, balance)`, where `balance`
-    may be below `amount`, down to zero, when a validation requested before the recall executed first, including
-    one that was still awaiting approval when the recall was instructed; stores the proof; sends it. A validation
-    requested after it cannot draw on the recalled amount: the token holds `amount` back from the wallet's
-    `availableOf` from the instruction until the proof settles the recall. Nothing else releases it: an instruction
-    that was never answered may still be executed, so its amount stays held back. A repeated
-    instruction is answered with the stored proof, and the operator can resend it. The Lite never answers one id with
-    two different proofs and never proves more than instructed. The token credits the native wallet the instruction
-    recorded, not one the proof could choose.
+Rule 8, the two-leg invariant, is gone: a receiving Lite no longer mints on the sending Lite's burn message. It
+mints on home's move out only (rule 9), and never acts on a message from another away token (rule 2).
+
+9. **A move out mints at most once per half**, keyed by `(ticketId, half)`, strictly before the half's `validUntil` on
+   the Lite's own clock, and answers with one receipt for that half. A move out that arrives at or after its
+   `validUntil`, never executed, is answered with a zero receipt (`Expired`), stored, and that half is never executed
+   afterwards: home then sends a new half. The same half again is answered with the stored receipt, byte for byte.
+   Home already holds the amount on hold; a Lite that mints twice has inflated its chain.
+10. **A bring home burns at most once per half**, keyed by `(ticketId, half)`, strictly before the half's `validUntil`
+    on the Lite's own clock. The Lite burns `min(amount, balance)`, down to zero, and answers with one receipt for that
+    half naming the burned wallet. A bring home that arrives at or after its `validUntil`, never executed, is answered
+    with a zero receipt (`Expired`), stored, and that half is never executed afterwards. The same half again is
+    answered with the stored receipt, byte for byte. The Lite never burns more than `amount` and never burns for an
+    older half: home holds `amount` reserved on the wallet until the receipt lands, so no ticket asked meanwhile
+    draws on it, and mints at the home wallet the ticket recorded, not one the receipt could choose.
 
 ## Lanes
 
@@ -82,37 +127,37 @@ depends on which block, or in which order, its transaction landed. That holds fo
 
 | Type | Lane | Why |
 |---|---|---|
-| `COMPLIANCE_VALIDATION` | may ride before finality | `validationId` is `keccak256(canonicalKey(from), salt)`, a function of the request and never of the chain's ordering or clock; the settlement path never halts the token. A validation issued by an approval SHOULD wait for finality all the same: a reorg can drop the approval and the approver answer otherwise, which leaves the executed leg parked. Which route a validation takes is the token's routing, not this table's |
-| `SETTLEMENT_NOTIFICATION`, `BURN_PROOF` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a leg or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
-| `MINT_INSTRUCTION`, `RECALL_INSTRUCTION` | MUST wait for finality | `delegationId` and `recallId` are counters, assigned by inclusion order; a reorg can give the same id to another instruction |
+| `TICKET` | may ride before finality | `ticketId` is built from the whole request, never from the chain's ordering or clock; a receipt never stops the token. A ticket an approval opened, a ticket above the chain's per-ticket cap, and one that would take the ticket route above its per-window cap travel at full finality: a reorg could otherwise drop the approval after the away token executed the ticket, and the caps bound what a dropped block can cost. The compliance chooses the route at the ask and writes it on the ticket |
+| `RECEIPT` | MUST wait for the satellite chain's finality | the reference chain applies a report once and cannot take it back; a receipt or a burn its chain later reorgs away would stay on the ledger for a movement that never happened |
+| `MOVE_OUT`, `BRING_HOME` | MUST wait for finality | they move value: home sends them only on its receipt route, at full finality |
 
 A Lite that executes a validation before finality owns the reorg exposure, and the reference chain bounds it to
 that chain. Three things can happen to an issuance after the Lite acted on it, and each has one outcome:
 
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
-- **Dropped.** The leg reaches the reference chain under an id nothing is issued under: the leg is parked
-  (`SettlementParked`, `parkedLegOf`) and the chain's inbound is paused. Neither the request sent again nor
-  `settleParkedLeg` goes through while that pause stands. Once the pause is lifted, the request
-  sent again with the same `salt` issues the same id and sends no leg to the chain that already executed; the body
-  carries the `salt`, so an agent can send it on the requester's behalf from the Lite's copy. Anyone then calls
-  `settleParkedLeg(validationId, chainKey)`, which judges the leg as a delivery would (`ParkedLegSettled`, or one
-  of the outcomes below); a leg that reverts there stays parked and is tried again, and once the keeper resolved
-  the pair it ends as a replay. While a leg is parked under an id its validation is not discarded
-  (`ParkedLegAwaitsSettlement`): the report is already here and is settled first. When the request can no longer be issued, because a rule that allowed it now
-  refuses it or an `APPROVAL` module refuses it this time, the leg stays parked and readable through
-  `parkedLegOf`: nothing is applied and the ledger does not follow what the Lite executed. No function takes
-  such a leg in or sends it back today: that exit needs a contract change.
-- **Re-issued with another body.** The hash in the report tells the two cases apart. A leg inside the issued terms
-  settles whatever hash it carries (`SettlementBodyDiverged` when it is not the issued one). A leg outside the
-  terms with the issued hash is a Lite that broke rule 5 or 6 (`SettlementRejected`); one with another hash, from
-  a chain the validation involves, executed a body this chain never canonically issued (`ValidationOrphaned`):
-  while `Pending` the validation ends `Orphaned` and its reservation is released, otherwise it stands. A leg from
-  any other chain is rejected whatever hash it names, since that chain could not have executed anything under the
-  id. Nothing is applied either way, and the chain is paused.
+- **Dropped.** The receipt reaches the reference chain under an id home has no record of. Home puts its amount on
+  hold under the sender, with no destination (`ReceiptWithoutTicket`), and no chain is blocked; when the Lite moved
+  the tokens to a wallet on its own chain, that wallet gets uncounted credit (`uncountedCreditOf`): tokens it holds
+  that home does not count for it yet and that it cannot ask to move. The request sent again with the same terms and
+  `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
+  Lite's copy. That ask takes the money on hold and finishes the move, once the held receipt keeps the ask's terms and
+  the per-ticket cap; no approval module may be bound. If nobody takes it within four waiting times of the sender's
+  chain, anyone cancels it (`cancelHold`): a `BRING_HOME` on the receiver for at most its uncounted credit, then a
+  `MOVE_OUT` of what burned back to the sender. A bring home that burns less than it asked leaves the rest on hold
+  (`CancelHoldShort`) and is not sent again until credit comes back to the receiver. A receipt for a ticket home
+  wrote and never sent (waiting for approval, or cancelled before it left) is put on hold the same way, never applied
+  as that ticket's move.
+- **Mined again in another block.** The id is the same and the ask block hash is not: the copy home now holds may
+  have another `amountMax` or `validUntil`. The ask block hash the receipt echoes tells the two cases apart. On
+  home's own ask block hash the receipt must echo home's own terms and move an amount inside them. On another one it
+  answers a copy from a block a reorg dropped (`ReceiptOnOlderTerms`): it is allowed up to `requestedMax` and the
+  away chain's per-ticket cap, with an amount inside the range of the copy it echoes. Either way the receipt is
+  applied as it happened, since the Lite's balances already moved; one that breaks its terms also blocks its chain.
+  A receipt from a chain the ticket was not sent to, or for other wallets, is refused and blocks that chain.
 
-The hash commits to the terms alone, the id, the wallets, the spender, the range and the token: `expiry` and
-`reconciliationWindow` are read off the issuing block's clock and are left out, so a body re-issued after a drop
-with the same terms hashes the same.
+The ask block hash holds the block number, the hash of the block before and the terms home narrows: two sibling
+blocks at one height share number and parent, so the terms tell their copies apart. Home writes it at the ask and
+only compares it later, so it never reads a block hash older than the chain serves (8,191 blocks, EIP-2935).
 
 ## Retries
 
@@ -120,77 +165,108 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| validation leg | sender's identity, recipient's identity for the leg toward the recipient's chain, or agent | `resendValidation(validationId, chainKey, to, spender)`: either leg while `Pending` and before `expiry`; the receiving chain's leg also once the burn landed, before `releaseAt`, so the leg cannot land after the pair was resolved and the burned amount returned; rebuilt from the record and checked against the issued hash; goes out as the issuance did, on the fast route when one is set and on the final route otherwise, and only while the final route and the peer are still the ones the issuance pinned; refused while issuance toward that chain is paused or the token is paused; nothing counts or spaces resends, the token forwards no value and the Lite ignores a leg it holds |
-| mint instruction | agent | `resend(0, delegationId, abi.encode(toWallet, amount, holder, peer))`, the fields from `DelegatedOut` and the peer at dispatch; checked against the stored commitment |
-| recall instruction | agent | `resend(1, recallId, abi.encode(wallet))`; the admitted gateway moves to the current route, which delivers the resend |
-| burn proof | Lite operator | resend the stored proof; the token settles it once |
-| a proof delivered twice | nobody | the token recognises the settled proof and changes nothing (`BurnProofDuplicate`) |
+| ticket (an ask for its receipt) | anyone | `sendTicket(ticketId, chainKey, to, spender)`: while `Open`, three asks at most, the first one waiting time after the later of `validUntil` and `seenValidUntil`, each next one a waiting time later; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out on the route chosen at the ask (the ticket route falls back to the receipt route when its bridge is no longer trusted), to the pinned pair while it is the current pair or the former pair inside its window, and to the current pair otherwise; refused while that away chain is blocked or the token is paused; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
+| move out (a second half) | anyone | `sendSecondHalf(ticketId, wallet)`, `wallet` read off `SecondHalfSent`: an owed half (answered `Expired`, or its send failed inside the receipt's delivery) is sent as a new half with a fresh valid until, at most four halves per money on hold (`NoNewHalfLeft`); otherwise the latest half is sent again byte for byte, three sends at most, at fixed times: one waiting time of its chain after its valid until, then two more. A half sent again goes only to its pinned peer: through the former pair inside the window of a planned change, or the current route while that peer is still the chain's (`PeerChanged` otherwise) |
+| bring home, or its receipt | anyone | `sendSecondHalf(ticketId, awayWallet)` while the bring home is open, at the same fixed times as a move out; the Lite answers with its stored receipt or a zero receipt (`Expired`), which ends the bring home with nothing moved. Sent again only to its pinned peer, as a move out is |
 
-A resend never retargets: it is refused (`PeerChanged`) once the chain's peer is no longer the one the instruction
-was addressed to. A resend after a route switch is the expected way to recover a recall whose original gateway is gone.
-A validation leg is the exception: its settlement is matched against the gateway and the peer it was pinned to, so
-after a route switch or a peer change the leg is not resent (`ValidationAlreadyRouted`). While `Pending`, the
-reservation comes back through discard at `releaseAt` and a new validation is requested. Once the burn landed, the
-pair cannot be discarded: its exit is `resolveStuckValidation` after the second window, which returns the burned
-amount to the sender. The leg already sent keeps settling from the peer it was sent to.
+A half sent again never retargets: it goes to the peer it was pinned to, which holds it, and the token refuses it
+(`PeerChanged`) once that peer is gone. A new half is taken only after a zero answer or a failed send, never because a
+route or a peer changed: the old half may still mint, and a new half would mint the same money twice. A half whose peer
+was replaced as hostile keeps no former pair, so it is ended by closing its chain by hand. The old away token must stay
+alive until every half pinned to it is answered.
+A ticket's receipt is taken from the bridge and the peer it was pinned to, so after a route switch or a peer change an
+ask for its receipt still goes to the pinned pair while that pair is the former one inside its window (the away token
+holding the ticket is the one that answers), and to the current pair after. Its reservation comes back through a
+cancel once an ask for its receipt went unanswered. A bring home is never cancelled: it ends on its receipt, or by
+`closeByHand` while its chain is closed.
+
+### When a half is never answered
+
+Home bounds what it sends for one money on hold: three sends per half and four halves (`newHalves` on `ticketOf`
+reads the halves taken, and `NoNewHalfLeft` refuses a fifth). Three cases leave the money on hold with nothing more to send: the
+fourth half dies too (answered `Expired`), a half goes unanswered after its three sends, or an open bring home goes
+unanswered after its three sends. So does a half whose pinned peer was replaced as hostile (`PeerChanged`). Nothing on
+home's clock ends them: the away chain may still have minted or burned. The operator's exit:
+
+1. Find why the away chain does not answer (its away token, its bridge, the fee balance) and fix it if it can be
+   fixed: a half sent again inside its three sends, or a stored receipt sent again with `resendReceipt`, ends it the
+   normal way.
+2. Otherwise close the chain's receipt route (`closeReceiptRoute`, the identity manager). This stops every message
+   from and to that chain, for every ticket on it.
+3. Read the away token on that chain from one final block: its stored receipt for the half and its clock. Call
+   `closeByHand(ticketId, receiver, reading)` on the compliance. A stored receipt is applied as if it had arrived;
+   without one, once that chain's clock is past the half's valid until, the money goes back to the sender, and an
+   open bring home ends with nothing moved.
+4. Set the receipt route again once every ticket of that chain is decided.
+
+## Changing a route or a peer
+
+A planned change (`setReceiptRoute` on an open route, or `setPeer`) is made on home first. Home keeps the route and
+peer the chain had as its former pair and takes every receipt from it for four waiting times of that away chain
+(`FormerRouteKept`, the waiting time read from the compliance at the change). The Lite switches only after home's
+change is final, early enough that its last receipts on the old pair land inside those four waiting times. A second
+change of route or peer on that chain inside the window is refused while its route is open
+(`RouteChangedTooRecently`): it would drop the former pair. A closed route keeps no new pair, so its peer and route
+may be set again inside the window. A receipt that came on the former pair inside the window and then waited (chain blocked, token stopped)
+stays applicable after the window ends. The accepted cost: an old peer that turns hostile inside the window can have
+home apply receipts it forges, for any ticket of that chain. When an away chain is first opened, set its peer before
+its receipt route: a change on a chain that has a route starts a change window.
+
+A hostile peer is replaced with `replaceHostilePeer`, never with `setPeer`. Home keeps no former pair, and for four
+waiting times of that away chain no ask, no ticket send, no ask for a receipt and no cancel runs for it
+(`HostileChangeNotOver`); receipts still land. Halves pinned to the hostile peer keep their receipt from it: for full
+containment the operator also distrusts its bridge.
 
 ## What the reference chain does with a Lite that breaks a rule
 
 | Broken rule | Reference-chain reaction |
 |---|---|
-| 3, 7: a settlement leg for a validation already settled, other than the applied leg itself, a leg for a pair the keeper already resolved, or a second, different leg from one chain for a parked id | `ReplayedSettlement`, the token stops taking that chain's messages (`setInboundPaused`) |
-| a leg already consumed, whether applied, parked or refused, delivered again byte for byte (a gateway redelivery, or the Lite resending its settlement) | `SettlementDuplicate`, consumed, nothing applied, nothing paused; a chain paused over the first delivery and reopened stays open |
-| a settlement for a validation never issued, or recorded but never sent | `SettlementParked`, the leg kept under its id, the token stops taking that chain's messages; once the request is sent again with the same salt, `settleParkedLeg` settles it |
-| 5, 6: amount outside the range, wrong wallets or chain, under the issued hash | `SettlementRejected`, consumed, the token stops taking that chain's messages; the validation stands |
-| 5, 6 under another hash: a body the reference chain never canonically issued | `ValidationOrphaned`, consumed, the token stops taking that chain's messages; `Orphaned` while no leg had landed |
-| 8: two legs with two amounts | `SettlementAmountMismatch` on the second; the keeper resolves the pair after the second window |
-| 10: proof above the instruction | `RecallAmountExceeded`, stays deliverable |
-| 10: proof for another wallet | `RecallMismatch`, stays deliverable |
-| 10: a different proof for a settled recall | `ReplayedBurnProof`, the token stops taking that chain's messages |
-| a proof for a recall never issued | `ReplayedBurnProof`, the token pauses itself |
+| 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
+| the receipt home holds for a half, delivered again byte for byte (a bridge redelivery, or the Lite resending its receipt) | `ReceiptDuplicate`, consumed, nothing applied, nothing blocked; a chain blocked over the first delivery and reopened stays open |
+| a first-half receipt for an id home has no record of, or for a ticket home never sent | put on hold under the sender with no destination (`ReceiptWithoutTicket`), nothing blocked; refused and the chain blocked when its sender is not on that chain or, for a ticket home wrote, its wallets are not the ticket's; taken by the ask mined again, or cancelled with `cancelHold` |
+| a second-half receipt for an id home has no record of | `ReceiptUnknown`, consumed, nothing written, nothing blocked |
+| a good receipt that cannot be applied yet: the token stopped, its away chain blocked, or the sender's away balance too low (for a receipt with no ticket, its away balance and the uncounted credit it may carry) | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
+| 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
+| 9: a move out's receipt from a chain the half was not sent to, naming a sender, minting another amount, or minting an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
+| a move out's receipt with less gas left than home's send of a new half needs, where one is sent | reverts with `NotEnoughGasForTheSecondHalf` and stays deliverable: home asks for 550,000 gas left before that send |
+| a zero answer (`Expired`) that comes late for a half close by hand already decided, or for an older half, judged against the wallet that half was sent to | `ReceiptApplied`, consumed, nothing changes, nothing blocked |
+| 5: an amount outside the range, or other terms echoed, under home's own ask block hash; or, under another ask block hash, a copy above `requestedMax` or the per-ticket cap | applied as it happened, then the compliance blocks that away chain |
+| 10: a bring home's receipt from another chain, for another wallet, naming a receiver, burning more than the bring home's amount, or burning for an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
 
-A settlement leg never reverts for what it carries: every leg the token cannot account for is consumed with the
-chain's inbound paused, so nothing stays deliverable for good and nothing is lost, see "Lanes". A reverted
+A receipt for a ticket home knows never reverts for what it carries: it is applied as it happened or refused, and
+consumed either way, see "Lanes". A receipt for an id home does not know blocks nobody: a first half is put on
+hold under its sender, a second half is announced (`ReceiptUnknown`) and consumed. A reverted
 delivery, from a tracker module for instance, can be redelivered once the cause is understood, on the assumption
 that the ERC-7786 gateway keeps a reverted execution retryable; a gateway that marks it failed for good loses the
-message, and its author has to send it again. Either pause is lifted by the pauser after an investigation:
-`setInboundPaused(chainKey, false)` for one chain, `unpause` for the token. While a chain's inbound is paused its deliveries revert with
-`ChainInboundPaused` and wait at the gateway; a delegation toward it is refused, and the compliance neither issues a
-validation toward it nor resends one, nor discards or resolves a validation still awaiting that chain's leg, since
-the held reports may answer it and acting on their absence would release or return what they move. Native transfers,
-every other chain, and recall instructions and instruction resends toward the paused chain are unaffected; the proof
-answering a recall lands once the pause is lifted. To abandon a chain for good: distrust its gateway or close its
-route, then lift the pause so its validations can be discarded and resolved.
+message, and its author has to send it again. The block of an away chain and the stop of the token are lifted by the
+pauser after an investigation: `unblockAwayChain(chainKey)` on the compliance for one chain, `unpause` for the token.
+While a chain is blocked its good receipts are consumed and wait at home; a move out toward it is not sent (a move
+to it is returned to the sender instead), no bring home is written or sent again toward it, and the compliance neither
+issues a ticket toward it nor asks for a receipt there, nor cancels any of its tickets, a ticket waiting for approval
+included, since the waiting receipts may answer them and acting on their absence would release what they move. Native
+transfers and every other chain are unaffected. To abandon a chain for good: distrust its gateway or close its
+route, refuse the receipts it left waiting, then lift the block so its tickets can be cancelled.
 
 Threat model, stated plainly. A trusted gateway, or the registered peer behind it, can stop its own chain's inbound
-with one message, and a settlement can do little more: a validation id is a function of the request, so a leg for
-an id the token never issued is the leg's chain's problem, a reorg's or the peer's, and is parked under the chain
-pause rather than halting the token. The one reach beyond its own chain: on a two-leg validation, a peer that
-names a foreign hash on a leg outside the terms ends the pair `Orphaned`, so the honest leg from the other chain
-then lands as a replay and pauses that chain too. That peer is involved in the validation and hostile, and is
-answered as any hostile peer is. A burn proof naming a recall never issued still pauses the whole token, with
-its price: recall ids are counters and wait for finality, so an unknown one has two readings the token cannot tell
-apart, the peer invented it, or the token's own records are out of step with what it dispatched, which is local
-and must not keep running. The remedy against a peer abusing either is to distrust its gateway.
+with one bad receipt, and a receipt can do little more: it is applied as it happened on its own chain, bounded by
+`requestedMax` and the per-ticket cap on older terms, and a receipt for an id the token never issued is put on hold
+under its sender, blocks nobody, and is cancelled after four waiting times if nobody takes it. Nothing a message says stops the whole token. The remedy against a peer abusing its chain is to
+distrust its gateway.
 
 ### The brakes
 
 | Brake | Stops | Set by | Lifted by |
 |---|---|---|---|
-| token pause, `pause` | every balance movement between wallets, native or satellite, and every inbound settlement and proof; new validations, approvals into issuance and validation resends; discards and resolutions of validations that may have a leg waiting | the pauser; the token itself on a proof for a recall it never issued | the pauser, `unpause` |
-| chain inbound pause, `setInboundPaused` | every message from one chain; delegations, new validations and validation resends toward it; discards and resolutions of validations still awaiting its leg | the pauser; the token itself on every settlement leg from that chain it cannot account for (replayed, parked, rejected, orphaned) and on a conflicting proof from that chain | the pauser, `setInboundPaused(chainKey, false)` |
-| chain issuance pause, `setIssuancePaused` on the compliance | new validations and validation resends toward one chain | the compliance manager; the compliance itself on a late settlement that breaches a rule, or a stuck pair resolved with the burn still owed | the compliance manager |
-| route close, `setRoute(..., 0)` | every send toward one chain and every message from it, a settlement of a validation already sent and a proof for an open recall included (`ChainNotOpen`); they stay deliverable and land once a route is set again | the identity manager | the identity manager, with a trusted gateway |
-| gateway distrust, `TrustedGatewayRegistry` | every message through that gateway, pinned or not, for every token | the registry's owner | the registry's owner |
+| token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home; new tickets, bring homes, approvals into issuance and asks for receipts; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
+| block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home); move outs, bring homes, new tickets and asks for receipts toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms | the pauser, `unblockAwayChain` |
+| hostile peer replaced, `replaceHostilePeer` | asks, ticket sends, asks for receipts and cancels for one away chain, for four of its waiting times (`HostileChangeNotOver`); receipts still land | the identity manager | nobody: it ends by itself at `hostileChangeEndsAt` |
+| receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled on home's clock meanwhile: the identity manager closes it by hand, `closeByHand` on the compliance, from a read of that chain's stored receipt and clock in one final block | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
+| bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled on home's clock meanwhile, only closed by hand from a read of its chain | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
-Before lifting the token pause or a chain pause, the operator has the gateway discard the deliveries refused while
-it was paused that should never land: lifting a pause lets every pending delivery through, and while the replay that
-triggered it is consumed, a misbehaving peer may have queued more.
-
-A peer replaced with `setPeer` while recalls are open keeps the authority to settle those recalls, through their
-pinned gateway, for up to the instructed amounts: that is what lets a recall survive a planned peer change. When the
-peer is replaced because it is hostile, the operator first distrusts its gateway in `TrustedGatewayRegistry`, since a
-distrusted gateway is refused even when pinned, or drains the open recalls before switching.
+Before lifting the token pause or the block of a chain, the operator refuses the receipts that waited and should
+never be applied, with `refuseWaitingReceipt(halfKey)` while the chain is still blocked: once lifted, anyone applies
+what waits and every pending delivery goes through. A waiting receipt is applied only after the route check runs again
+on the bridge and peer that brought it, so one from a bridge distrusted meanwhile is never applied.
 
 ## Assumptions and accepted limitations
 
@@ -201,7 +277,8 @@ distrusted gateway is refused even when pinned, or drains the open recalls befor
   the sender are supported in this release.
 - **Permanent loss of a trusted gateway or peer** with instructions or validations outstanding needs a separately
   reviewed migration procedure; it is not covered here.
-- **A native wallet unlinked after a recall was instructed:** the proof reverts `WalletsNotLinked` and stays
-  deliverable; repair the link, then redeliver. An identity deleted while a satellite position is outstanding is
-  re-registered first.
-- **A lost message is recovered by retry, not by write-off.** There is no proof-free recovery and no recall cancel.
+- **A home wallet unlinked or no longer verified after a bring home was written:** what the away token burned goes
+  back to the away wallet by a `MOVE_OUT`; the agent brings it home again to a wallet of the identity. An identity
+  deleted while a satellite position is outstanding is re-registered first.
+- **A lost message is recovered by retry, not by write-off.** A bring home is not cancelled; it ends on its receipt,
+  or by close by hand while its chain is closed.

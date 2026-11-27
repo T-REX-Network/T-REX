@@ -62,7 +62,7 @@ This branch diverged from the spec's original target. The following were changed
   `checksDisabled` ERC-7201 slot/offset were verified against the current contracts.
 - `ModularCompliance.spec` follows the typed module interface: `checkTransfer`, `checkSpender` and
   `afterTransfer` take one `TransferContext`, `moduleTypes` replaces the capability bitmask, and the
-  restricted selector set includes `setIssuancePaused` and `discardExpiredValidations`. It has not been
+  restricted selector set includes `setIssuancePaused` and `cancelTickets`. It has not been
   re-run since that change.
 
 ## Modelling assumptions

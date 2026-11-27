@@ -38,8 +38,10 @@ A module may name any combination. It inherits `AbstractModuleUpgradeable`, whic
 neutrally, and overrides only the methods its types cover.
 
 The order on a native movement is: `canTransfer` asks the `TRANSFER_CHECK` modules; the token moves the balances and
-calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement asks
-nobody and tells the `AFTER` modules once the positions moved. The issuance of a validation asks `TRANSFER_CHECK`
+calls the compliance; the compliance moves the positions and tells the `AFTER` modules. A settlement tells the
+`AFTER` modules once the positions moved. It asks the `TRANSFER_CHECK` modules again only where home still decides:
+whether the second half of a move to another chain goes to the receiver or back to the sender, and, announced with
+`MoveBreachedRule` and never refused, a move inside one away chain. The issuance of a validation asks `TRANSFER_CHECK`
 and `SPENDER` only: nothing moves there.
 
 Which to pick. A bound on how much may move is a `TRANSFER_CHECK`: it returns a number, so it narrows a cross-chain
@@ -91,7 +93,7 @@ struct TransferContext {
     uint8   kind;           // a MovementKindLib constant: TRANSFER, MINT, BURN, FORCED_TRANSFER, RECOVERY, CROSS_CHAIN, DELEGATION, RECALL; never zero
     bool    isIssuance;     // true while a cross-chain validation is being issued
     bytes   spender;        // ERC-7930 envelope of who executes on the sender's behalf, empty otherwise
-    bytes   data;           // empty today; room for a later compliance to say more without a selector change
+    bytes   data;           // abi.encode(bytes32 fromChainKey) on a move between chains, empty on a native one
 }
 ```
 
@@ -109,16 +111,16 @@ asked about those two, so a `TRANSFER_CHECK` module only ever sees `TRANSFER`, `
 position does not move. A tracker of the investor's own activity leaves it out like `FORCED_TRANSFER` and
 `RECOVERY`; a holder count sees no change of ownership.
 
-`RECALL` is the way back, a recall answered by a satellite's burn proof: the exact inverse of a `DELEGATION`, so a
-module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both the native wallet
-the credit landed on, as on the way out; the position does not move, and no rule is asked. Before the credit lands
-the token calls `syncOwner(nativeWallet)`, which settles who owns that wallet: an empty wallet the registry
-relinked takes its new owner, a funded one is refused until the registry names the owner the ledger credited. The
-credit is already counted in that identity's position as a bridged one, so nothing else moves. The `RECALL` is
-reported after the mint, through `agentTransferred` like the `DELEGATION`, with both identities the owner that
-sync settled on. The mint itself goes through no hook, so a module never sees a plain `MINT` of tokens it saw
-leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping its own record
-of native balances credits it, and needs no reseed after a round trip.
+`RECALL` is the way back, an agent's bring home answered by the away token's receipt: the inverse of a
+`DELEGATION`, so a module that debited the out-leg has the in-leg to credit. `fromWallet` and `toWallet` are both
+the home wallet the credit landed on; the position does not move, and no rule is asked. Before the credit lands the
+compliance settles who owns that wallet: an empty wallet the registry relinked takes its new owner, a funded one
+refuses the receipt until the registry names the owner the ledger credited. The credit is already counted in that
+identity's position as an away one, so nothing else moves. The compliance tells the `RECALL` once the mint is done,
+with both identities the bring home's. The mint itself goes through no hook, so a module never sees a plain `MINT`
+of tokens it saw leave as a `DELEGATION`. A tracker of the investor's own activity leaves it out; a module keeping
+its own record of native balances credits it, and needs no reseed after a round trip. A bring home whose home
+wallet is no longer the identity's is sent back to the away wallet and tells nobody.
 
 `kind` is a number and not an enum, on purpose. Solidity range-checks an enum when it decodes calldata, so a
 module compiled against today's kinds would revert on a kind added later and block every movement of that
@@ -134,12 +136,17 @@ leaves it out, the way it leaves out `FORCED_TRANSFER` and `RECOVERY`. A tracker
 change of ownership, a holder count for instance, records it like any other movement. Write that choice
 in the module; never let it fall out of a `switch` with no default.
 
-`data` is empty and reserved. The struct is a parameter of every module function, so it is part of their
-selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
+`data` is room for what the struct does not carry. The struct is a parameter of every module function, so it is part
+of their selectors: a field added once modules are deployed changes the selectors and breaks every one of them. A
 new fact goes in `data` instead. The compliance that fills it documents the shape, an `abi.encode`d tuple,
 and only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when a
 later fact is added behind it. A module decodes `data` only when it knows which compliance filled it, and
 ignores it otherwise.
+
+`ModularCompliance` fills it on every move between chains, at the ask, when the rules are asked again and when the
+move is done: `abi.encode(bytes32 fromChainKey)`, the key of the chain the money leaves (`MessageTypesLib.chainKey`),
+home's own key for a home wallet's move out. The wallet keys cannot say it: an away wallet's key is a hash of its
+envelope. A native movement leaves `data` empty.
 
 A `SPENDER` module answers about `ctx.spender`, a wallet on this chain or on a satellite, so one
 policy covers `transferFrom` here and a validation a satellite operator will execute. The shipped
@@ -164,27 +171,38 @@ investor's holdings across every asset for instance, or the rule may be computed
 result in a later transaction, through its decryption callback. `checkTransfer` is a view and cannot wait, so
 the compliance has a waiting state for cross-chain requests, and a module of type `APPROVAL` decides them.
 
-While an `APPROVAL` module is bound (one at most), `requestTransferValidation` does everything it does today,
+While an `APPROVAL` module is bound (one at most), `askToMove` does everything it does today,
 resolving the route, narrowing the range by every rule and reserving it, but records the validation as
-`AwaitingApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
-`approvalRequested`. The request's `expiry`, the validity window from now, is both the deadline for the answer
-and, once issued, the satellite's deadline: the time spent waiting comes out of the time to execute, so the
-rules are never older than one validity window when the satellite executes.
+`WaitingForApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
+`approvalRequested`. A ticket that waits for an approver always travels the receipt route, at full finality: a home
+reorg short of finality could otherwise drop the approver's answer after the away token executed the ticket. The
+request's `validUntil`, the receipt route's validity window from now, is the deadline for the answer, for the first
+send and, once sent, the satellite's deadline: the time spent waiting comes out of the time to execute, so the rules
+are never older than one validity window when the satellite executes. The approvers' answer time is not measured on
+chain: the receipt route's validity window is sized off chain to cover it.
 
-Only the module answers, with `answerApproval(bytes32 validationId, approvedMax)`, before the deadline. An approval
-lowers the maximum when the answer is lower, releases the difference and sends the legs; no rule runs again,
-since every rule ran and the room was reserved at the request, but the chains are checked again, as one may
-have been paused while the request waited. An answer below the requested minimum is a refusal, which releases
-the reservation and ends the validation `Discarded`. A request nobody answered is discarded past its deadline
-with `discardExpiredValidations`, by anyone, since nothing was sent for it; `statusOf` reads it `Expired` from
-then on. A settlement for a validation that was never sent (still waiting, refused or unanswered) halts the
-token, as one for an id never taken does: no satellite could have executed it.
+Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
+lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
+since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
+first send with `sendTicket(ticketId, chainKey, to, spender)` before the deadline, and that send checks the token
+and the chain again, as either may have been stopped while the request waited. An answer below the requested
+minimum is a refusal, which releases the reservation and ends the validation `Cancelled`. A request nobody answered,
+or an approved ticket nobody sent, is discarded past its deadline with `cancelTickets`, by anyone, since nothing was
+sent for it. A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
+unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
+ticket's move. Home's own copy is the only honest one of an approved ticket: a first-half receipt on any other ask
+block hash breaks its terms and blocks its away chain. Neither stops the token.
 
 Because the request reserves while it waits, two waiting requests cannot jointly break a rule that reads the
 ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
 
-Unbinding the module turns new requests back into immediate issuances; the OWNER of the compliance can do it if
-the approvers stop answering. Requests already waiting keep waiting until their deadline, then are discarded.
+An `APPROVAL` module is bound, removed or filed again only while asks are paused for the whole token
+(`setAsksPaused`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
+change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. Like every
+module change, it also waits until no ticket holds a reservation (`TicketsStillReserved`); only
+`forceRemoveModule` skips that wait. Unbinding the module turns new requests back into immediate issuances; the
+OWNER of the compliance can do it if the approvers stop answering, once the waiting requests were discarded past
+their deadline.
 
 `AsyncApprovalModule` is the `APPROVAL` module that ships:
 
@@ -194,9 +212,8 @@ the approvers stop answering. Requests already waiting keep waiting until their 
   `refuseValidation(compliance, id)`. They cannot change the recipient or the spender, or widen the range: the
   lowest maximum approved is the one issued, and the first refusal refuses at once.
 - The last approval only records the request as fully approved. Anyone then calls `finalize(compliance, id)`,
-  which answers the compliance and pays for sending the legs. An approver answering from a callback therefore
-  never reverts on a paused chain, nor carries the cost of the issuance, and a failed `finalize` can be tried
-  again before the deadline.
+  which answers the compliance; anyone then sends the ticket with `sendTicket`. An approver answering from a
+  callback therefore never reverts on a paused chain, nor carries the cost of a send.
 - An approver contract is told in the same transaction, through `IAsyncApprover.approvalAsked`, when its turn
   comes. An FHE rule starts its computation there and answers from its decryption callback, with no trusted
   party in between. Telling is best effort: an approver that does not implement it reads `ApprovalRequested`.
@@ -223,6 +240,33 @@ Limits, stated plainly:
 - **Mints are not judged**, being the issuer's own action, though they move holdings like a transfer does. An
   issuer whose rule covers total holdings checks it before minting.
 - **Forced transfers, recoveries and relocations** between one identity's native wallets are not judged either.
+
+## A limit per away chain
+
+The caps on the ticket route bound what a home reorg can cost. They do not bound a hostile away token, which can
+still report a move made on a home block that was dropped. `AwayChainVolumeModule` bounds what one away chain can
+make leave in a window, per compliance:
+
+- The compliance owner sets a limit per away chain with `setVolumeLimit(chainKey, limitPerWindow, window)`, through
+  `addAndSetModule` or `callModuleFunction` (so, like every module change, while no ticket holds a reservation). The
+  window is in seconds and must be positive (`ZeroDuration`); a new length also moves the end of the window running
+  now. `VolumeLimitSet` says so; `volumeLimitOf(compliance, chainKey)` reads it. To lift a limit, set
+  `type(uint256).max`. A chain with no limit set is neither limited nor counted.
+- `checkTransfer` reads the chain the money leaves from `data` and answers the room left on it in the current window,
+  less the money on hold forward from it (`onHoldForwardOf(chainKey)` on the compliance: money that left the chain
+  toward a receiver on another chain, not done yet): the ask is narrowed to it, and refused once nothing is left. So is home's decision for a second half: a move whose
+  chain is full by then goes back to its sender. A native movement carries no chain and is never limited.
+- `afterTransfer` counts a move once, when it is done, on the chain it left. A window starts at the first move counted
+  after the last window ended, and the next window opens the chain again.
+
+Limits, stated plainly:
+
+- **Open tickets do not count.** Only finished moves and money on hold forward count. Tickets open at the same time
+  each see the same room, so one window can carry the limit plus what was open when it filled. The ask limits per
+  identity bound how many can be open.
+- **A relocation is counted but never narrowed.** The rules are not asked about a move between one identity's own
+  wallets, so it passes whatever the room, and fills the room of the moves after it.
+- **Counting starts at binding,** and for a chain at its first limit. An unbind discards the limits and the counts.
 
 ## Two rules a module must follow
 

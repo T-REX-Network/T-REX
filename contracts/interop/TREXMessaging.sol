@@ -99,13 +99,13 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function routeFor(bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().routes[chainKey];
+    function receiptRouteFor(bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().receiptRoutes[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
-    function fastRouteFor(bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().fastRoutes[chainKey];
+    function ticketRouteFor(bytes32 chainKey) public view returns (address) {
+        return TREXMessagingLib.layout().ticketRoutes[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
@@ -119,8 +119,14 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) public view returns (address) {
-        return TREXMessagingLib.layout().pinnedRoutes[validationId][chainKey];
+    function pinOf(bytes32 halfKey) public view returns (address bridge, bytes32 peerKey) {
+        TREXMessagingLib.Pin storage pin = TREXMessagingLib.layout().pins[halfKey];
+        return (pin.bridge, pin.peerKey);
+    }
+
+    /// @inheritdoc ITREXMessaging
+    function hostileChangeEndsAt(bytes32 chainKey) public view returns (uint64) {
+        return TREXMessagingLib.layout().hostileChangeEndsAt[chainKey];
     }
 
     /// @inheritdoc ITREXMessaging
@@ -129,8 +135,14 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ITREXMessaging
-    function isInboundPaused(bytes32 chainKey) public view returns (bool) {
-        return TREXMessagingLib.layout().inboundPaused[chainKey];
+    function checkReceiptOrigin(
+        bytes32 chainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        bytes32 halfKey,
+        uint64 arrivedAt
+    ) external view {
+        TREXMessagingLib.checkReceiptOrigin(chainKey, bridge, senderPeerKey, halfKey, arrivedAt);
     }
 
     /// @dev Whether `gateway` has already delivered `receiveId` to this token. Always false for a zero id, which
@@ -140,41 +152,37 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ERC7786Recipient
+    /// @dev Everything a token receives reports value that moved, so only a receipt bridge delivers to it. A ticket
+    ///  bridge relays before finality and is refused here, whichever away chain it serves.
     function _isAuthorizedGateway(address gateway, bytes calldata) internal view override returns (bool) {
-        return TREXMessagingLib.layout().registry.isTrusted(gateway);
+        return TREXMessagingLib.layout().registry.isReceiptBridge(gateway);
     }
 
     /// @inheritdoc ERC7786Recipient
     /// @dev Admission is the library's: attribution to the peer, the replay guard, the expected gateway.
-    /// What an admitted message does is the token's, so the hooks are called from here. A message from a chain
-    /// whose inbound is paused reverts once attributed, which undoes the replay guard's record of it in the same
-    /// transaction: it stays deliverable, and lands once the pauser lifts the pause.
+    /// What an admitted message does is the token's, so the hook is called from here. A receipt, the only message a
+    /// token receives, is handed on with the bridge and the peer that delivered it, so the compliance can keep it
+    /// waiting and check that route again when it is applied later.
     function _processMessage(address gateway, bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         internal
         override
     {
-        (MessageTypesLib.Message messageType, bytes32 chainKey, bytes memory body) =
-            TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
+        (bytes32 chainKey, bytes memory body) = TREXMessagingLib.acceptMessage(gateway, receiveId, sender, payload);
 
-        if (messageType == MessageTypesLib.Message.SETTLEMENT_NOTIFICATION) {
-            _handleSettlement(chainKey, body);
-        } else {
-            _handleBurnProof(chainKey, body);
-        }
+        _handleSettlement(chainKey, gateway, keccak256(sender), body);
 
-        emit EventsLib.ProtocolMessageReceived(messageType, chainKey, receiveId);
+        emit EventsLib.ProtocolMessageReceived(MessageTypesLib.Message.RECEIPT, chainKey, receiveId);
     }
 
-    /// @dev Acts on a settlement attributed to this token's peer on `chainKey`.
+    /// @dev Acts on a settlement attributed to this token's peer on `chainKey`, delivered by `bridge` from the peer
+    /// whose `keccak256` is `senderPeerKey`.
     ///
     /// Left to the inheriting token, because the destination is something only it knows: its bound
     /// compliance, which owns the slot lifecycle. The body arrives encoded, already known to decode as
-    /// a `MessageTypesLib.SettlementNotification`; {TREXMessagingLib-forwardSettlement} delivers it.
-    function _handleSettlement(bytes32 chainKey, bytes memory body) internal virtual;
-
-    /// @dev Acts on a burn proof attributed to this token's peer on `chainKey`. The token's recall path.
-    /// The body arrives encoded, a `MessageTypesLib.BurnProof`.
-    function _handleBurnProof(bytes32 chainKey, bytes memory body) internal virtual;
+    /// a `MessageTypesLib.ReceiptMessage`; {TREXMessagingLib-forwardSettlement} delivers it.
+    function _handleSettlement(bytes32 chainKey, address bridge, bytes32 senderPeerKey, bytes memory body)
+        internal
+        virtual;
 
     /// @dev Called once, from the token's initializer. The registry is the network's and the token
     /// exposes no setter for it, so a token can never resolve trust against a registry of its own.
@@ -182,31 +190,39 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setTrustedGatewayRegistry(registry);
     }
 
-    function _setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setRoute(chainType, chainReference, gateway);
+    function _setReceiptRoute(
+        bytes2 chainType,
+        bytes calldata chainReference,
+        address bridge,
+        uint64 awayChainSelector,
+        bytes calldata awayReceiptBridge
+    ) internal {
+        TREXMessagingLib.setReceiptRoute(chainType, chainReference, bridge, awayChainSelector, awayReceiptBridge);
     }
 
-    function _setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) internal {
-        TREXMessagingLib.setFastRoute(chainType, chainReference, gateway);
+    function _closeReceiptRoute(bytes32 chainKey) internal {
+        TREXMessagingLib.closeReceiptRoute(chainKey);
+    }
+
+    function _setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) internal {
+        TREXMessagingLib.setTicketRoute(chainType, chainReference, bridge);
     }
 
     function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
         TREXMessagingLib.setPeer(chainKey, peer);
     }
 
-    /// @dev Stops, or resumes, taking messages from `chainKey`. The token calls it with `true` on its own when a
-    /// handler returns `PauseChain`; the pauser calls it either way.
-    function _setInboundPaused(bytes32 chainKey, bool pause) internal {
-        TREXMessagingLib.setInboundPaused(chainKey, pause);
+    function _replaceHostilePeer(bytes32 chainKey, bytes calldata peer) internal {
+        TREXMessagingLib.replaceHostilePeer(chainKey, peer);
     }
 
-    /// @dev Sends a compliance validation to this token's peer on `chainKey`, on its fast route when set, pinning
-    /// its final route.
-    function _sendComplianceValidation(bytes32 chainKey, bytes32 validationId, bytes memory body)
+    /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to
+    /// its receipt route and peer.
+    function _sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         internal
         returns (bytes32 sendId)
     {
-        return TREXMessagingLib.sendComplianceValidation(chainKey, validationId, body);
+        return TREXMessagingLib.sendComplianceValidation(chainKey, ticketId, body);
     }
 
 }

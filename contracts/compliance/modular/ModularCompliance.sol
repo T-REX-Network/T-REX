@@ -59,7 +59,6 @@
 
 pragma solidity 0.8.30;
 
-import { AuthorityUtils } from "@openzeppelin/contracts/access/manager/AuthorityUtils.sol";
 import { IAccessManager } from "@openzeppelin/contracts/access/manager/IAccessManager.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -67,7 +66,7 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { IERC3643 } from "../../ERC-3643/IERC3643.sol";
 import { IERC3643Compliance } from "../../ERC-3643/IERC3643Compliance.sol";
 import { ERC3643Compliance } from "../../ERC-3643/base/ERC3643Compliance.sol";
-import { ISettlementHandler } from "../../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../../interop/IReceiptHandler.sol";
 import { ErrorsLib } from "../../libraries/ErrorsLib.sol";
 import { EventsLib } from "../../libraries/EventsLib.sol";
 import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
@@ -76,21 +75,23 @@ import { ITREXRegistry } from "../../registry/interface/ITREXRegistry.sol";
 import { IToken } from "../../token/IToken.sol";
 import { AccessManagedOwnableUpgradeable } from "../../utils/AccessManagedOwnableUpgradeable.sol";
 import { ComplianceLedgerLib } from "./ComplianceLedgerLib.sol";
+import { HoldLib } from "./HoldLib.sol";
 import { IComplianceLedger } from "./IComplianceLedger.sol";
 import { IModularCompliance } from "./IModularCompliance.sol";
-import { ITransferValidation } from "./ITransferValidation.sol";
+import { ITickets } from "./ITickets.sol";
 import { ModuleSetLib } from "./ModuleSetLib.sol";
 import { MovementKindLib } from "./MovementKindLib.sol";
+import { ReceiptLib } from "./ReceiptLib.sol";
+import { SecondHalfLib } from "./SecondHalfLib.sol";
+import { TicketLib } from "./TicketLib.sol";
+import { Tickets } from "./Tickets.sol";
 import { TransferContextLib } from "./TransferContextLib.sol";
-import { TransferSettlementLib } from "./TransferSettlementLib.sol";
-import { TransferValidation } from "./TransferValidation.sol";
-import { TransferValidationLib } from "./TransferValidationLib.sol";
 import { IModule } from "./modules/IModule.sol";
 
 /// @title ModularCompliance
 /// @dev {ERC3643Compliance} plus the module system that supplies the rules: the bound modules sorted by what
 /// they are, the dispatch implementing the base hooks over the ledger, the `canSpenderCall` check, the
-/// cross-chain validation lifecycle of {TransferValidation} and AccessManager authorization.
+/// cross-chain validation lifecycle of {Tickets} and AccessManager authorization.
 ///
 /// Every module reads the same numbers. On a movement the compliance resolves both identities once, asks every
 /// `TRANSFER_CHECK` module the largest amount it allows and keeps the smallest answer, moves the positions, then tells
@@ -99,9 +100,9 @@ import { IModule } from "./modules/IModule.sol";
 /// binding, so a dispatch is a plain loop over the modules concerned and nothing else.
 contract ModularCompliance is
     IModularCompliance,
-    ISettlementHandler,
+    IReceiptHandler,
     ERC3643Compliance,
-    TransferValidation,
+    Tickets,
     AccessManagedOwnableUpgradeable
 {
 
@@ -167,7 +168,7 @@ contract ModularCompliance is
      *  @param _module address of the module to remove
      */
     function forceRemoveModule(address _module) external restricted {
-        _removeModule(_module);
+        ModuleSetLib.forceRemoveModule(_module);
         emit EventsLib.ModuleForceRemoved(_module);
     }
 
@@ -180,13 +181,14 @@ contract ModularCompliance is
         ModuleSetLib.resyncModuleTypes(_module);
     }
 
-    /// @inheritdoc ISettlementHandler
-    function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
-        external
-        onlyBoundToken
-        returns (ISettlementHandler.Verdict verdict)
-    {
-        return TransferSettlementLib.handleSettlement(originChainKey, notification, _getTokenBound());
+    /// @inheritdoc IReceiptHandler
+    function receiveReceipt(
+        bytes32 originChainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        MessageTypesLib.ReceiptMessage calldata notification
+    ) external onlyBoundToken {
+        ReceiptLib.receiveReceipt(originChainKey, bridge, senderPeerKey, notification, _getTokenBound());
     }
 
     /**
@@ -252,41 +254,97 @@ contract ModularCompliance is
 
     /* ----- Validation settings ----- */
 
-    /// @inheritdoc ITransferValidation
-    function setDefaultValidityWindow(uint64 duration) external restricted {
-        _setDefaultValidityWindow(duration);
+    /// @inheritdoc ITickets
+    function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external restricted {
+        TicketLib.setValidityWindows(onTicketRoute, onReceiptRoute);
     }
 
-    /// @inheritdoc ITransferValidation
-    function setReconciliationWindow(bytes32 chainKey, uint64 duration) external restricted {
-        _setReconciliationWindow(chainKey, duration);
+    /// @inheritdoc ITickets
+    function setWaitingTime(bytes32 chainKey, uint64 duration) external restricted {
+        TicketLib.setWaitingTime(chainKey, duration);
     }
 
-    /// @inheritdoc ITransferValidation
-    function setIssuancePaused(bytes32 chainKey, bool paused) external restricted {
-        TransferValidationLib.setIssuancePaused(chainKey, paused);
+    /// @inheritdoc ITickets
+    function setMeasuredTimes(bytes32 chainKey, MeasuredTimes calldata times) external restricted {
+        TicketLib.setMeasuredTimes(chainKey, times);
     }
 
-    /// @inheritdoc ITransferValidation
-    function resolveStuckValidation(bytes32 validationId) external restricted {
-        TransferSettlementLib.resolveStuckValidation(validationId, _getTokenBound());
+    /// @inheritdoc ITickets
+    function setAsksPaused(bool paused) external restricted {
+        _setAsksPaused(paused);
     }
 
-    /// @inheritdoc ITransferValidation
-    /// @dev Not `restricted`: the leg was reported by the chain's Lite and admitted by the token already, and it is
-    ///  judged as a delivery would be. The caller chooses when, as whoever relays a delivery does: a leg that is
-    ///  refused pauses its chain's inbound at that moment, the verdict the delivery would have reached.
-    function settleParkedLeg(bytes32 validationId, bytes32 chainKey) external {
-        TransferSettlementLib.settleParkedLeg(validationId, chainKey, _getTokenBound());
+    /// @inheritdoc ITickets
+    function setAskLimits(AskLimits calldata limits) external restricted {
+        _setAskLimits(limits);
     }
 
-    /// @inheritdoc ITransferValidation
-    /// @dev Not `restricted`: who may call depends on the clock. The keeper is recognised through the role the
-    ///  AccessManager binds to this selector, and anyone else is admitted once the second window has passed.
-    function discardExpiredValidations(bytes32[] calldata validationIds) external {
-        TransferSettlementLib.discardExpiredValidations(
-            validationIds, _getTokenBound(), _canCallSelector(msg.sender, this.discardExpiredValidations.selector)
-        );
+    /// @inheritdoc ITickets
+    function setAskLimitOf(address identity, uint32 asksPerWindow) external restricted {
+        _setAskLimitOf(identity, asksPerWindow);
+    }
+
+    /// @inheritdoc ITickets
+    function setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) external restricted {
+        _setTicketLimits(chainKey, perTicketCap, perWindowCap);
+    }
+
+    /* ----- Block an away chain ----- */
+
+    /// @inheritdoc ITickets
+    function blockAwayChain(bytes32 chainKey) external restricted {
+        TicketLib.blockAwayChain(chainKey);
+    }
+
+    /// @inheritdoc ITickets
+    function unblockAwayChain(bytes32 chainKey) external restricted {
+        TicketLib.unblockAwayChain(chainKey);
+    }
+
+    /// @inheritdoc ITickets
+    function refuseWaitingReceipt(bytes32 halfKey) external restricted {
+        ReceiptLib.refuseWaitingReceipt(halfKey);
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev Not `restricted`: the receipt was sent by the chain's away token and admitted by the token already, and
+    ///  it is applied as a delivery would be, once its route check passes again. The caller chooses when, as
+    ///  whoever relays a delivery does.
+    function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt) external {
+        ReceiptLib.applyWaitingReceipt(halfKey, receipt, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev Not `restricted`: anyone may cancel, once the ticket's clock allows it.
+    function cancelTickets(bytes32[] calldata validationIds) external {
+        ReceiptLib.cancelTickets(validationIds, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev The checks, the record and the send live in {SecondHalfLib-bringHome}.
+    function bringHome(bytes calldata awayWallet, uint256 amount, address homeWallet, bytes32 salt)
+        external
+        restricted
+        returns (bytes32)
+    {
+        return SecondHalfLib.bringHome(awayWallet, amount, homeWallet, salt, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev Not `restricted`: anyone may cancel money on hold with no ticket, once its clock allows it, see
+    ///  {HoldLib-cancelHold}.
+    function cancelHold(bytes32 ticketId, bytes calldata receiver) external {
+        HoldLib.cancelHold(ticketId, receiver, _getTokenBound());
+    }
+
+    /// @inheritdoc ITickets
+    /// @dev `restricted`: the role that holds it attests the read of the closed away chain, see
+    ///  {ReceiptLib-closeByHand}.
+    function closeByHand(bytes32 ticketId, bytes calldata receiver, AwayChainReading calldata reading)
+        external
+        restricted
+    {
+        ReceiptLib.closeByHand(ticketId, receiver, reading, _getTokenBound());
     }
 
     /**
@@ -294,10 +352,9 @@ contract ModularCompliance is
      */
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IModularCompliance).interfaceId
-            || interfaceId == type(IERC3643Compliance).interfaceId
-            || interfaceId == type(ISettlementHandler).interfaceId
-            || interfaceId == type(ITransferValidation).interfaceId
-            || interfaceId == type(IComplianceLedger).interfaceId || super.supportsInterface(interfaceId);
+            || interfaceId == type(IERC3643Compliance).interfaceId || interfaceId == type(IReceiptHandler).interfaceId
+            || interfaceId == type(ITickets).interfaceId || interfaceId == type(IComplianceLedger).interfaceId
+            || super.supportsInterface(interfaceId);
     }
 
     /// @dev Binding policy: an unbound compliance accepts a bind from the token itself (so a Token can
@@ -331,10 +388,14 @@ contract ModularCompliance is
 
     /// @dev The ledger's positions belong to the bound token's holders, and no path binds a circulating token
     ///  back, so the token may leave only once it has no supply. An open validation keeps it too: closing one
-    ///  releases its reservation on the bound token. A compliance that must change under it is upgraded instead.
+    ///  releases its reservation on the bound token. So does every ticket home still waits for, until its
+    ///  `stopWaitingAt`: a new compliance would meet its late receipt with no record. A compliance that must change
+    ///  under it is upgraded instead.
     function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
-        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
+        require(_ledger().pendingTotal == 0, ErrorsLib.TicketsStillReserved());
+        bool homeStoppedWaiting = block.timestamp >= _validationStorage().latestStopWaitingAt;
+        require(homeStoppedWaiting, ErrorsLib.TicketsStillReserved());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */
@@ -368,15 +429,8 @@ contract ModularCompliance is
         _applyMovement(from, address(0), value, MovementKindLib.BURN);
     }
 
-    /// @dev See {IModularCompliance-syncOwner}. The owner change only, at adjustment zero: no movement is counted
-    ///  and no module is told. The recall it precedes is reported by {agentTransferred} once the token minted.
-    function syncOwner(address wallet) external onlyBoundToken {
-        address token = _getTokenBound();
-        ComplianceLedgerLib.currentOwner(token, wallet, address(_registryOf(token).identity(wallet)), 0);
-    }
-
     /// @dev See {IModularCompliance-agentTransferred}. Same guards as `transferred`, which this replaces on
-    ///  the token's forced, recovery, delegation and recall paths so that the trackers learn what moved the tokens.
+    ///  the token's forced and recovery paths so that the trackers learn what moved the tokens.
     function agentTransferred(address from, address to, uint256 amount, uint8 kind) external onlyBoundToken {
         require(from != address(0) && to != address(0), ErrorsLib.ZeroAddress());
         _applyMovement(from, to, amount, kind);
@@ -392,10 +446,7 @@ contract ModularCompliance is
     ///  to the new owner here, before the movement itself is counted.
     ///
     ///  A self-transfer leaves the wallet's balance where it was, so neither side adds the value back: the
-    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same. A delegation
-    ///  also names the holder on both sides, but the token burned the amount before reporting it, so it keeps
-    ///  the full adjustment. A recall names the native wallet on both sides too, after its mint: `syncOwner`
-    ///  settled that wallet's owner before the mint, so no owner is left to follow here.
+    ///  adjustment is the net effect on the wallet, zero when sender and recipient are the same.
     ///
     ///  The spender of a `transferFrom` is forgotten before the trackers run, so a transfer one of them makes
     ///  is not taken for it.
@@ -404,8 +455,8 @@ contract ModularCompliance is
         ITREXRegistry registry = _registryOf(token);
         address fromIdentity;
         address toIdentity;
-        // A self-transfer leaves the balance where it was; a delegation reports holder to holder after its burn.
-        bool balanceUnchanged = from == to && kind != MovementKindLib.DELEGATION;
+        // A self-transfer leaves the balance where it was.
+        bool balanceUnchanged = from == to;
         int256 adjustment = balanceUnchanged ? int256(0) : int256(value);
         if (from != address(0)) {
             fromIdentity = ComplianceLedgerLib.currentOwner(token, from, address(registry.identity(from)), adjustment);
@@ -450,7 +501,7 @@ contract ModularCompliance is
 
     /* ----- What the validation layer needs ----- */
 
-    /// @inheritdoc TransferValidation
+    /// @inheritdoc Tickets
     function _boundToken() internal view override returns (IToken) {
         return IToken(_getTokenBound());
     }
@@ -460,15 +511,9 @@ contract ModularCompliance is
         return ITREXRegistry(address(IToken(token).identityRegistry()));
     }
 
-    /// @inheritdoc TransferValidation
+    /// @inheritdoc Tickets
     function _authority() internal view override returns (address) {
         return authority();
-    }
-
-    /// @inheritdoc TransferValidation
-    function _canCallSelector(address caller, bytes4 selector) internal view override returns (bool) {
-        (bool immediate,) = AuthorityUtils.canCallWithDelay(authority(), caller, address(this), selector);
-        return immediate;
     }
 
     /* ----- Module lifecycle ----- */

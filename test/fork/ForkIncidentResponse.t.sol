@@ -70,7 +70,7 @@ contract ForkIncidentResponseTest is ForkBase {
 
         // The attacker queues a trusted gateway of their own (24 h delay) before anyone notices.
         address evilGateway = makeAddr("evil gateway");
-        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (evilGateway, true));
+        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.trustReceiptBridge, (evilGateway));
         _fromSafe(
             c,
             Actor.OperationsSafe,
@@ -284,7 +284,7 @@ contract ForkIncidentResponseTest is ForkBase {
         assertEq(UpgradeableBeacon(a.suiteBeacons[0]).implementation(), a.tokenImpl, "suites stay on the deployed code");
     }
 
-    /// @dev A trusted gateway turns hostile. Distrusting it is the same function as trusting it, under INTEROP_MANAGER
+    /// @dev A trusted gateway turns hostile. Distrusting it is under the same role as trusting it, INTEROP_MANAGER
     ///      with its 24 h delay, on the registry and on the IdentityFactory alike: it cannot happen sooner, and does
     ///      once the delay has passed. An immediate distrust under its own role needs a contract change (known limit).
     function test_hostileGatewayDistrustTakesTheConfigDelay() public {
@@ -292,7 +292,7 @@ contract ForkIncidentResponseTest is ForkBase {
         Addrs memory a = _live(c);
         address gateway = makeAddr("gateway");
         bytes memory chainRef = bytes("8453");
-        bytes memory trustReg = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (gateway, true));
+        bytes memory trustReg = abi.encodeCall(TrustedGatewayRegistry.trustReceiptBridge, (gateway));
         bytes memory trustIdf =
             abi.encodeCall(IdentityFactory.setTrustedGateway, (gateway, bytes2(0x0000), chainRef, true));
         _scheduleAndExecute(c, Actor.OperationsSafe, a.platformAM, a.gatewayRegistry, trustReg, c.configDelay);
@@ -304,7 +304,7 @@ contract ForkIncidentResponseTest is ForkBase {
         );
 
         // It turns hostile: no immediate path, not for the operator and not for the Protocol Admin Safe.
-        bytes memory distrustReg = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (gateway, false));
+        bytes memory distrustReg = abi.encodeCall(TrustedGatewayRegistry.distrustBridge, (gateway));
         bytes memory distrustIdf =
             abi.encodeCall(IdentityFactory.setTrustedGateway, (gateway, bytes2(0x0000), chainRef, false));
         _expectSafeCallReverts(

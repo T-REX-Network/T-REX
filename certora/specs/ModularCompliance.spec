@@ -92,7 +92,8 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:addModule(address).selector
     || f.selector == sig:callModuleFunction(bytes,address).selector
     || f.selector == sig:resyncModuleTypes(address).selector
-    || f.selector == sig:setIssuancePaused(bytes32,bool).selector;
+    || f.selector == sig:setIssuancePaused(bytes32,bool).selector
+    || f.selector == sig:setTicketLimits(bytes32,uint256,uint256).selector;
 
 /* MC-4: bindToken is restricted to the owner, or a self-binding token while the slot is empty. */
 rule bindTokenAccessControl(env e, address newToken) {

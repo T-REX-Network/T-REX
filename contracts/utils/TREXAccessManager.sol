@@ -70,13 +70,12 @@ import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.s
 import { IERC3643IdentityRegistryStorage } from "../ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "../ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ITransferValidation } from "../compliance/modular/ITransferValidation.sol";
+import { ITickets } from "../compliance/modular/ITickets.sol";
 import { ITREXMessaging } from "../interop/ITREXMessaging.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { EventsLib } from "../libraries/EventsLib.sol";
 import { RolesLib } from "../libraries/RolesLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
-import { IToken } from "../token/IToken.sol";
 
 /// @title TREXAccessManager
 /// @notice The AccessManager of a T-REX suite. It knows the suite's own role layout: which role opens
@@ -233,8 +232,8 @@ contract TREXAccessManager is AccessManagerUpgradeable {
             _setComplianceFunctionRoles(compliance, domainId);
         }
 
-        // The token registers wallets on recovery and dispatches cross-chain instructions, so it acts as
-        // an agent of its registry. Only the registry writes into the storage, never a person.
+        // The token registers wallets on recovery, so it acts as an agent of its registry. Only the registry
+        // writes into the storage, never a person.
         _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.AGENT), token, 0, NO_EXECUTION_DELAY);
         _grantRole(RolesLib.forDomain(domainId, RolesLib.Role.IRS_WRITER), registry, 0, NO_EXECUTION_DELAY);
     }
@@ -273,15 +272,11 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, IERC3643.setOnchainID.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setIdentityRegistry.selector, identityManagerRole);
         _setTargetFunctionRole(token, IERC3643.setCompliance.selector, identityManagerRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setRoute.selector, identityManagerRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setFastRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setReceiptRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.closeReceiptRoute.selector, identityManagerRole);
+        _setTargetFunctionRole(token, ITREXMessaging.setTicketRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
-
-        // Cross-chain instructions.
-        uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(token, IToken.delegateOut.selector, agentRole);
-        _setTargetFunctionRole(token, IToken.instructRecall.selector, agentRole);
-        _setTargetFunctionRole(token, IToken.resend.selector, agentRole);
+        _setTargetFunctionRole(token, ITREXMessaging.replaceHostilePeer.selector, identityManagerRole);
 
         // From here on, one agent verb per role. Each batch has a row of its own, on the role of its single-item
         // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could
@@ -318,11 +313,10 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         uint64 recoveryRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_RECOVERY_ADDRESS);
         _setTargetFunctionRole(token, IERC3643.recoveryAddress.selector, recoveryRole);
 
-        // Stopping every transfer, or one chain's messages, and resuming.
+        // Stopping every transfer, and resuming.
         uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
         _setTargetFunctionRole(token, IERC3643.pause.selector, pauserRole);
         _setTargetFunctionRole(token, IERC3643.unpause.selector, pauserRole);
-        _setTargetFunctionRole(token, ITREXMessaging.setInboundPaused.selector, pauserRole);
     }
 
     function _setRegistryFunctionRoles(address registry, uint32 domainId) private {
@@ -386,19 +380,30 @@ contract TREXAccessManager is AccessManagerUpgradeable {
 
         // Cross-chain validation policy.
         uint64 complianceManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.COMPLIANCE_MANAGER);
-        _setTargetFunctionRole(compliance, ITransferValidation.setDefaultValidityWindow.selector, complianceManagerRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.setReconciliationWindow.selector, complianceManagerRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.setIssuancePaused.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setValidityWindows.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setWaitingTime.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setMeasuredTimes.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setTicketLimits.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAsksPaused.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAskLimits.selector, complianceManagerRole);
+        _setTargetFunctionRole(compliance, ITickets.setAskLimitOf.selector, complianceManagerRole);
 
-        // Issuing a validation, and sending a lost leg of one again.
+        // Asking to move any wallet's tokens, and bringing an away wallet's tokens home. Asking for a receipt,
+        // sending a second half again and cancelling are open to anyone.
         uint64 agentRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT);
-        _setTargetFunctionRole(compliance, ITransferValidation.requestTransferValidation.selector, agentRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.resendValidation.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITickets.askToMove.selector, agentRole);
+        _setTargetFunctionRole(compliance, ITickets.bringHome.selector, agentRole);
 
-        // Cleaning up expired or stuck validations.
-        uint64 validationKeeperRole = RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER);
-        _setTargetFunctionRole(compliance, ITransferValidation.discardExpiredValidations.selector, validationKeeperRole);
-        _setTargetFunctionRole(compliance, ITransferValidation.resolveStuckValidation.selector, validationKeeperRole);
+        // Blocking an away chain, lifting the block, and refusing a receipt waiting from a blocked chain.
+        uint64 pauserRole = RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER);
+        _setTargetFunctionRole(compliance, ITickets.blockAwayChain.selector, pauserRole);
+        _setTargetFunctionRole(compliance, ITickets.unblockAwayChain.selector, pauserRole);
+        _setTargetFunctionRole(compliance, ITickets.refuseWaitingReceipt.selector, pauserRole);
+
+        // Closing by hand what waits on an away chain whose receipt route is closed, from a read of that chain the
+        // caller attests: the role that closes a dead chain's route on the token.
+        uint64 identityManagerRole = RolesLib.forDomain(domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _setTargetFunctionRole(compliance, ITickets.closeByHand.selector, identityManagerRole);
     }
 
     /// @dev Who hands out which role. The key that appoints never acts: `AGENT_ADMIN` and `SUITE_ADMIN` open
@@ -416,7 +421,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_FORCED_TRANSFER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.AGENT_PAUSER), agentAdminRole);
         _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.IRS_BINDER), agentAdminRole);
-        _setRoleAdmin(RolesLib.forDomain(domainId, RolesLib.Role.VALIDATION_KEEPER), agentAdminRole);
 
         // The configuration managers are appointed by SUITE_ADMIN.
         uint64 suiteAdminRole = RolesLib.forDomain(domainId, RolesLib.Role.SUITE_ADMIN);

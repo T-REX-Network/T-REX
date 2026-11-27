@@ -3,6 +3,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - v5
 
+### Changed
+
+- **Home Decides: cross-chain moves go through home, as tickets and receipts.** This replaces the validations,
+  settlements, parked legs, delegations and recalls described in the entries below. What integrators see:
+  - *The four messages, format version 2.* `TICKET` (`TicketMessage`): home lets one move happen on the sender's
+    away chain, once, before its valid until. `RECEIPT` (`ReceiptMessage`): the away token says what it did, for the
+    ticket (half 0) or for one half, with an answer `Executed`, `Expired` or `StillOpen`. `MOVE_OUT`
+    (`MoveOutMessage`): home mints on an away chain, the second half of a move. `BRING_HOME` (`BringHomeMessage`):
+    home burns an away wallet's tokens to bring them home. Every message carries version 2; any other version is
+    refused on both sides. Away tokens never talk to each other: a move between two away chains is a ticket to the
+    sender's chain, the money on hold at home, then a `MOVE_OUT` to the receiver, or back to the sender when the
+    rules refuse the receiver. A ticket id is built from the whole request, with a spender key of zero when the move
+    names no spender, so the same ask mined again after a home reorg keeps its id; the ask block hash names which
+    copy the away token executed. `docs/satellite-lite.md` is the away token's contract.
+  - *New functions.* On the compliance: `askToMove`, `sendTicket` (an ask for the receipt, three at most),
+    `cancelTickets`, `sendSecondHalf`, `bringHome`, `cancelHold`, `closeByHand`, `applyWaitingReceipt`,
+    `refuseWaitingReceipt`, `blockAwayChain`, `unblockAwayChain`, `setValidityWindows`, `setWaitingTime`,
+    `setMeasuredTimes`, `setAskLimits`, `setAskLimitOf`, `setAsksPaused`, `setTicketLimits`, `receiveReceipt`, and
+    the views `ticketOf`, `waitingReceiptOf`, `uncountedCreditOf`, `isAwayChainBlocked`, `validityWindows`,
+    `waitingTimeOf`, `measuredTimesOf`, `askLimits`, `askLimitOf`, `areAsksPaused`, `ticketLimitsOf`. On the token:
+    `setReceiptRoute`, `closeReceiptRoute`, `setTicketRoute`, `replaceHostilePeer`, `sendOnTicketRoute`,
+    `sendOnReceiptRoute`, `checkReceiptOrigin`, `putOnHold`, `burnOntoHold`, `finishMove`, `reserveForTicket`,
+    `releaseFromTicket`, and the views `awayBalanceOf`, `totalAwayBalance`, `onHoldOf`, `totalOnHold`,
+    `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. On `TrustedGatewayRegistry`:
+    `trustTicketBridge`, `trustReceiptBridge`, `distrustBridge`, `isReceiptBridge`, `depthOf`.
+  - *Deleted functions.* `requestTransferValidation`, `resendValidation`, `discardExpiredValidations`,
+    `resolveStuckValidation`, `settleParkedLeg`, `parkedLegOf`, `validationOf`, `handleSettlement`,
+    `setReconciliationWindow`, `reconciliationWindowOf`, `setDefaultValidityWindow`, `defaultValidityWindow`,
+    `setIssuancePaused`, `isIssuancePaused`, `setInboundPaused`, `isInboundPaused`, `applyVerdict`, `delegateOut`,
+    `instructRecall`, `pendingRecall`, `syncOwner`, `resend`, `holdInTransit`, `returnHeldInTransit`,
+    `settleValidation`, `reserveForValidation`, `releaseFromValidation`, `dispatchComplianceValidation`, `setRoute`,
+    `routeFor`, `setFastRoute`, `fastRouteFor`, `pinnedRouteFor`, `bridgedBalanceOf`, `totalBridged`, `inTransitOf`,
+    `totalInTransit`, and `setTrustedGateway` on the registry.
+  - *Roles.* The agent asks to move any wallet's tokens (`askToMove`; the identity linked to the sender, or a home
+    sender itself, asks too) and brings home (`bringHome`). The agent pauser blocks and unblocks an away chain and
+    refuses a waiting receipt. The compliance manager sets the validity windows, waiting times, measured times, ask
+    limits, the pause of asks and the ticket caps. The identity manager sets and closes routes and sets and replaces
+    peers on the token, and closes by hand on the compliance. The interop manager trusts and distrusts bridges.
+    Asking for a receipt, cancelling a ticket, sending a second half again, cancelling money on hold and applying a
+    waiting receipt are open to anyone.
+  - *Settings, with OpenZeppelin's values for Base.* Measured times per away chain (`setMeasuredTimes`): shortest
+    validity window 372 s, shortest waiting time 5,485 s, clock lead 30 s, clock lag 120 s, full finality delivery
+    1,148 s; they are the floors the other settings are checked against. OpenZeppelin counts the reorg slot shift
+    inside its clock lead; the seed script sets it to 60 s. Validity windows
+    (`setValidityWindows`): 15 minutes on the ticket route, 25 minutes on the receipt route. Waiting time per away
+    chain (`setWaitingTime`): 95 minutes. OpenZeppelin gives no values for the ask limits (`setAskLimits`: open
+    tickets and asks per identity, the ask window, the smallest amount) or the ticket caps (`setTicketLimits`: per
+    ticket and per window); `scripts/SeedInterop.s.sol` shows example values. A receipt whose delivery sends a second
+    half reverts unless 550,000 gas is left for that send (449,545 gas at most measured with the test bridge), so a
+    receipt route needs a delivery gas limit of at least about 1,250,000 gas; measure it again with the production
+    bridge.
+  - *Storage: fresh deployments only.* No proxy of the develop version can be upgraded to this one, testnets
+    included. Three ERC-7201 namespaces keep their strings and change their layout:
+    `erc3643.storage.TransferValidation` (the compliance) is rewritten from its first slot: `defaultValidityWindow`,
+    `reconciliationWindows`, `issuancePaused`, `awaitedTerms`, `parkedLegs` and `reportedLegs` are gone,
+    `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
+    `waitingReceipts`, `receiptHashes`, `ticketLimits`, `latestValidUntilSent`, `blockedAwayChains`,
+    `measuredTimes`, `validityWindowFloors`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
+    `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
+    `erc3643.storage.TREXMessaging` (the token) keeps its first five slots (`routes` read as `receiptRoutes`);
+    `pinnedRoutes`, `pinnedPeers`, `inboundPaused` and `fastRoutes` are replaced from slot 5 by `pins` (one pin per
+    half), `ticketRoutes`, `awayReceiptBridges`, `formerReceiptRoutes` and `hostileChangeEndsAt`.
+    `erc3643.storage.TREXToken` (the token) keeps its first six slots under new names (`bridgedBalance` as
+    `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
+    `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
+    `lastRecallId`, `openRecall`, `settledProofs`, `lastDelegationId` and `delegations` from slot 6. The new
+    `erc3643.storage.AwayChainVolumeModule` belongs to a new module. `ComplianceLedger`, `TREXCompliance`,
+    `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are
+    unchanged.
+
 ### Added
 
 - **Reorg-stable validation ids, parked legs, and the hash in the settlement.** A validation may now be

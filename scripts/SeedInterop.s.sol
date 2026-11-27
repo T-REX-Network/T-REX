@@ -46,6 +46,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
 import { IKeyExecutor } from "@onchain-id/solidity/contracts/interface/IKeyExecutor.sol";
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ModularCompliance } from "contracts/compliance/modular/ModularCompliance.sol";
 import { TREXFactory } from "contracts/factory/TREXFactory.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
@@ -56,22 +57,22 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /**
  * @title SeedInterop
  * @notice Seeds every cross-chain flow of the Gold Token on one chain, so a subgraph and an SDK
- *         see real routes, validations, a delegation and a recall without a second chain.
+ *         see real routes, validations, a home wallet's move out and a bring home without a second chain.
  *
  * The "satellite" is chain SATELLITE_CHAIN_ID (default 31338, a local id no public network uses), reached
  * through a loopback ERC-7786 gateway (test/integration/mocks/ERC7786GatewayMock.sol) that
  * attributes everything it delivers to that chain. The deployer plays the satellite's Lite: it
- * is registered as the token's peer there, so the settlements and burn proofs it authors through
+ * is registered as the token's peer there, so the receipts it authors through
  * the gateway are admitted. Gold investors 0 and 1 own one satellite wallet each: their own
  * address on the satellite chain, linked to their identity through the factory's cross-chain
  * link (the wallet sends the proposal itself through the gateway, the identity settles it).
  *
  * What lands on chain, in order:
- *   gateway trusted, route + peer set, validity and reconciliation windows set, two satellite
- *   wallets linked, investor0 delegates 100 GOLD to its satellite wallet, validation 1 issued
- *   and settled for 30 (satellite 0 -> satellite 1), validation 2 issued and left pending,
- *   validation 3 issued toward investor1's native wallet and its leg resent once, a recall of 20
- *   instructed on satellite wallet 1 and settled by a burn proof.
+ *   gateway trusted, route + peer set, measured times, validity windows, waiting time, ask limits
+ *   and ticket caps set, two satellite wallets linked, investor0 moves 100 GOLD out of its home wallet to
+ *   its satellite wallet (burned at home onto hold, landed by the move out's receipt), validation 1 issued and settled for 30 (satellite 0 -> satellite 1), validation 2 issued
+ *   and left pending, validation 3 issued toward investor1's native wallet, a bring home of 20
+ *   from satellite wallet 1 to investor1's home wallet, ended by its receipt.
  *
  * ===== Environment =====
  *   DEPLOYER_PRIVATE_KEY        the suite agent (every suite role was granted by the seeders)
@@ -83,7 +84,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
  *
  * ===== Idempotency =====
  * Infrastructure steps check on-chain state first. The gateway address, once deployed, is kept in
- * the record and reused. The movement steps (delegation, validations, recall) run once: the record
+ * the record and reused. The movement steps (move out, validations, bring home) run once: the record
  * carries `movementsSeeded` and a re-run skips them unless INTEROP_FORCE_MOVEMENTS=true.
  *
  * Usage:
@@ -122,7 +123,7 @@ contract SeedInterop is Script {
     bytes32 internal settledValidation;
     bytes32 internal pendingValidation;
     bytes32 internal resentValidation;
-    uint256 internal recallId;
+    bytes32 internal bringHomeTicket;
 
     function run() external {
         _load();
@@ -140,10 +141,10 @@ contract SeedInterop is Script {
         if (movementsSeeded && !vm.envOr("INTEROP_FORCE_MOVEMENTS", false)) {
             console.log("Movements already seeded, skipping (set INTEROP_FORCE_MOVEMENTS=true to add more)");
         } else {
-            _delegateOut();
+            _moveOutFromHome();
             vm.startBroadcast(deployerKey);
             _seedValidations();
-            _seedRecall();
+            _seedBringHome();
             vm.stopBroadcast();
             movementsSeeded = true;
         }
@@ -194,7 +195,7 @@ contract SeedInterop is Script {
             settledValidation = vm.parseJsonBytes32(json, ".settledValidation");
             pendingValidation = vm.parseJsonBytes32(json, ".pendingValidation");
             resentValidation = vm.parseJsonBytes32(json, ".resentValidation");
-            recallId = vm.parseJsonUint(json, ".recallId");
+            bringHomeTicket = vm.parseJsonBytes32(json, ".bringHomeTicket");
         }
 
         console.log("Deployer (plays the Lite):", deployer);
@@ -214,18 +215,33 @@ contract SeedInterop is Script {
             gateway = new ERC7786GatewayMock(satelliteChainId);
             console.log("Loopback gateway deployed:", address(gateway));
         }
-        if (!registry.isTrusted(address(gateway))) {
-            registry.setTrustedGateway(address(gateway), true);
-            console.log("Gateway trusted in TrustedGatewayRegistry");
+        // The loopback gateway plays the home receipt bridge: its receiving policy admits the satellite's
+        // receipt bridge (the deployer, who plays every satellite contract) at full finality only.
+        gateway.setReceivingPolicy(_satelliteChainSelector(), _satelliteReceiptBridge(), bytes4(0));
+        if (!registry.isReceiptBridge(address(gateway))) {
+            registry.trustReceiptBridge(address(gateway));
+            console.log("Gateway recorded as a receipt bridge in TrustedGatewayRegistry");
         }
         idFactory.setTrustedGateway(address(gateway), chainType, chainReference, true);
         console.log("Gateway trusted in IdentityFactory for the satellite chain");
     }
 
+    /// @dev The CCIP selector the loopback setup gives the satellite chain. CCIP selectors are not chain ids.
+    function _satelliteChainSelector() internal view returns (uint64) {
+        return uint64(uint256(keccak256(abi.encode("away chain selector", satelliteChainId))));
+    }
+
+    /// @dev The satellite's receipt bridge as CCIP reports a sender: the deployer plays it.
+    function _satelliteReceiptBridge() internal view returns (bytes memory) {
+        return abi.encode(deployer);
+    }
+
     function _ensureRouteAndPeer() internal {
-        if (token.routeFor(chainKey) != address(gateway)) {
-            token.setRoute(chainType, chainReference, address(gateway));
-            console.log("Route set toward the satellite chain");
+        if (token.receiptRouteFor(chainKey) != address(gateway)) {
+            token.setReceiptRoute(
+                chainType, chainReference, address(gateway), _satelliteChainSelector(), _satelliteReceiptBridge()
+            );
+            console.log("Receipt route set toward the satellite chain");
         }
         bytes memory peer = InteroperableAddress.formatEvmV1(satelliteChainId, deployer);
         if (keccak256(token.peerFor(chainKey)) != keccak256(peer)) {
@@ -234,14 +250,43 @@ contract SeedInterop is Script {
         }
     }
 
+    /// @dev OpenZeppelin's sizing for Base with a monitored on-call time of 30 minutes: tickets on the ticket route
+    ///  need a validity window above 6.2 minutes, tickets at full finality above 24.6 minutes, and the waiting time
+    ///  must be above 91.4 minutes. The measured times are set first: they are the floors the other settings check.
     function _ensureWindows() internal {
-        if (compliance.defaultValidityWindow() == 0) {
-            compliance.setDefaultValidityWindow(1 days);
-            console.log("Default validity window set to 1 day");
+        if (compliance.measuredTimesOf(chainKey).shortestWaitingTime == 0) {
+            compliance.setMeasuredTimes(
+                chainKey,
+                ITickets.MeasuredTimes({
+                    shortestValidityWindow: 372,
+                    shortestWaitingTime: 5485,
+                    clockLead: 30,
+                    clockLag: 120,
+                    fullFinalityDelivery: 1148,
+                    reorgSlotShift: 60
+                })
+            );
+            console.log("Measured times set for the satellite chain, from OpenZeppelin's Base sizing");
         }
-        if (compliance.reconciliationWindowOf(chainKey) == 0) {
-            compliance.setReconciliationWindow(chainKey, 1 hours);
-            console.log("Reconciliation window set to 1 hour");
+        if (compliance.validityWindows().onTicketRoute == 0) {
+            compliance.setValidityWindows(15 minutes, 25 minutes);
+            console.log("Validity windows set to 15 minutes on the ticket route, 25 minutes on the receipt route");
+        }
+        if (compliance.waitingTimeOf(chainKey) == 0) {
+            compliance.setWaitingTime(chainKey, 95 minutes);
+            console.log("Waiting time set to 95 minutes");
+        }
+        if (compliance.askLimits().askWindow == 0) {
+            compliance.setAskLimits(
+                ITickets.AskLimits({
+                    openTicketsPerIdentity: 10, asksPerIdentityPerWindow: 20, askWindow: 1 days, smallestAmount: UNIT
+                })
+            );
+            console.log("Ask limits set: 10 open tickets and 20 asks a day per identity, 1 GOLD at least");
+        }
+        if (compliance.ticketLimitsOf(chainKey).perTicketCap == 0) {
+            compliance.setTicketLimits(chainKey, 1000 * UNIT, 10_000 * UNIT);
+            console.log("Ticket caps set: 1,000 GOLD per ticket, 10,000 GOLD per waiting time");
         }
     }
 
@@ -275,51 +320,72 @@ contract SeedInterop is Script {
 
     // ============ Movements ============
 
-    function _delegateOut() internal {
-        if (token.bridgedBalanceOf(satellites[0]) != 0) {
-            console.log("investor0 already holds a bridged position, skipping the delegation");
+    /// @dev investor0 moves 100 GOLD from its home wallet to its away wallet: burned at home onto hold, then the
+    ///  move out's receipt from the away chain lands it there.
+    function _moveOutFromHome() internal {
+        if (token.awayBalanceOf(satellites[0]) != 0) {
+            console.log("investor0 already holds an away balance, skipping the move out");
             return;
         }
         require(token.balanceOf(wallets[0]) >= 100 * UNIT, "investor0 holds less than 100 GOLD");
         _fund(wallets[0]);
+        bytes memory homeWallet = InteroperableAddress.formatEvmV1(block.chainid, wallets[0]);
         vm.startBroadcast(investorKeys[0]);
-        token.delegateOut(wallets[0], satellites[0], 100 * UNIT);
+        bytes32 ticketId =
+            compliance.askToMove(homeWallet, satellites[0], 100 * UNIT, 100 * UNIT, "", _salt("move out"));
         vm.stopBroadcast();
-        console.log("investor0 delegated 100 GOLD to its satellite wallet");
+
+        vm.startBroadcast(deployerKey);
+        _liteSends(
+            MessageTypesLib.encodeSettlement(
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: ticketId,
+                    from: "",
+                    to: satellites[0],
+                    amount: 100 * UNIT,
+                    askBlockHash: bytes32(0),
+                    seenMax: 0,
+                    seenValidUntil: 0,
+                    half: 1,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
+                })
+            )
+        );
+        vm.stopBroadcast();
+        console.log("investor0 moved 100 GOLD out to its away wallet");
     }
 
     function _seedValidations() internal {
-        // The salt is the requester's nonce: the id is `keccak256(canonicalKey(from), salt)`, so a seed run
-        // that is replayed takes a fresh one.
-        settledValidation = compliance.requestTransferValidation(
-            satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled")
-        );
+        // The salt is the requester's nonce: the id is built from the whole request, salt included, so a seed
+        // run that is replayed takes a fresh one.
+        settledValidation =
+            compliance.askToMove(satellites[0], satellites[1], 10 * UNIT, 50 * UNIT, "", _salt("settled"));
         _liteSends(
             MessageTypesLib.encodeSettlement(
-                MessageTypesLib.SettlementNotification({
-                    validationId: settledValidation,
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: settledValidation,
                     from: satellites[0],
                     to: satellites[1],
                     amount: 30 * UNIT,
-                    hash: compliance.validationOf(settledValidation).hash
+                    askBlockHash: compliance.ticketOf(settledValidation).askBlockHash,
+                    seenMax: compliance.ticketOf(settledValidation).amountMax,
+                    seenValidUntil: compliance.ticketOf(settledValidation).validUntil,
+                    half: 0,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
                 })
             )
         );
         console.log("Validation settled for 30 GOLD, id", vm.toString(settledValidation));
 
-        pendingValidation = compliance.requestTransferValidation(
-            satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "", _salt("pending")
-        );
+        pendingValidation =
+            compliance.askToMove(satellites[0], satellites[1], 5 * UNIT, 20 * UNIT, "", _salt("pending"));
         console.log("Validation left pending, id", vm.toString(pendingValidation));
 
         bytes memory nativeInvestor1 = InteroperableAddress.formatEvmV1(block.chainid, wallets[1]);
-        resentValidation = compliance.requestTransferValidation(
-            satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent")
-        );
-        compliance.resendValidation(resentValidation, chainKey, nativeInvestor1, "");
-        console.log(
-            "Validation issued toward investor1's native wallet and resent once, id", vm.toString(resentValidation)
-        );
+        resentValidation =
+            compliance.askToMove(satellites[0], nativeInvestor1, 1 * UNIT, 10 * UNIT, "", _salt("resent"));
+        // Its receipt may be asked for only one waiting time after its valid until, so it is not asked for here.
+        console.log("Validation issued toward investor1's native wallet, id", vm.toString(resentValidation));
     }
 
     /// @dev A salt per seeded validation, distinct per run so a replayed seed never reuses an id.
@@ -327,14 +393,26 @@ contract SeedInterop is Script {
         return keccak256(abi.encode(label, block.timestamp, block.chainid));
     }
 
-    function _seedRecall() internal {
-        recallId = token.instructRecall(satellites[1], 20 * UNIT, wallets[1]);
+    /// @dev The agent brings 20 GOLD of satellite wallet 1 home to investor1's home wallet: the away token burns them
+    ///  and its receipt for the bring home's half mints them at home.
+    function _seedBringHome() internal {
+        bringHomeTicket = compliance.bringHome(satellites[1], 20 * UNIT, wallets[1], _salt("bring home"));
         _liteSends(
-            MessageTypesLib.encodeBurnProof(
-                MessageTypesLib.BurnProof({ recallId: recallId, burnedWallet: satellites[1], amount: 20 * UNIT })
+            MessageTypesLib.encodeSettlement(
+                MessageTypesLib.ReceiptMessage({
+                    ticketId: bringHomeTicket,
+                    from: satellites[1],
+                    to: "",
+                    amount: 20 * UNIT,
+                    askBlockHash: bytes32(0),
+                    seenMax: 0,
+                    seenValidUntil: 0,
+                    half: 1,
+                    answer: MessageTypesLib.ReceiptAnswer.Executed
+                })
             )
         );
-        console.log("Recall of 20 GOLD instructed and settled, id", recallId);
+        console.log("Bring home of 20 GOLD done, id", vm.toString(bringHomeTicket));
     }
 
     function _liteSends(bytes memory payload) internal {
@@ -357,7 +435,7 @@ contract SeedInterop is Script {
         vm.serializeBytes32(JSON, "settledValidation", settledValidation);
         vm.serializeBytes32(JSON, "pendingValidation", pendingValidation);
         vm.serializeBytes32(JSON, "resentValidation", resentValidation);
-        vm.serializeUint(JSON, "recallId", recallId);
+        vm.serializeBytes32(JSON, "bringHomeTicket", bringHomeTicket);
         string memory json = vm.serializeBool(JSON, "movementsSeeded", movementsSeeded);
         vm.writeJson(json, recordPath);
         console.log("Recorded", recordPath);
@@ -368,8 +446,8 @@ contract SeedInterop is Script {
         console.log("========== Interop Seeding Summary ==========");
         console.log("Loopback gateway:        ", address(gateway));
         console.log("Route open:              ", token.isChainOpen(chainKey));
-        console.log("investor0 bridged:       ", token.bridgedBalanceOf(satellites[0]));
-        console.log("investor1 bridged:       ", token.bridgedBalanceOf(satellites[1]));
+        console.log("investor0 bridged:       ", token.awayBalanceOf(satellites[0]));
+        console.log("investor1 bridged:       ", token.awayBalanceOf(satellites[1]));
         console.log("investor1 native:        ", token.balanceOf(wallets[1]));
         console.log("settled validation:      ", vm.toString(settledValidation));
         console.log("pending validation:      ", vm.toString(pendingValidation));

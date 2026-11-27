@@ -223,14 +223,14 @@ abstract contract AccessManagerHelper is Test {
         platformManager.grantRole(_interopManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants VALIDATION_KEEPER, which gates the discard of expired validations on ModularCompliance.
-    function _grantValidationKeeperRole(address account) internal {
-        suiteManager.grantRole(_role(RolesLib.Role.VALIDATION_KEEPER), account, NO_EXECUTION_DELAY);
-    }
-
     /// @notice Grants COMPLIANCE_MANAGER, which gates the validation policy setters on ModularCompliance.
     function _grantComplianceManagerRole(address account) internal {
         suiteManager.grantRole(_role(RolesLib.Role.COMPLIANCE_MANAGER), account, NO_EXECUTION_DELAY);
+    }
+
+    /// @notice Grants AGENT_PAUSER, which gates the stop of the token and the block of an away chain.
+    function _grantPauserRole(address account) internal {
+        suiteManager.grantRole(_role(RolesLib.Role.AGENT_PAUSER), account, NO_EXECUTION_DELAY);
     }
 
     /// @notice Grants IRS_BINDER, which gates IdentityRegistryStorage.bindIdentityRegistry.

@@ -71,9 +71,9 @@ IMPLEMENTATION_AUTHORITY=$(addr_for TREXImplementationAuthority)
 TRUSTED_GATEWAY_REGISTRY=$(addr_for TrustedGatewayRegistry)
 TREX_FACTORY=$(addr_for TREXFactory)
 
-# Token is linked against TREXMessagingLib, TokenDelegationLib, TokenLedgerLib, TokenRecoveryLib and
-# TokenGuardsLib; ModularCompliance against ModuleSetLib, TransferValidationLib and TransferSettlementLib
-# (ComplianceLedgerLib is internal and never deployed). forge deploys each library ahead of the script's own
+# Token is linked against TREXMessagingLib, TokenLedgerLib, TokenRecoveryLib and TokenGuardsLib;
+# ModularCompliance against ModuleSetLib, TicketLib, ReceiptLib, SecondHalfLib and HoldLib (ComplianceLedgerLib is internal
+# and never deployed). forge deploys each library ahead of the script's own
 # transactions and records it under "libraries" as "<source>:<name>:<address>".
 lib_addr() {
     python3 -c '
@@ -87,13 +87,14 @@ sys.exit(1)
 ' "$1" "$RUN" || { echo "ERROR: $1 not found in $RUN libraries." >&2; exit 1; }
 }
 MESSAGING_LIB=$(lib_addr TREXMessagingLib)
-DELEGATION_LIB=$(lib_addr TokenDelegationLib)
 LEDGER_LIB=$(lib_addr TokenLedgerLib)
 RECOVERY_LIB=$(lib_addr TokenRecoveryLib)
 GUARDS_LIB=$(lib_addr TokenGuardsLib)
 MODULE_SET_LIB=$(lib_addr ModuleSetLib)
-TRANSFER_VALIDATION_LIB=$(lib_addr TransferValidationLib)
-TRANSFER_SETTLEMENT_LIB=$(lib_addr TransferSettlementLib)
+TRANSFER_VALIDATION_LIB=$(lib_addr TicketLib)
+TRANSFER_SETTLEMENT_LIB=$(lib_addr ReceiptLib)
+SECOND_HALF_LIB=$(lib_addr SecondHalfLib)
+HOLD_LIB=$(lib_addr HoldLib)
 
 # beacons() returns a SuiteBeacons tuple (token, registry, irs, mc, accessManager) - fetch
 # post-hoc, they're not top-level CREATEs.
@@ -107,13 +108,14 @@ cat > "deployments/$NETWORK_NAME.json" <<JSON
   "accessManager": "$ACCESS_MANAGER",
   "tokenImpl": "$TOKEN_IMPL",
   "messagingLib": "$MESSAGING_LIB",
-  "delegationLib": "$DELEGATION_LIB",
   "ledgerLib": "$LEDGER_LIB",
   "recoveryLib": "$RECOVERY_LIB",
   "guardsLib": "$GUARDS_LIB",
   "moduleSetLib": "$MODULE_SET_LIB",
   "transferValidationLib": "$TRANSFER_VALIDATION_LIB",
   "transferSettlementLib": "$TRANSFER_SETTLEMENT_LIB",
+  "secondHalfLib": "$SECOND_HALF_LIB",
+  "holdLib": "$HOLD_LIB",
   "identityRegistryStorageImpl": "$IRS_IMPL",
   "modularComplianceImpl": "$MC_IMPL",
   "trexRegistryImpl": "$TREX_REGISTRY_IMPL",

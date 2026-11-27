@@ -48,7 +48,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ERC3643ErrorsLib } from "contracts/ERC-3643/ERC3643ErrorsLib.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
@@ -63,13 +63,13 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /// Three identities, each with a native wallet and two wallets on one satellite chain, so every issued
 /// validation has a single leg and nothing waits in transit. The transitions are the ones the ledger is written
 /// from: mint, burn, transfer, forced transfer, validation issuance (to another identity, to the same identity,
-/// to a native wallet), settlement in time or late, the keeper's discard, and a wallet no registry names that an
+/// to a native wallet), settlement in time or late, a cancel after an unanswered ask, and a wallet no registry names that an
 /// agent tries to pay with eligibility checks disabled, links, and moves tokens out of. A cap is bound so
 /// issuance is really narrowed by the ledger.
 ///
 ///   LEDGER-1  positionOf(identity) == native balance + bridged balances over the identity's wallets
 ///   LEDGER-2  sum of positions == totalSupply()
-///   LEDGER-3  pendingInOf / pendingOutOf == sum of amountMax over stored-Pending validations of the identity,
+///   LEDGER-3  pendingInOf / pendingOutOf == sum of amountMax over stored-Open validations of the identity,
 ///             relocations excluded
 ///   LEDGER-4  the token's reservedOf(wallet) == sum of amountMax over open validations out of that wallet
 ///   LEDGER-5  a wallet no registry names holds nothing, even with eligibility checks disabled; once linked, its
@@ -112,7 +112,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
     function setUp() public override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(gateway));
 
         stranger = makeAddr("stranger");
@@ -215,19 +215,19 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
             ? _nativeEnvelope(actors[toActor])
             : satellites[toActor][toWallet % WALLETS_PER_ACTOR];
 
-        uint256 balance = token.bridgedBalanceOf(from);
+        uint256 balance = token.awayBalanceOf(from);
         uint256 pending = token.reservedOf(from);
         if (balance <= pending) return;
         max = bound(max, 1, balance - pending);
         min = bound(min, 1, max);
 
-        if (boundCompliance.isIssuancePaused(polygon)) {
-            vm.prank(deployer);
-            boundCompliance.setIssuancePaused(polygon, false);
+        if (boundCompliance.isAwayChainBlocked(polygon)) {
+            vm.prank(agent);
+            boundCompliance.unblockAwayChain(polygon);
         }
 
         vm.prank(address(identities[fromActor]));
-        try boundCompliance.requestTransferValidation(from, to, min, max, "", _salt()) returns (bytes32 id) {
+        try boundCompliance.askToMove(from, to, min, max, "", _salt()) returns (bytes32 id) {
             issued.push(id);
         } catch { }
     }
@@ -238,8 +238,8 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         callsSettle++;
         if (issued.length == 0) return;
         bytes32 id = issued[idSeed % issued.length];
-        ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
-        if (_burnLegArrived(validation.status)) return;
+        ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
+        if (_receiptLanded(validation.status)) return;
         uint256 amount = bound(amountSeed, validation.amountMin, validation.amountMax);
 
         (bytes memory from, bytes memory to) = _walletsOf(validation);
@@ -247,22 +247,30 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         try gateway.relay(index) { } catch { }
     }
 
-    /// @dev The keeper discards a validation past its release time, or this handler, holding no role, past the
-    ///      second window; the clock moves forward to get there.
-    function discard(uint256 idSeed, bool asKeeper) external {
+    /// @dev This handler, holding no role, cancels an open ticket the only way a sent one is cancelled: an ask for
+    ///      its receipt at its due time, then one waiting time with no answer; the clock moves forward to get there.
+    function discard(uint256 idSeed) external {
         callsDiscard++;
         if (issued.length == 0) return;
         bytes32 id = issued[idSeed % issued.length];
-        ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
-        if (validation.status != ITransferValidation.ValidationStatus.Pending) return;
+        ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
+        if (validation.status != ITickets.TicketStatus.Open) return;
+        if (validation.asksForReceipt == 3) return;
+        // A receipt for the ticket that waits is applied, not raced: the cancel refuses while it can be.
+        if (boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0)) return;
+        if (boundCompliance.isAwayChainBlocked(polygon)) {
+            vm.prank(agent);
+            boundCompliance.unblockAwayChain(polygon);
+        }
 
-        uint64 openAt =
-            asKeeper ? validation.releaseAt : validation.releaseAt + (validation.releaseAt - validation.expiry);
-        if (block.timestamp <= openAt) vm.warp(openAt + 1);
+        (, bytes memory to) = _walletsOf(validation);
+        uint64 askDueAt = validation.validUntil + (validation.asksForReceipt + 1) * validation.waitingTime;
+        if (block.timestamp < askDueAt) vm.warp(askDueAt);
+        boundCompliance.sendTicket(id, validation.fromChainKey, to, "");
+        vm.warp(block.timestamp + validation.waitingTime + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
-        if (asKeeper) vm.prank(keeper);
-        boundCompliance.discardExpiredValidations(ids);
+        boundCompliance.cancelTickets(ids);
     }
 
     /// @dev An investor retires one of their own native wallets in ONCHAINID. It keeps whatever it holds and
@@ -405,43 +413,41 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     /* ----- Recounts ----- */
 
+    /// @dev What the actor's identity owns: its wallets, and its money on hold between two halves of a move.
     function _recount(uint256 actor) private view returns (uint256 sum) {
         sum = token.balanceOf(actors[actor]);
         if (strangerIdentity == address(identities[actor])) sum += token.balanceOf(stranger);
         for (uint256 j = 0; j < WALLETS_PER_ACTOR; j++) {
-            sum += token.bridgedBalanceOf(satellites[actor][j]);
+            sum += token.awayBalanceOf(satellites[actor][j]);
+        }
+        for (uint256 i = 0; i < issued.length; i++) {
+            ITickets.Ticket memory ticket = boundCompliance.ticketOf(issued[i]);
+            if (ticket.fromIdentity == address(identities[actor])) sum += token.onHoldOf(issued[i]);
         }
     }
 
     /// @dev The reservation rules, spelled out here rather than read back from the compliance. A harness that
     ///      asked the contract what it still reserves would agree with it by construction and prove nothing;
     ///      these are the rules the lifecycle is supposed to follow, written independently.
-    function _burnLegArrived(ITransferValidation.ValidationStatus status) private pure returns (bool) {
-        return status == ITransferValidation.ValidationStatus.AwaitingMint
-            || status == ITransferValidation.ValidationStatus.DiscardedAwaitingMint
-            || status == ITransferValidation.ValidationStatus.Settled
-            || status == ITransferValidation.ValidationStatus.LateReconciled;
+    function _receiptLanded(ITickets.TicketStatus status) private pure returns (bool) {
+        return status == ITickets.TicketStatus.Done;
     }
 
-    /// @dev The identities' pending amounts are outstanding while the movement is still expected, and never on
-    ///      a relocation, where nothing was reserved against them in the first place.
-    function _reservesIdentities(ITransferValidation.Validation memory v) private pure returns (bool) {
+    /// @dev The identities' pending amounts are outstanding while the move is still expected, and never on a
+    ///      relocation, where nothing was reserved against them in the first place.
+    function _reservesIdentities(ITickets.Ticket memory v) private pure returns (bool) {
         if (v.relocation) return false;
-        return v.status == ITransferValidation.ValidationStatus.Pending
-            || v.status == ITransferValidation.ValidationStatus.AwaitingMint
-            || v.status == ITransferValidation.ValidationStatus.AwaitingBurn;
+        return v.status == ITickets.TicketStatus.WaitingForApproval || v.status == ITickets.TicketStatus.Open;
     }
 
-    /// @dev The sender wallet's share is outstanding until its burn leg arrives, which moves the amount into
-    ///      transit on the token instead.
-    function _reservesWallet(ITransferValidation.Validation memory v) private pure returns (bool) {
-        return v.status == ITransferValidation.ValidationStatus.Pending
-            || v.status == ITransferValidation.ValidationStatus.AwaitingBurn;
+    /// @dev The sender wallet's share is outstanding while the move is still expected.
+    function _reservesWallet(ITickets.Ticket memory v) private pure returns (bool) {
+        return v.status == ITickets.TicketStatus.WaitingForApproval || v.status == ITickets.TicketStatus.Open;
     }
 
     function _openPendingOf(address identity) private view returns (uint256 pendingIn, uint256 pendingOut) {
         for (uint256 i = 0; i < issued.length; i++) {
-            ITransferValidation.Validation memory validation = boundCompliance.validationOf(issued[i]);
+            ITickets.Ticket memory validation = boundCompliance.ticketOf(issued[i]);
             if (!_reservesIdentities(validation)) continue;
             if (validation.toIdentity == identity) pendingIn += validation.amountMax;
             if (validation.fromIdentity == identity) pendingOut += validation.amountMax;
@@ -450,17 +456,13 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     function _openWalletPendingOf(bytes32 key) private view returns (uint256 pending) {
         for (uint256 i = 0; i < issued.length; i++) {
-            ITransferValidation.Validation memory validation = boundCompliance.validationOf(issued[i]);
+            ITickets.Ticket memory validation = boundCompliance.ticketOf(issued[i]);
             if (_reservesWallet(validation) && validation.fromKey == key) pending += validation.amountMax;
         }
     }
 
     /// @dev The envelopes a validation was issued for, found again by their canonical keys.
-    function _walletsOf(ITransferValidation.Validation memory validation)
-        private
-        view
-        returns (bytes memory from, bytes memory to)
-    {
+    function _walletsOf(ITickets.Ticket memory validation) private view returns (bytes memory from, bytes memory to) {
         for (uint256 i = 0; i < ACTORS; i++) {
             if (validation.toKey == WalletKeyLib.canonicalKey(_nativeEnvelope(actors[i]))) {
                 to = _nativeEnvelope(actors[i]);

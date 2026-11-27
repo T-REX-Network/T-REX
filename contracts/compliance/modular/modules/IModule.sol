@@ -130,13 +130,16 @@ interface IModule {
         /// on a native movement, the spender named on a validation, at its issuance and at its settlement.
         /// Empty when the sender executes itself, which is every direct transfer, mint and burn.
         bytes spender;
-        /// Room for what a later compliance has to say that this struct does not carry yet. Empty today.
+        /// Room for what a later compliance has to say that this struct does not carry yet.
         /// This struct is a parameter of every module function, so it is part of their selectors: a field
         /// added after modules are deployed changes the selectors and breaks every one of them. A new fact
         /// goes here instead. The compliance that fills it documents the shape as an `abi.encode`d tuple and
         /// only ever appends to that tuple, so a module that decodes the prefix it knows keeps working when
         /// a later fact is added. A module decodes `data` only when it knows the compliance that fills it,
         /// and ignores it otherwise.
+        /// `ModularCompliance` fills it on a move between chains, at the ask, when the rules are asked again and
+        /// when the move is done: `abi.encode(bytes32 fromChainKey)`, the key (`MessageTypesLib.chainKey`) of the
+        /// chain the money leaves, home's own key for a home wallet. Empty on a native movement.
         bytes data;
     }
 
@@ -164,7 +167,7 @@ interface IModule {
     /**
      *  @dev the ledger moved. Called on every `AFTER` module after the compliance updated the positions, on
      *  a native transfer, a mint, a burn, a forced transfer, a recovery, a settled validation, a delegation out
-     *  and a recall
+     *  and a bring home
      *  the movement is entirely in `ctx`: `ctx.amountMax` is the exact amount that moved, `ctx.kind` says
      *  what produced it, a zero `fromIdentity` and `fromWallet` mean a mint, a zero `toIdentity` and
      *  `toWallet` mean a burn. That is the convention {checkTransfer} already uses, so one function covers
@@ -173,7 +176,7 @@ interface IModule {
      *  reverting stops the movement: a module that cannot record a move has to stop it, and a module that
      *  judges the state the movement left behind refuses it the same way, with its own error. Such a veto is
      *  for `TRANSFER` and `MINT` only, and lets `BURN`, `CROSS_CHAIN`, `DELEGATION`, `RECALL`, `FORCED_TRANSFER`
-     *  and `RECOVERY` pass: on a settlement or a recall the satellite already executed, so a revert only blocks
+     *  and `RECOVERY` pass: on a settlement or a bring home the satellite already executed, so a revert only blocks
      *  the delivery, and a burn, a forced transfer or a recovery is the agent's own action. `forceRemoveModule`
      *  is the escape hatch for a module that reverts everywhere
      *  MUST NOT revert on a `ctx.kind` it does not know: a kind added later has to keep moving through

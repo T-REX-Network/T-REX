@@ -66,7 +66,7 @@ import { ERC165Checker } from "@openzeppelin/contracts/utils/introspection/ERC16
 import { IERC3643Compliance } from "../ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "../ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "../compliance/modular/IModularCompliance.sol";
-import { ISettlementHandler } from "../interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "../interop/IReceiptHandler.sol";
 import { ErrorsLib } from "../libraries/ErrorsLib.sol";
 import { ITREXRegistry } from "../registry/interface/ITREXRegistry.sol";
 
@@ -94,7 +94,7 @@ library TokenGuardsLib {
     ) external view {
         require(current == address(0) || supply == 0, ErrorsLib.TokenCirculating());
 
-        // The token's recovery and delegation, and the spender check on every `transferFrom`, call T-REX
+        // The token's recovery, and the spender check on every `transferFrom`, call T-REX
         // methods outside the standard interface, which would revert on a registry missing them.
         bytes4[] memory calledInterfaces = new bytes4[](2);
         calledInterfaces[0] = type(IERC3643IdentityRegistry).interfaceId;
@@ -138,7 +138,7 @@ library TokenGuardsLib {
         bytes4[] memory calledInterfaces = new bytes4[](3);
         calledInterfaces[0] = type(IERC3643Compliance).interfaceId;
         calledInterfaces[1] = type(IModularCompliance).interfaceId;
-        calledInterfaces[2] = type(ISettlementHandler).interfaceId;
+        calledInterfaces[2] = type(IReceiptHandler).interfaceId;
         require(ERC165Checker.supportsAllInterfaces(complianceAddress, calledInterfaces), ErrorsLib.InvalidCompliance());
 
         address boundToken = IModularCompliance(complianceAddress).getTokenBound();

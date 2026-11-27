@@ -231,7 +231,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     /// @notice An `AFTER` module is not reached at the issuance of a validation: nothing has moved yet, so
     ///         there is nothing to tell, and a veto bound there cannot block an issuance.
     function test_requestTransferValidation_Success_WhenAfterModulesAreNotTold() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceSat"), 1000);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobSat"));
 
@@ -457,11 +457,11 @@ contract ComplianceDispatchTest is InteropSuiteTest {
         assertEq(token.balanceOf(bob), 100);
     }
 
-    // ==== .requestTransferValidation routing Tests ====
+    // ==== .askToMove routing Tests ====
 
     /// @notice Issuance asks every rule for an amount, and touches no tracker: nothing has moved yet.
     function test_requestTransferValidation_Success_WhenEveryRuleIsAsked() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
@@ -483,7 +483,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             kind: MovementKindLib.CROSS_CHAIN,
             isIssuance: true,
             spender: "",
-            data: ""
+            // A move between chains names the chain the money leaves.
+            data: abi.encode(polygon)
         });
         vm.expectCall(address(firstRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
         vm.expectCall(address(secondRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
@@ -494,7 +495,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
     /// @notice A rule that allows less narrows the issued range, and the trackers stay untouched.
     function test_requestTransferValidation_Success_WhenARuleNarrowsTheRange() public {
-        _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
+        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         bytes memory from = _delegatedSatelliteWallet(100);
         bytes memory to = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
 
@@ -505,7 +506,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
 
         bytes32 id = _requestValidation(address(aliceIdentity), from, to, 10, 100);
 
-        assertEq(mc.validationOf(id).amountMax, 40, "narrowed to what the rule allows");
+        assertEq(mc.ticketOf(id).amountMax, 40, "narrowed to what the rule allows");
         assertEq(tracker.totalHookCalls(), 0);
     }
 
@@ -518,7 +519,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
         envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
         vm.prank(agent);
-        TokenLedgerHarness(address(token)).ledgerDelegateOut(alice, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerMoveOut(alice, envelope, amount);
     }
 
 }

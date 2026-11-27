@@ -87,10 +87,7 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
-    error ValidationsPending();
-    error NothingInTransit(bytes32 validationId);
-    error ValidationNotStuck(bytes32 validationId, uint8 status);
-    error ValidationNotYetResolvable(bytes32 validationId, uint64 resolvableAt);
+    error TicketsStillReserved();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -105,27 +102,15 @@ library ErrorsLib {
     error OnlyBoundCompliance();
     /// @dev The bridged position on the wallet is smaller than the amount to move out of it.
     error InsufficientBridgedBalance(bytes wallet, uint256 balance, uint256 needed);
-    /// @dev A delegation-out or a recall moves location, never ownership: the native wallet and the satellite
-    ///  wallet must resolve to one identity, and that identity must exist.
+    /// @dev A bring home moves location, never ownership: the home wallet and the away wallet must resolve to one
+    ///  identity, and that identity must exist.
     error WalletsNotLinked(address nativeWallet, bytes wallet);
-    /// @dev The burn proof or the resend names another wallet, or the proof another chain, than the recall.
-    error RecallMismatch(uint256 recallId);
-    /// @dev The satellite proves it burned more than the recall instructed.
-    error RecallAmountExceeded(uint256 recallId, uint256 instructed, uint256 proven);
-    /// @dev The wallet already has a recall waiting for its proof; one at a time.
-    error RecallPending(bytes32 walletKey, uint256 recallId);
-    /// @dev The recall is not waiting for a proof: never issued, or already settled.
-    error RecallNotPending(uint256 recallId);
-    /// @dev The fields given for a resend are not the ones the delegation committed to.
-    error DelegationMismatch(uint256 delegationId);
-    /// @dev The chain's peer changed since the instruction went out; a resend never retargets.
+    /// @dev The away wallet already has a bring home open; one at a time.
+    error BringHomeAlreadyOpen(bytes32 walletKey, bytes32 ticketId);
+    /// @dev The chain's peer or receipt route changed since the half was first sent; a send never retargets.
     error PeerChanged(bytes32 chainKey);
-    /// @dev `resend` knows two kinds: 0, a delegation, and 1, a recall.
-    error UnknownResendKind(uint8 kind);
-    /// @dev The validation already holds an amount in transit; a burn leg moves it once.
-    error TransitAlreadyHeld(bytes32 validationId);
-    /// @dev The amount settled under the validation is not the one its burn leg put in transit.
-    error TransitAmountMismatch(bytes32 validationId, uint256 held, uint256 amount);
+    /// @dev The ticket already holds money on hold; a move puts its money on hold once.
+    error TransitAlreadyHeld(bytes32 ticketId);
 
     // ModularCompliance Errors
     error AddressNotATokenBoundToComplianceContract();
@@ -154,10 +139,10 @@ library ErrorsLib {
     error ApproversNotSet();
     error NotAnApprover(address caller);
     error NotTheNextApprover(address caller, address expected);
-    error UnknownApprovalRequest(bytes32 validationId);
-    error ApproversChanged(bytes32 validationId);
-    error NotFullyApproved(bytes32 validationId);
-    error AlreadyFullyApproved(bytes32 validationId);
+    error UnknownApprovalRequest(bytes32 ticketId);
+    error ApproversChanged(bytes32 ticketId);
+    error NotFullyApproved(bytes32 ticketId);
+    error AlreadyFullyApproved(bytes32 ticketId);
     error ExpiryInPast(uint64 expiry);
     error TransferNotApproved(address from, address to, uint256 amount);
 
@@ -233,21 +218,18 @@ library ErrorsLib {
     // TREXRegistry Errors
     error Deprecated();
 
-    // TransferValidation Errors
+    // Tickets Errors
     /// @dev A `SPENDER` module refused the spender named on the requested validation.
     error ValidationSpenderRefused(bytes spender);
-    /// @dev A validity or reconciliation window must be positive.
+    /// @dev A window must be positive: the one asks are counted over, or a volume rule module's window.
     error ZeroDuration();
-    /// @dev Issuance involving this chain is paused, by the manager or by a late reconciliation.
-    error ValidationIssuancePaused(bytes32 chainKey);
     /// @dev The token is paused: no validation is issued, approved into issuance or resent until it is unpaused,
-    ///  none that may have a leg in flight is discarded or resolved, and a parked leg, like a delivered one, is
-    ///  settled only once it is unpaused.
+    ///  none whose receipt may be in flight is cancelled, and a waiting receipt is applied only once it is unpaused.
     error TokenPaused();
     /// @dev Issuance needs a validity window; none was configured.
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
-    error ReconciliationWindowNotSet(bytes32 chainKey);
+    error WaitingTimeNotSet(bytes32 chainKey);
     /// @dev The requested range is inverted.
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     /// @dev The balance cap, the modules or the clamp left no amount to authorize.
@@ -256,54 +238,105 @@ library ErrorsLib {
     error NotAuthorizedForWallet(address caller, bytes wallet);
     /// @dev `from` has no identity, or `to` is not eligible for new activity.
     error UnverifiedWallet(bytes wallet);
-    /// @dev `from` lives on the reference chain: no satellite holds that position, so none can execute it.
-    error SenderNotOnSatellite(bytes wallet);
-    /// @dev Only a validation stored `AwaitingApproval` can be answered; `status` is the one found instead.
-    error ValidationNotAwaitingApproval(bytes32 validationId, uint8 status);
+    /// @dev Both wallets are home wallets: that is a plain transfer, not a move between chains.
+    error NotACrossChainMove();
+    /// @dev Only a validation stored `WaitingForApproval` can be answered; `status` is the one found instead.
+    error ValidationNotAwaitingApproval(bytes32 ticketId, uint8 status);
     /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
     error NotTheApprovalModule(address caller);
-    /// @dev A leg can be sent again while the validation is stored `Pending`, or, the recipient's leg only, while
-    ///  it is `AwaitingMint`; `status` is the `ValidationStatus` found instead.
-    error ValidationNotResendable(bytes32 validationId, uint8 status);
-    /// @dev The deadline for a resend has passed: `expiry` while `Pending`, since past it no satellite may execute;
-    ///  `releaseAt` once the burn landed, so the resent leg cannot land after the pair was resolved.
-    error ValidationExpired(bytes32 validationId, uint64 deadline);
-    /// @dev `chainKey` is neither the sender's chain nor, on two legs, the recipient's.
-    error ChainNotPartOfValidation(bytes32 validationId, bytes32 chainKey);
-    /// @dev The supplied `to` and `spender` do not rebuild the hash issued under this id. The bound token is part
-    ///  of the hash too, so a compliance bound to another token since the issuance gets this for every old id.
-    error ValidationBodyMismatch(bytes32 validationId);
+    /// @dev A ticket can be sent again while it is stored `Open`; `status` is the `TicketStatus` found instead.
+    error ValidationNotResendable(bytes32 ticketId, uint8 status);
+    /// @dev The approver answered at or after `validUntil`, past which no away token may execute.
+    error ValidationExpired(bytes32 ticketId, uint64 deadline);
+    /// @dev `chainKey` is not the sender's chain, the only one a ticket goes to.
+    error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
+    /// @dev The supplied `to` or `spender` is not the one the ticket was asked with: the ticket recorded under this
+    ///  id keeps the key of the first and the second itself.
+    error ValidationBodyMismatch(bytes32 ticketId);
     /// @dev The id was never issued by this compliance.
-    error UnknownValidation(bytes32 validationId);
-    /// @dev `keccak256(canonicalKey(from), salt)` is already recorded: the same request was sent twice, or the
-    ///  salt was reused for another movement out of the same wallet.
-    error ValidationAlreadyRequested(bytes32 validationId);
-    /// @dev No leg is parked under this id for this chain, or nothing is issued under the id yet.
-    error ParkedLegNotSettleable(bytes32 validationId, bytes32 chainKey);
-    /// @dev A leg `chainKey` reported for this validation is parked: it is settled first, so that the validation is
-    ///  not discarded over a report this chain already holds.
-    error ParkedLegAwaitsSettlement(bytes32 validationId, bytes32 chainKey);
-    /// @dev Only a stored `Pending` validation can be discarded; `status` is the `ValidationStatus` found instead.
-    error ValidationNotDiscardable(bytes32 validationId, uint8 status);
-    /// @dev The validation's release deadline has not passed yet.
-    error ValidationNotReleasable(bytes32 validationId, uint64 releaseAt);
-    /// @dev Between `releaseAt` and the end of the second window only the keeper may discard; `publicAt` is when
-    ///  anyone may.
-    error ValidationNotPubliclyDiscardable(bytes32 validationId, uint64 publicAt);
-    /// @dev The second leg of a cross-chain validation does not repeat the first one's amount.
-    error SettlementAmountMismatch(bytes32 validationId, uint256 expected, uint256 amount);
+    error UnknownTicket(bytes32 ticketId);
+    /// @dev The id of the whole request is already recorded: the same request, salt included, was asked twice.
+    error TicketAlreadyWritten(bytes32 ticketId);
+    /// @dev No receipt waits under this half with the body given, or its ticket is not sent yet.
+    error NoWaitingReceipt(bytes32 halfKey);
+    /// @dev A waiting receipt is refused by hand only while its away chain is blocked.
+    error AwayChainNotBlocked(bytes32 chainKey);
+    /// @dev A receipt `chainKey` sent for this ticket waits here: it is applied first, so that the ticket is not
+    ///  cancelled over a receipt this chain already holds.
+    error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
+    /// @dev Only a stored `Open` validation can be discarded; `status` is the `TicketStatus` found instead.
+    error TicketNotCancellable(bytes32 ticketId, uint8 status);
+    /// @dev The ticket may not be cancelled yet: no ask for its receipt has gone unanswered for one waiting time.
+    ///  `dueAt` is the earliest the cancel can come, once such an ask is out.
+    error CancelNotDue(bytes32 ticketId, uint64 dueAt);
+    /// @dev The ticket was already asked for its receipt the most times allowed.
+    error NoAsksLeft(bytes32 ticketId);
+    /// @dev The next ask for the ticket's receipt, or the next send of its second half, is due only at `dueAt`.
+    error SendNotDue(bytes32 ticketId, uint64 dueAt);
+    /// @dev The ticket owes no second half now: it holds no money with a destination, or its latest half was sent
+    ///  the most times allowed and is waiting for its receipt.
+    error SecondHalfNotOwed(bytes32 ticketId);
+    /// @dev The ticket's money on hold already had the most new halves allowed; a human ends it.
+    error NoNewHalfLeft(bytes32 ticketId);
+    /// @dev The money on hold under `laterTicketId` still carries uncounted credit of the one under `ticketId`: the
+    ///  earlier one is not cancelled before the later one gives it back, and the later one is not taken before the
+    ///  earlier one is.
+    error LaterHoldStillCarries(bytes32 ticketId, bytes32 laterTicketId);
+    /// @dev The receipt held under `ticketId` moved an amount the ask mined again does not allow, or echoed a maximum
+    ///  above what was asked or above the away chain's per-ticket cap: the ask does not take it.
+    error HeldReceiptBreaksItsTerms(bytes32 ticketId);
+    /// @dev The block read from the closed away chain is at `awayClockTime` on that chain's clock, before `validUntil`:
+    ///  the half or the ticket of `ticketId` could still be executed there, so close by hand does not decide yet.
+    error AwayClockBeforeValidUntil(bytes32 ticketId, uint64 awayClockTime, uint64 validUntil);
+    /// @dev Close by hand is only for an away chain whose receipt route is closed or whose bridge is distrusted:
+    ///  `chainKey` still delivers receipts.
+    error ReceiptRouteNotClosed(bytes32 chainKey);
+    /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
+    error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
+    /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor
+    ///  measured for that chain.
+    error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
+    /// @dev A validity window must be above the floor measured for every away chain and at most the longest allowed.
+    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
+    /// @dev New asks are paused for the whole token; receipts still land.
+    error AsksPaused();
+    /// @dev An approval module is bound or removed only while asks are paused for the whole token: a module bound in a
+    ///  home block a reorg drops would leave one fork's tickets waiting for approval and the other's not.
+    error AsksNotPaused();
+    /// @dev The identity asked as many times as it may in the current window.
+    error AskLimitReached(address identity);
+    /// @dev The identity already has as many tickets waiting for approval or open as it may.
+    error TooManyOpenTickets(address identity);
+    /// @dev The asked maximum is below the smallest amount one may ask to move.
+    error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
+    /// @dev The asked maximum is above what the sending wallet has free: the id is built from the asked maximum, so it
+    ///  is refused rather than narrowed.
+    error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);
+    /// @dev The per-ticket cap toward `chainKey` is lowered while a ticket sent under the higher cap may still be
+    ///  executed: an honest receipt of it would then block that away chain. Allowed from `allowedAt`.
+    error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
-    error ChainInboundPaused(bytes32 chainKey);
+    error AwayChainBlocked(bytes32 chainKey);
+    /// @dev The route or peer of `chainKey` changed less than four waiting times ago: a change now would drop the
+    ///  former pair while receipts sent on it may still be on their way. Allowed from `allowedAt`.
+    error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
+    /// @dev The peer of `chainKey` was replaced as hostile: asks, ticket sends and cancels for it wait until `endsAt`.
+    error HostileChangeNotOver(bytes32 chainKey, uint64 endsAt);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
-    /// @dev `gateway` would be both the fast and the final route of `chainKey`.
-    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
-    /// @dev `gateway` is the fast route of `chainKey`, which carries validations out and nothing in.
-    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
-    error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
-    error GatewayNotTrusted(address gateway);
+    error BridgeNotOnRoute(address gateway, bytes32 chainKey);
+    error BridgeNotTrusted(address gateway);
+    /// @dev `bridge` is not recorded as a receipt bridge, the only kind a receipt route may use.
+    error NotAReceiptBridge(address bridge);
+    /// @dev `bridge` is not recorded as a ticket bridge, the only kind a ticket route may use.
+    error NotATicketBridge(address bridge);
+    /// @dev `bridge` was distrusted, and a distrusted bridge is never trusted again.
+    error BridgeDistrusted(address bridge);
+    /// @dev `bridge` already has its one record; a bridge that changes is a new bridge.
+    error BridgeAlreadyRecorded(address bridge);
+    /// @dev The receiving policy of `bridge` admits messages from `chainKey` before that chain's full finality.
+    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
@@ -312,6 +345,5 @@ library ErrorsLib {
     error SenderNotCompliance(address sender);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
     error UnsupportedMessageVersion(uint8 messageVersion);
-    error ValidationAlreadyRouted(bytes32 validationId, bytes32 chainKey, address gateway);
 
 }

@@ -65,80 +65,115 @@ interface ITREXMessaging {
 
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
-    event RouteSet(bytes32 indexed chainKey, address indexed gateway);
-    event FastRouteSet(bytes32 indexed chainKey, address indexed gateway);
-    event PeerSet(bytes32 indexed chainKey, bytes peer);
-    event ValidationRoutePinned(bytes32 indexed validationId, bytes32 indexed chainKey, address gateway);
-    event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
-    event InboundPaused(bytes32 indexed chainKey);
-    event InboundUnpaused(bytes32 indexed chainKey);
-    event BurnProofReceived(
-        bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
+    event ReceiptRouteSet(
+        bytes32 indexed chainKey, address indexed bridge, uint64 awayChainSelector, bytes awayReceiptBridge
     );
+    event ReceiptRouteClosed(bytes32 indexed chainKey);
+    event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event PeerSet(bytes32 indexed chainKey, bytes peer);
+    event FormerRouteKept(bytes32 indexed chainKey, address indexed bridge, bytes32 peerKey, uint64 acceptedUntil);
+    event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
+    event HalfPinned(bytes32 indexed halfKey, bytes32 indexed chainKey, address gateway);
+    event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
 
-    error ChainInboundPaused(bytes32 chainKey);
+    error AwayChainBlocked(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
-    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
-    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
-    error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
-    error GatewayNotTrusted(address gateway);
+    error BridgeNotOnRoute(address gateway, bytes32 chainKey);
+    error NotAReceiptBridge(address bridge);
+    error NotATicketBridge(address bridge);
+    error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
+    error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
     error MessageAlreadyReceived(address gateway, bytes32 receiveId);
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error ValidationAlreadyRouted(bytes32 validationId, bytes32 chainKey, address gateway);
     error UnsupportedMessageVersion(uint8 messageVersion);
 
     error InteroperableAddressParsingError(bytes);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
 
-    /// @dev Routes this token's traffic to and from a chain through `gateway`.
+    /// @dev Sets the receipt route of an away chain: the receipt bridge that carries this token's money messages
+    /// (move out, bring home) to that chain at full finality, and every receipt from it into this token.
+    ///
+    /// The token asks `bridge` for its receiving policy toward the away chain's receipt bridge, here and again on
+    /// every receipt, and requires full finality: on CCIP the sending bridge picks a message's finality and only
+    /// the receiving policy checks it, so the token reads that policy rather than a label. A receipt route is
+    /// never set to zero; `closeReceiptRoute` closes it. Changing the bridge is one call to this setter.
+    ///
+    /// A change of an open route is a planned change, made on home first: the route and peer the chain had are kept
+    /// as its former pair and taken for every receipt during four waiting times of the away chain (read from the
+    /// compliance), so the receipts the away token sends before it switches still land. A hostile peer is replaced
+    /// with `replaceHostilePeer` instead.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `gateway` must be registry-trusted or zero; otherwise reverts with `GatewayNotTrusted`.
+    /// - `bridge` must be recorded as a receipt bridge in the registry; otherwise reverts with `NotAReceiptBridge`.
+    ///   A ticket bridge, a distrusted bridge and zero all fail this.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
+    /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
+    ///   only; otherwise reverts with `ReceiptBridgeNotFullFinality`.
+    /// - While the route is open, the last planned change of the chain's route or peer must be four waiting times
+    ///   old; otherwise reverts with `RouteChangedTooRecently`, since this change would drop the former pair.
     ///
-    /// Emits `ChainRegistered` on first sight of the prefix, then `RouteSet`.
+    /// Emits `ChainRegistered` on first sight of the prefix, `FormerRouteKept` when the route was open, then
+    /// `ReceiptRouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
-    /// @param gateway The trusted gateway to route through, or zero to close the chain: nothing is sent to
-    /// or accepted from it, settlements of validations already sent included, until a route is set again.
-    function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
+    /// @param bridge The receipt bridge on this chain.
+    /// @param awayChainSelector The away chain's CCIP selector, as `bridge`'s receiving policy knows it.
+    /// @param awayReceiptBridge The bridge on the away chain that sends the receipts, as CCIP reports the sender
+    /// (`abi.encode(address)` on EVM).
+    function setReceiptRoute(
+        bytes2 chainType,
+        bytes calldata chainReference,
+        address bridge,
+        uint64 awayChainSelector,
+        bytes calldata awayReceiptBridge
+    ) external;
 
-    /// @dev Routes this token's compliance validations to a chain through `gateway`, a gateway that relays ahead
-    /// of the chain's finality, while everything else keeps the final route set by `setRoute`.
+    /// @dev Closes the receipt route of `chainKey`: nothing is sent to that away chain and no receipt is taken from
+    /// it, receipts of halves already sent included, until a receipt route is set again. While it is closed no
+    /// ticket toward that chain is cancelled, since its receipt may still be on its way; close by hand stays the
+    /// way out.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The receipt route must be set; otherwise reverts with `ChainNotOpen`.
+    ///
+    /// Emits `ReceiptRouteClosed`.
+    /// @param chainKey The away chain whose receipt route is closed.
+    function closeReceiptRoute(bytes32 chainKey) external;
+
+    /// @dev Sets the ticket route of an away chain: a ticket bridge that relays tickets ahead of that chain's
+    /// finality, while everything else keeps the receipt route.
     ///
     /// The two routes of a chain split its traffic by what a reorg can cost:
-    /// - the fast route carries validations out, and only validations. A validation moves nothing on its own.
-    /// - the final route carries mint and recall instructions out, and is the only route settlements and burn
-    ///   proofs are taken from: a message delivered by the fast route is refused with `GatewayIsFastRoute`.
+    /// - the ticket route carries tickets out, and only tickets. A ticket moves nothing on its own.
+    /// - the receipt route carries money messages out and is the only route receipts are taken from. A ticket
+    ///   bridge never delivers to this token: the token takes deliveries from receipt bridges only.
     ///
-    /// A validation goes out on the fast route when it is set and still trusted, otherwise on the final route.
-    /// The chain must be open on its final route either way, and the validation's leg is pinned to that final
-    /// route, which its settlement must come back through (see `pinnedRouteFor`). The Lite on that chain must
-    /// therefore send its settlements through its final route, not back through the gateway that delivered the
-    /// validation.
+    /// A ticket goes out on the ticket route when it is set and still trusted, otherwise on the receipt route.
+    /// The chain must be open on its receipt route either way, and the half is pinned to that receipt route,
+    /// which its receipt must come back through (see `pinOf`). The away token on that chain must therefore send
+    /// its receipts through its receipt route, not back through the bridge that delivered the ticket.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `gateway` must be registry-trusted or zero; otherwise reverts with `GatewayNotTrusted`.
-    /// - `gateway` must not be the chain's final route; otherwise reverts with `FastRouteIsFinalRoute`. `setRoute`
-    ///   refuses the chain's fast route the same way.
+    /// - `bridge` must be recorded as a ticket bridge in the registry, or zero; otherwise reverts with
+    ///   `NotATicketBridge`. A bridge has one record, so a receipt bridge of any away chain is refused.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
     ///
-    /// Emits `ChainRegistered` on first sight of the prefix, then `FastRouteSet`.
+    /// Emits `ChainRegistered` on first sight of the prefix, then `TicketRouteSet`.
     /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
     /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
-    /// @param gateway The trusted gateway to send validations through, or zero to send them on the final route.
-    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
+    /// @param bridge The ticket bridge to send tickets through, or zero to send them on the receipt route.
+    function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) external;
 
     /// @dev Registers this token's Lite on `chainKey`: the outbound recipient and the only accepted
     /// inbound author for that chain.
@@ -150,57 +185,53 @@ interface ITREXMessaging {
     /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part, 20 bytes on EVM,
     ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
+    /// - While the route is open, the last planned change of the chain's route or peer must be four waiting times
+    ///   old; otherwise reverts with `RouteChangedTooRecently`.
     ///
-    /// A validation already sent keeps settling from the peer it was sent to; only what is sent after the
-    /// change goes to, and is accepted from, the new peer.
+    /// A planned change, made on home first. A half already sent keeps its receipt accepted from the peer it was
+    /// sent to, as well as from the new one; while the route is open, the former peer is also taken for every receipt
+    /// during four waiting times of the away chain. What is sent after the change goes to the new peer.
     ///
-    /// Emits `ChainRegistered` on first sight of the prefix, then `PeerSet`.
+    /// Emits `ChainRegistered` on first sight of the prefix, `FormerRouteKept` when the route is open, then `PeerSet`.
     /// @param chainKey The chain the peer is on.
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
-    /// @dev Stops taking messages from `chainKey`, or resumes. While paused, every settlement and burn proof
-    /// attributed to that chain reverts with `ChainInboundPaused` and stays deliverable, so the chain's reports
-    /// wait at the gateway; nothing else on the token is affected, native transfers and every other chain
-    /// included. The token sets it on its own when a chain reports a settlement or a burn proof for something
-    /// already accounted for, see `ISettlementHandler.Verdict`; lifting it is the pauser's, after an investigation.
+    /// @dev Replaces the peer of `chainKey` because the old one is hostile. No former pair is kept, a former pair of an
+    /// earlier planned change included: home cannot tell a receipt of the hostile peer from an honest one. For four
+    /// waiting times of the away chain the compliance takes no ask, sends no ticket and cancels nothing for it, so an
+    /// honest receipt still on the old pair cannot be beaten by a cancel; receipts still land. Never refused for a
+    /// recent change.
     ///
-    /// What waits with the chain: a delegation toward it is refused with `ChainInboundPaused`, so no more supply
-    /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
-    /// resends one, nor discards or resolves a validation still awaiting that chain's leg, since the held reports
-    /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
-    /// lands once the pause is lifted. To abandon a chain for good, distrust its gateway or close its route, then
-    /// lift the pause so its validations can be discarded and resolved.
+    /// Requirements: those of `setPeer` on the peer, and the role bound to this selector by the AccessManager.
     ///
-    /// Whether a refused delivery can be delivered again is the gateway's: this contract assumes an ERC-7786
-    /// gateway that keeps a reverted execution retryable. One that marks it failed for good loses the message,
-    /// and its author has to send it again.
-    ///
-    /// Requirements:
-    /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The chain must have been registered by a route or a peer; otherwise reverts with `ChainNotRegistered`.
-    ///
-    /// Emits `InboundPaused` or `InboundUnpaused` when the state changes; nothing when it does not.
-    /// @param chainKey The chain whose messages are refused or taken again.
-    /// @param pause True to refuse, false to take again.
-    function setInboundPaused(bytes32 chainKey, bool pause) external;
+    /// Emits `ChainRegistered` on first sight of the prefix, `PeerSet`, then `HostilePeerReplaced`.
+    /// @param chainKey The chain the peer is on.
+    /// @param peer The new Lite as an ERC-7930 address, or empty to restore the default.
+    function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external;
 
-    /// @dev The gateway registry this token resolves trust against. It is the network's, wired at
-    /// deployment, and no role on the token can move it: removing a gateway from the registry severs
+    /// @dev Until when asks, ticket sends and cancels for `chainKey` stay frozen after its peer was replaced as
+    /// hostile; the compliance reads it. Frozen while the time is before it.
+    /// @param chainKey The away chain to look up.
+    /// @return The end of the freeze, or zero when the peer was never replaced as hostile.
+    function hostileChangeEndsAt(bytes32 chainKey) external view returns (uint64);
+
+    /// @dev The bridge registry this token resolves trust against. It is the network's, wired at
+    /// deployment, and no role on the token can move it: distrusting a bridge in the registry severs
     /// every route through it, for every token.
     /// @return The registry address.
     function trustedGatewayRegistry() external view returns (address);
 
-    /// @dev The stored route for `chainKey`, not re-validated: the gateway may have been untrusted
+    /// @dev The stored receipt route for `chainKey`, not re-validated: the bridge may have been distrusted
     /// since. Use `isChainOpen` to know whether it can carry traffic.
     /// @param chainKey The chain to look up.
-    /// @return The routed gateway, or zero when the chain is closed.
-    function routeFor(bytes32 chainKey) external view returns (address);
+    /// @return The receipt bridge, or zero when the route is closed.
+    function receiptRouteFor(bytes32 chainKey) external view returns (address);
 
-    /// @dev The stored fast route for `chainKey`, not re-validated against the registry.
+    /// @dev The stored ticket route for `chainKey`, not re-validated against the registry.
     /// @param chainKey The chain to look up.
-    /// @return The gateway validations go out through, or zero when they use the final route.
-    function fastRouteFor(bytes32 chainKey) external view returns (address);
+    /// @return The ticket bridge tickets go out through, or zero when they use the receipt route.
+    function ticketRouteFor(bytes32 chainKey) external view returns (address);
 
     /// @dev The ERC-7930 prefix recorded for `chainKey`.
     /// @param chainKey The chain to look up.
@@ -214,26 +245,42 @@ interface ITREXMessaging {
     /// @return The peer as an ERC-7930 address, or empty when the chain cannot be addressed.
     function peerFor(bytes32 chainKey) external view returns (bytes memory);
 
-    /// @dev The final route of `chainKey` when a validation's leg went out toward it, snapshot at dispatch, even
-    /// when the leg itself travelled on the fast route. Settlements of that validation from that chain are
-    /// accepted from this gateway only, so a route switch affects new validations and never orphans a leg in
-    /// flight.
-    /// @param validationId The validation to look up.
-    /// @param chainKey The chain the leg was dispatched toward.
-    /// @return The pinned gateway, or zero when the leg never went out.
-    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) external view returns (address);
+    /// @dev The receipt route and the peer a half left through, written when it first left, even when the ticket
+    /// itself travelled on the ticket route. Its receipt is accepted from this pair, from the chain's current one,
+    /// or from the chain's former one during the window of a planned change.
+    /// @param halfKey The half to look up, see {MessageTypesLib-halfKeyOf}: the ticket id itself for the ticket,
+    /// the first half of its move.
+    /// @return bridge The pinned receipt bridge, or zero when the half never left.
+    /// @return peerKey The `keccak256` of the peer the half was sent to.
+    function pinOf(bytes32 halfKey) external view returns (address bridge, bytes32 peerKey);
 
-    /// @dev Whether `chainKey` is routed right now: a route, a peer, and a still-trusted gateway. Re-reads the
-    /// registry, so an emergency gateway removal closes every chain routed through it. The inbound pause is a
-    /// separate state, see `isInboundPaused`: a paused chain stays open for the instructions that still go out
-    /// while its deliveries are refused.
+    /// @dev Whether `chainKey` is routed right now: a receipt route, a peer, and a bridge still recorded as a
+    /// receipt bridge. Re-reads the registry, so distrusting a bridge closes every chain routed through it. A blocked
+    /// away chain is the compliance's, see `ITickets.isAwayChainBlocked`, and stays open here.
     /// @param chainKey The chain to check.
-    /// @return True when the chain has a route, a peer and a trusted gateway.
+    /// @return True when the chain has a receipt route, a peer and a receipt bridge.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
 
-    /// @dev Whether messages from `chainKey` are currently refused, see `setInboundPaused`.
-    /// @param chainKey The chain to check.
-    /// @return True while that chain's inbound is paused.
-    function isInboundPaused(bytes32 chainKey) external view returns (bool);
+    /// @dev Runs the route check a receipt passes at delivery again, for a receipt the compliance kept waiting:
+    /// `bridge` must still be a receipt bridge of the network, the away chain's receipt route must be open, the
+    /// pair must be the one the half was pinned to, the chain's current route and peer, or its former ones as long as
+    /// the receipt arrived inside the window of their planned change, and the bridge's receiving policy must still
+    /// admit that away chain at full finality only. A bridge distrusted, a route closed or changed, or a peer replaced
+    /// since the receipt arrived therefore refuses it; so does a hostile change, which drops the former pair.
+    ///
+    /// Reverts with `NotAReceiptBridge`, `ChainNotOpen`, `PeerChanged`, `BridgeNotOnRoute` or
+    /// `ReceiptBridgeNotFullFinality`; returns nothing when the receipt may be applied.
+    /// @param chainKey The away chain the receipt came from.
+    /// @param bridge The bridge that delivered it.
+    /// @param senderPeerKey The `keccak256` of the peer that sent it.
+    /// @param halfKey The half it answers, see {MessageTypesLib-halfKeyOf}.
+    /// @param arrivedAt When it was delivered: the former pair is taken if its window still ran then.
+    function checkReceiptOrigin(
+        bytes32 chainKey,
+        address bridge,
+        bytes32 senderPeerKey,
+        bytes32 halfKey,
+        uint64 arrivedAt
+    ) external view;
 
 }

@@ -65,7 +65,8 @@ import { IModule } from "./modules/IModule.sol";
 
 /// @title TransferContextLib
 /// @dev The three shapes a movement takes before a module sees it. One constructor per kind, each filled
-///  completely where it is built: a rule is asked the same struct whatever produced the movement.
+///  completely where it is built: a rule is asked the same struct whatever produced the movement. A move between
+///  chains is only ever built inside the compliance's own code, so the compliance is `address(this)`.
 library TransferContextLib {
 
     /// @dev A native movement: a transfer, a mint (zero `from`) or a burn (zero `to`), for `amount` exactly.
@@ -93,8 +94,9 @@ library TransferContextLib {
     }
 
     /// @dev A cross-chain validation being issued: a range the satellite will execute some amount inside.
+    ///  `fromChainKey` is the chain the money leaves, see {IModule-TransferContext}'s `data`.
     function issuance(
-        address compliance,
+        bytes32 fromChainKey,
         address fromIdentity,
         address toIdentity,
         bytes32 fromWallet,
@@ -102,8 +104,8 @@ library TransferContextLib {
         uint256 amountMin,
         uint256 amountMax,
         bytes memory spender
-    ) internal pure returns (IModule.TransferContext memory ctx) {
-        ctx.compliance = compliance;
+    ) internal view returns (IModule.TransferContext memory ctx) {
+        ctx.compliance = address(this);
         ctx.fromIdentity = fromIdentity;
         ctx.toIdentity = toIdentity;
         ctx.fromWallet = fromWallet;
@@ -113,28 +115,33 @@ library TransferContextLib {
         ctx.kind = MovementKindLib.CROSS_CHAIN;
         ctx.isIssuance = true;
         ctx.spender = spender;
+        ctx.data = abi.encode(fromChainKey);
     }
 
-    /// @dev A validation that settled: the amount a satellite actually executed, between two satellite wallets
-    ///  or landing on a native one, executed by the spender the validation names.
+    /// @dev A move between chains that is done: the amount that moved, between two away wallets or between an away
+    ///  wallet and a home wallet, executed by the spender the ticket names. `kind` is `CROSS_CHAIN` for a move out of
+    ///  an away wallet, `DELEGATION` for a home wallet's move out and `RECALL` for a bring home. `fromChainKey` is the
+    ///  chain the money left, see {IModule-TransferContext}'s `data`.
     function settlement(
-        address compliance,
+        bytes32 fromChainKey,
+        uint8 kind,
         address fromIdentity,
         address toIdentity,
         bytes32 fromWallet,
         bytes32 toWallet,
         uint256 amount,
         bytes memory spender
-    ) internal pure returns (IModule.TransferContext memory ctx) {
-        ctx.compliance = compliance;
+    ) internal view returns (IModule.TransferContext memory ctx) {
+        ctx.compliance = address(this);
         ctx.fromIdentity = fromIdentity;
         ctx.toIdentity = toIdentity;
         ctx.fromWallet = fromWallet;
         ctx.toWallet = toWallet;
         ctx.amountMin = amount;
         ctx.amountMax = amount;
-        ctx.kind = MovementKindLib.CROSS_CHAIN;
+        ctx.kind = kind;
         ctx.spender = spender;
+        ctx.data = abi.encode(fromChainKey);
     }
 
 }

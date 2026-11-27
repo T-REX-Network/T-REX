@@ -61,8 +61,8 @@ contract TokenLedgerAccessorsUnitTest is TokenBaseUnitTest {
         assertEq(token.balanceOf(user1), 0);
         assertEq(token.getFrozenTokens(user1), 0);
         assertEq(token.freeBalanceOf(user1), 0);
-        assertEq(token.bridgedBalanceOf(InteroperableAddress.formatEvmV1(SATELLITE_CHAIN, user1)), 0);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.awayBalanceOf(InteroperableAddress.formatEvmV1(SATELLITE_CHAIN, user1)), 0);
+        assertEq(token.totalAwayBalance(), 0);
         assertEq(token.totalSupply(), 0);
     }
 
@@ -94,27 +94,27 @@ contract TokenLedgerAccessorsUnitTest is TokenBaseUnitTest {
         token.mint(user1, 1000);
 
         assertEq(token.totalSupply(), 1000);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.totalAwayBalance(), 0);
     }
 
     function test_bridgedBalanceOf_ReadsZeroForAReferenceChainWallet() public view {
-        assertEq(token.bridgedBalanceOf(InteroperableAddress.formatEvmV1(block.chainid, user1)), 0);
+        assertEq(token.awayBalanceOf(InteroperableAddress.formatEvmV1(block.chainid, user1)), 0);
     }
 
     function test_bridgedBalanceOf_AcceptsANonEvmEnvelope() public view {
         bytes memory envelope = InteroperableAddress.formatV1(0x0002, hex"0102", new bytes(32));
-        assertEq(token.bridgedBalanceOf(envelope), 0);
+        assertEq(token.awayBalanceOf(envelope), 0);
     }
 
     function test_bridgedBalanceOf_RevertWhen_EnvelopeIsNotCanonical() public {
         bytes memory padded = abi.encodePacked(InteroperableAddress.formatEvmV1(SATELLITE_CHAIN, user1), hex"00");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
-        token.bridgedBalanceOf(padded);
+        token.awayBalanceOf(padded);
     }
 
     function test_bridgedBalanceOf_RevertWhen_EnvelopeIsEmpty() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, ""));
-        token.bridgedBalanceOf("");
+        token.awayBalanceOf("");
     }
 
 }

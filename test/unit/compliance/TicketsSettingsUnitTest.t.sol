@@ -43,148 +43,154 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
-/// @dev The COMPLIANCE_MANAGER surface of the validation layer: the five setters, their events and their
-///      guards, plus the late-reconciliation hook that pauses a chain on its own.
-contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
+/// @dev The settings of the validation layer: the COMPLIANCE_MANAGER's windows and the pauser's block of an away
+///      chain, with their events and their guards.
+contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
 
     bytes32 internal constant POLYGON = keccak256(abi.encodePacked(bytes2(0x0000), hex"89"));
     bytes32 internal constant OPTIMISM = keccak256(abi.encodePacked(bytes2(0x0000), hex"0a"));
 
-    // ==== .setDefaultValidityWindow Tests ====
+    // ==== .setValidityWindows Tests ====
 
-    function test_setDefaultValidityWindow_Success_WhenCalledByManager() public {
-        assertEq(mc.defaultValidityWindow(), 0);
+    function test_setValidityWindows_Success_WhenCalledByManager() public {
+        assertEq(mc.validityWindows().onTicketRoute, 0);
 
         vm.expectEmit(false, false, false, true, address(mc));
-        emit EventsLib.DefaultValidityWindowSet(1 hours);
-        mc.setDefaultValidityWindow(1 hours);
+        emit EventsLib.ValidityWindowsSet(15 minutes, 25 minutes);
+        mc.setValidityWindows(15 minutes, 25 minutes);
 
-        assertEq(mc.defaultValidityWindow(), 1 hours);
+        assertEq(mc.validityWindows().onTicketRoute, 15 minutes);
+        assertEq(mc.validityWindows().onReceiptRoute, 25 minutes);
     }
 
-    function test_setDefaultValidityWindow_RevertWhen_DurationIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroDuration.selector);
-        mc.setDefaultValidityWindow(0);
+    /// @notice A window of zero is not above the floor, which is zero while nothing was measured.
+    function test_setValidityWindows_reverts_when_aWindowIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidityWindowOutOfRange.selector, 0, 0, 1 days));
+        mc.setValidityWindows(0, 25 minutes);
     }
 
-    function test_setDefaultValidityWindow_RevertWhen_CallerIsNotManager() public {
+    function test_setValidityWindows_reverts_when_theCallerIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setDefaultValidityWindow(1 hours);
+        mc.setValidityWindows(15 minutes, 25 minutes);
     }
 
-    // ==== .setReconciliationWindow Tests ====
+    // ==== .setWaitingTime Tests ====
 
-    function test_setReconciliationWindow_Success_WhenCalledByManager() public {
+    function test_setWaitingTime_Success_WhenCalledByManager() public {
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ReconciliationWindowSet(POLYGON, 30 minutes);
-        mc.setReconciliationWindow(POLYGON, 30 minutes);
+        emit EventsLib.WaitingTimeSet(POLYGON, 95 minutes);
+        mc.setWaitingTime(POLYGON, 95 minutes);
 
-        assertEq(mc.reconciliationWindowOf(POLYGON), 30 minutes);
-        assertEq(mc.reconciliationWindowOf(OPTIMISM), 0);
+        assertEq(mc.waitingTimeOf(POLYGON), 95 minutes);
+        assertEq(mc.waitingTimeOf(OPTIMISM), 0);
     }
 
-    function test_setReconciliationWindow_RevertWhen_DurationIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroDuration.selector);
-        mc.setReconciliationWindow(POLYGON, 0);
+    /// @notice A waiting time is at least one hour, so zero is below the floor.
+    function test_setWaitingTime_reverts_when_theDurationIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WaitingTimeTooShort.selector, POLYGON, 0, 1 hours - 1));
+        mc.setWaitingTime(POLYGON, 0);
     }
 
-    function test_setReconciliationWindow_RevertWhen_CallerIsNotManager() public {
+    function test_setWaitingTime_reverts_when_theCallerIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setReconciliationWindow(POLYGON, 30 minutes);
+        mc.setWaitingTime(POLYGON, 95 minutes);
     }
 
-    // ==== .setIssuancePaused Tests ====
+    // ==== .blockAwayChain and .unblockAwayChain Tests ====
 
-    function test_setIssuancePaused_Success_WhenPausingAnOpenChain() public {
-        assertFalse(mc.isIssuancePaused(POLYGON));
+    function test_blockAwayChain_blocksOnlyThatChain() public {
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ValidationIssuancePaused(POLYGON);
-        mc.setIssuancePaused(POLYGON, true);
+        emit EventsLib.AwayChainBlockSet(POLYGON, true);
+        mc.blockAwayChain(POLYGON);
 
-        assertTrue(mc.isIssuancePaused(POLYGON));
-        assertFalse(mc.isIssuancePaused(OPTIMISM));
+        assertTrue(mc.isAwayChainBlocked(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(OPTIMISM));
     }
 
-    function test_setIssuancePaused_Success_WhenResumingAPausedChain() public {
-        mc.setIssuancePaused(POLYGON, true);
+    function test_unblockAwayChain_liftsTheBlock() public {
+        mc.blockAwayChain(POLYGON);
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.ValidationIssuanceUnpaused(POLYGON);
-        mc.setIssuancePaused(POLYGON, false);
+        emit EventsLib.AwayChainBlockSet(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
 
-        assertFalse(mc.isIssuancePaused(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
     }
 
-    /// @notice Setting the state a chain already has changes nothing and emits nothing, so a keeper can
-    ///         pause without first checking whether someone else already did.
-    function test_setIssuancePaused_Success_WhenTheStateIsAlreadyTheOneAsked() public {
-        mc.setIssuancePaused(POLYGON, true);
+    /// @notice Blocking a blocked chain, or unblocking an open one, changes nothing and emits nothing, so a pauser can
+    ///         block without first checking whether a bad receipt already did.
+    function test_blockAwayChain_changesNothing_whenTheStateIsAlreadyTheOneAsked() public {
+        mc.blockAwayChain(POLYGON);
 
         vm.recordLogs();
-        mc.setIssuancePaused(POLYGON, true);
+        mc.blockAwayChain(POLYGON);
         assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
-        assertTrue(mc.isIssuancePaused(POLYGON));
+        assertTrue(mc.isAwayChainBlocked(POLYGON));
 
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
         vm.recordLogs();
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
         assertEq(vm.getRecordedLogs().length, 0, "no event on a no-op");
-        assertFalse(mc.isIssuancePaused(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
     }
 
-    function test_setIssuancePaused_RevertWhen_PauserIsNotManager() public {
+    function test_blockAwayChain_reverts_when_theCallerHasNoRole() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, true);
+        mc.blockAwayChain(POLYGON);
     }
 
-    function test_setIssuancePaused_RevertWhen_ResumerIsNotManager() public {
-        mc.setIssuancePaused(POLYGON, true);
+    /// @notice The bound token has no door to the block any more: only the pauser blocks by hand.
+    function test_blockAwayChain_reverts_when_theBoundTokenCalls() public {
+        vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, token));
+        mc.blockAwayChain(POLYGON);
+
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
+    }
+
+    /// @notice Only the pauser lifts a block, whoever set it: a bad receipt blocks from inside `receiveReceipt`, and
+    ///         the lift is never automatic.
+    function test_unblockAwayChain_reverts_when_theCallerHasNoRole() public {
+        mc.blockAwayChain(POLYGON);
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, false);
+        mc.unblockAwayChain(POLYGON);
+        assertTrue(mc.isAwayChainBlocked(POLYGON), "the chain stays blocked until the pauser acts");
+    }
+
+    /// @notice The bound token blocks, it never unblocks.
+    function test_unblockAwayChain_reverts_when_theBoundTokenCalls() public {
+        mc.blockAwayChain(POLYGON);
+
+        vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, token));
+        mc.unblockAwayChain(POLYGON);
     }
 
     /// @notice OWNER alone does not reach the manager surface: the roles are distinct.
-    function test_setDefaultValidityWindow_RevertWhen_CallerIsOnlyOwner() public {
+    function test_setValidityWindows_reverts_when_theCallerIsOnlyOwner() public {
         address owner = makeAddr("OnlyOwner");
         _grantOwnerRole(owner);
 
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, owner));
-        mc.setDefaultValidityWindow(1 hours);
-    }
-
-    // ==== automatic pause Tests ====
-
-    /// @notice Only the manager lifts a pause, whoever set it. A late settlement that breached a rule closes
-    ///         the chain from inside `handleSettlement`; `LateReconciliation.t.sol` covers that path end to
-    ///         end, and this pins that the lift is a manager action and not automatic.
-    function test_setIssuancePaused_Success_WhenTheManagerLiftsAnAutomaticPause() public {
-        mc.setIssuancePaused(POLYGON, true);
-        assertTrue(mc.isIssuancePaused(POLYGON));
-
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setIssuancePaused(POLYGON, false);
-        assertTrue(mc.isIssuancePaused(POLYGON), "issuance stays closed until the manager acts");
-
-        mc.setIssuancePaused(POLYGON, false);
-        assertFalse(mc.isIssuancePaused(POLYGON));
+        mc.setValidityWindows(15 minutes, 25 minutes);
     }
 
     // ==== .supportsInterface and storage Tests ====
 
     function test_supportsInterface_Success_WhenQueriedForITransferValidation() public view {
-        assertTrue(mc.supportsInterface(type(ITransferValidation).interfaceId));
+        assertTrue(mc.supportsInterface(type(ITickets).interfaceId));
     }
 
     /// @notice The compliance advertises the ledger, which is how a module finds the four numbers it reads.
@@ -199,16 +205,16 @@ contract TransferValidationSettingsUnitTest is ModularComplianceBaseUnitTest {
         bytes32 slot = keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1))
             & ~bytes32(uint256(0xff));
 
-        mc.setDefaultValidityWindow(1 hours);
+        mc.setValidityWindows(15 minutes, 25 minutes);
 
-        assertEq(uint256(vm.load(address(mc), slot)), 1 hours);
+        assertEq(uint256(vm.load(address(mc), slot)), 15 minutes | (25 minutes << 64));
     }
 
     function test_views_Success_WhenNothingWasIssued() public view {
-        ITransferValidation.Validation memory record = mc.validationOf(bytes32(uint256(1)));
-        assertEq(record.hash, bytes32(0));
-        assertEq(record.expiry, 0);
-        assertEq(record.releaseAt, 0);
+        ITickets.Ticket memory record = mc.ticketOf(bytes32(uint256(1)));
+        assertEq(record.askBlockHash, bytes32(0));
+        assertEq(record.validUntil, 0);
+        assertEq(record.waitingTime, 0);
     }
 
 }

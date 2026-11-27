@@ -65,54 +65,56 @@ import { ErrorsLib } from "./ErrorsLib.sol";
 
 /**
  * @title MessageTypesLib
- * @dev The protocol's ERC-7786 message surface: the five types that cross the interop boundary, the
+ * @dev The protocol's ERC-7786 message surface: the four types that cross the interop boundary, the
  * bodies they carry, and the envelope that wraps them.
  */
 library MessageTypesLib {
 
-    /// @dev The five types that cross the interop boundary, numbered from zero as their wire codes.
+    /// @dev The four types that cross the interop boundary, numbered from zero as their wire codes.
     /// Appending a member is the only backward-compatible way to grow the surface.
     enum Message {
-        /// Outbound. A `ComplianceValidation` issued on the reference chain for a satellite to execute.
-        COMPLIANCE_VALIDATION,
-        /// Outbound. A delegation-out instruction to mint on a satellite. Resent unchanged under its `delegationId`;
-        /// the Lite mints once per id.
-        MINT_INSTRUCTION,
-        /// Outbound. A forced-recall instruction to burn on a satellite. Answered by a `BURN_PROOF` under its id.
-        RECALL_INSTRUCTION,
-        /// Inbound. A satellite reporting that a validation's leg executed.
-        SETTLEMENT_NOTIFICATION,
-        /// Inbound. A satellite's proof that it burned a position, so a recall can credit the holder.
-        BURN_PROOF
+        /// Outbound. A `TicketMessage` issued on the reference chain for a satellite to execute.
+        TICKET,
+        /// Outbound. Home's order to an away chain to mint, the second half of a move into it. The away token mints
+        /// once per half, strictly before the half's valid until, and answers with a `RECEIPT` for that half.
+        MOVE_OUT,
+        /// Outbound. Home's order to an away chain to burn a wallet's tokens, the half of a bring home. The away token
+        /// burns once per half, strictly before the half's valid until, and answers with a `RECEIPT` for that half.
+        BRING_HOME,
+        /// Inbound. An away chain reporting what it did with one half of a move or a bring home.
+        RECEIPT
     }
 
-    /// @dev The envelope version this library serves. A payload carrying any other version is refused. The body
-    ///  shapes changed while no token or Lite was live (the id became salt-derived and the settlement gained the
-    ///  hash of the body executed), so the version stayed 1. Once anything is live, a change to a body's shape bumps
-    ///  it, so a peer on the old shape refuses the new one instead of decoding it wrong.
-    uint8 internal constant VERSION = 1;
+    /// @dev The envelope version this library serves. A payload carrying any other version is refused, so a peer on
+    ///  another shape refuses a message instead of decoding it wrong. Version 2: the ticket id is built from the whole
+    ///  request, the TICKET and the RECEIPT carry the ask block hash, the RECEIPT echoes the copy it answers, the
+    ///  second halves carry their own valid until, and a bring home is answered by a RECEIPT.
+    uint8 internal constant VERSION = 2;
 
     /// @dev The ERC-7930 chain type of every EVM chain, where CREATE3 puts a Lite at its token's own address.
     bytes2 internal constant EVM_CHAIN_TYPE = 0x0000;
 
-    /// @dev EIP-712 type hash of the terms of a `ComplianceValidation`, see {hashValidation}:
-    ///  keccak256("ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,
-    ///  uint256 amountMax,address token)")
-    bytes32 internal constant COMPLIANCE_VALIDATION_TYPEHASH =
-        0xafd18733126d2336f2b9ca999b9c8ad036ae2ed6021708f89e163f1c7fdce926;
+    /// @dev Why a receipt says what it says. A receipt of amount zero is either an executed ticket that moved
+    ///  nothing or a ticket never executed, and home must tell the two apart.
+    enum ReceiptAnswer {
+        /// The away token executed the ticket copy it echoes, for `amount`, which may be zero.
+        Executed,
+        /// The ticket was never executed and its valid until has passed: it never will be. `amount` is zero.
+        Expired,
+        /// The ticket was never executed and its valid until has not passed: it still may be. `amount` is zero.
+        StillOpen
+    }
 
-    /// @dev Body of a `COMPLIANCE_VALIDATION`: the reference chain's authorization for one movement, the only thing
-    /// a satellite executes a transfer against.
-    /// Validations expire; settlements never do.
-    struct ComplianceValidation {
-        /// `keccak256(abi.encode(canonicalKey(from), salt))`, the salt supplied by the requester: a function of the
-        /// request and never of the reference chain's ordering or clock, so a reorg that re-includes or drops the
-        /// issuance leaves the id the satellite executed under unchanged. Single-use: consumed on the satellite, keys
-        /// the record on T-REX.
-        bytes32 validationId;
-        /// The requester's nonce the id was derived from. Carried so that the satellite chain, where the body is
-        /// final, holds what it takes to send the request again should a reorg drop its issuance: an agent reads
-        /// it off the Lite and re-issues the same id. Not part of {hashValidation}: the id commits to it.
+    /// @dev Body of a `TICKET`: home's authorization for one move, the only thing an away token executes a
+    /// transfer against. Tickets expire; receipts never do.
+    struct TicketMessage {
+        /// Built from the whole request, see {TicketLib-ticketIdOf}: a function of what was asked and never of
+        /// home's ordering or clock, so the same ask mined again after a reorg keeps its id. Single-use: consumed on
+        /// the away chain, keys the record at home.
+        bytes32 ticketId;
+        /// The requester's nonce the id was built from. Carried so that the away chain, where the ticket is final,
+        /// holds what it takes to ask again should a reorg drop the ask: an agent reads it off the away token and
+        /// asks again under the same id.
         bytes32 salt;
         /// ERC-7930 sender. Its chain reference against `to`'s decides same-chain transfer or burn-and-mint.
         bytes from;
@@ -120,70 +122,77 @@ library MessageTypesLib {
         bytes to;
         /// ERC-7930 address allowed to execute through `transferFrom`; empty means `from` alone.
         bytes spender;
-        /// Inclusive lower bound, caller-proposed and engine-narrowed.
+        /// Inclusive lower bound, as asked.
         uint256 amountMin;
-        /// Inclusive upper bound, caller-proposed, engine-narrowed, capped at `from`'s recorded balance so no
-        /// settlement carries an amount the ledger cannot absorb, and none is ever rejected to protect it. Tokens
-        /// invented on a satellite obtain no validation only if the Lite consumes one per transfer and the bridged
-        /// ledger is correct.
+        /// Inclusive upper bound, the asked maximum narrowed by home, capped at `from`'s recorded balance so no
+        /// receipt carries an amount the ledger cannot absorb. Tokens invented on an away chain obtain no ticket
+        /// only if the away token consumes one per transfer and the away balance is correct.
         uint256 amountMax;
-        /// The asset's reference-chain address, its canonical identifier everywhere.
+        /// The upper bound as asked, before home narrowed it. Part of the id, so a copy mined again after a reorg
+        /// keeps the id even when home narrows it to another `amountMax`.
+        uint256 requestedMax;
+        /// The asset's home address, its canonical identifier everywhere.
         address token;
-        /// Absolute timestamp: the satellite executes strictly before it.
-        uint64 expiry;
-        /// Seconds T-REX keeps the slot reserved past `expiry` for the reconciliation.
-        uint64 reconciliationWindow;
+        /// Absolute timestamp: the away token executes strictly before it.
+        uint64 validUntil;
+        /// Names the copy home wrote, see {TicketLib-askBlockHashOf}. Two copies of one ask mined in two blocks share
+        /// the id and differ here.
+        bytes32 askBlockHash;
     }
 
-    /// @dev Body of a `SETTLEMENT_NOTIFICATION`: a satellite reporting that one leg of a validation executed.
-    struct SettlementNotification {
-        bytes32 validationId;
-        /// ERC-7930; empty on the mint leg.
+    /// @dev Body of a `RECEIPT`: an away chain reporting what it did with one ticket copy.
+    struct ReceiptMessage {
+        bytes32 ticketId;
+        /// ERC-7930 wallet the tokens left.
         bytes from;
-        /// ERC-7930; empty on the burn leg.
+        /// ERC-7930 wallet the tokens reached.
         bytes to;
         uint256 amount;
-        /// {hashValidation} of the body the Lite executed under. Evidence, not a gate: the reference chain judges the
-        /// leg on its wallets and amount, and reads the hash to tell a body it never canonically issued (a reorg
-        /// orphaned it) from a Lite that broke a rule on the body it did issue.
-        bytes32 hash;
+        /// The `askBlockHash` of the ticket copy the away token holds: which copy home wrote this receipt answers.
+        bytes32 askBlockHash;
+        /// The `amountMax` of that copy.
+        uint256 seenMax;
+        /// The `validUntil` of that copy.
+        uint64 seenValidUntil;
+        /// Which half of the move the receipt answers: 0 for the away token's execution of a ticket, the half's number
+        /// for a move out or a bring home. A move out's receipt leaves `from` empty and names the minted wallet in `to`;
+        /// a bring home's names the burned wallet in `from` and leaves `to` empty.
+        uint8 half;
+        /// Why the receipt says what it says, so a zero receipt says why it is zero.
+        ReceiptAnswer answer;
     }
 
-    /// @dev Body of a `MINT_INSTRUCTION`: the reference chain already burned `amount` of `holder`'s native balance
-    /// and credited `toWallet`'s bridged position, so the satellite mints the same amount there, once per
-    /// `delegationId`. A resend carries the same body byte for byte.
-    struct MintInstruction {
-        /// Unique per token, sequential from 1: the Lite mints at most once per id.
-        uint256 delegationId;
-        /// ERC-7930 satellite wallet to mint to, linked to the same identity as `holder`.
+    /// @dev Body of a `MOVE_OUT`: the second half of a move. Home holds `amount` on hold for `ticketId`, so the away
+    /// token mints it to `toWallet` once per half, strictly before `validUntil` on its own clock. A half that
+    /// arrives at or after its valid until, never executed, is answered with a stored zero receipt (`Expired`) and is
+    /// dead. A half sent again carries the same body byte for byte.
+    struct MoveOutMessage {
+        /// The ticket of the move: the forward move's or the return's.
+        bytes32 ticketId;
+        /// Which second half this is, from 1. With the ticket id it keys the half, see {halfKeyOf}.
+        uint8 half;
+        /// ERC-7930 wallet on the away chain to mint to.
         bytes toWallet;
         uint256 amount;
-        /// Reference-chain wallet the tokens left. Informational for the satellite.
-        address holder;
+        /// The half's own valid until: its first send time plus the waiting time of the chain it goes to.
+        uint64 validUntil;
     }
 
-    /// @dev Body of a `RECALL_INSTRUCTION`: an order to burn up to `amount` of `wallet` on the satellite and answer
-    /// with a `BurnProof` under the same `recallId`. A resend carries the same body byte for byte.
-    struct RecallInstruction {
-        /// Unique per token, sequential from 1: keys the pending recall the proof must answer.
-        uint256 recallId;
-        /// ERC-7930 satellite wallet to burn.
+    /// @dev Body of a `BRING_HOME`: the half of a bring home. The away token burns the smaller of `amount` and what
+    /// `wallet` holds, once per half, strictly before `validUntil` on its own clock, and answers with a `RECEIPT` for
+    /// that half, of the amount it burned. A half that arrives at or after its valid until, never executed, is answered
+    /// with a stored zero receipt (`Expired`) and is dead. A half sent again carries the same body byte for byte.
+    struct BringHomeMessage {
+        /// The bring home's ticket.
+        bytes32 ticketId;
+        /// Which half this is, from 1. With the ticket id it keys the half, see {halfKeyOf}.
+        uint8 half;
+        /// ERC-7930 wallet on the away chain to burn from.
         bytes wallet;
-        /// Upper bound: the satellite may burn less when a validation moved part of the position first.
+        /// The most the away token burns.
         uint256 amount;
-        /// Reference-chain wallet the token will credit. Informational for the satellite.
-        address nativeWallet;
-    }
-
-    /// @dev Body of a `BURN_PROOF`: a satellite's proof that it burned a position under a recall instruction. The
-    /// token credits the native wallet the instruction recorded, never one the proof could name.
-    struct BurnProof {
-        /// The recall this proof answers.
-        uint256 recallId;
-        /// ERC-7930 wallet the satellite burned. Must be the instructed one.
-        bytes burnedWallet;
-        /// What was burned: at most the instructed amount, possibly zero.
-        uint256 amount;
+        /// The half's own valid until: its first send time plus the waiting time of the wallet's chain.
+        uint64 validUntil;
     }
 
     /// @dev Wraps `body` in the envelope.
@@ -202,64 +211,41 @@ library MessageTypesLib {
         require(messageVersion == VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
     }
 
-    /// @dev EIP-712 `hashStruct` of a validation's terms, without a domain: a commitment, not something to sign.
-    ///  The terms are the id, the wallets, the spender, the range and the token. `expiry` and `reconciliationWindow`
-    ///  are left out on purpose: both are read off the issuing block's clock, so a body re-issued after a reorg
-    ///  dropped the first issuance would otherwise hash differently for the same movement, and the hash could no
-    ///  longer say whether the satellite executed the terms this chain issued.
-    function hashValidation(ComplianceValidation memory validation) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                COMPLIANCE_VALIDATION_TYPEHASH,
-                validation.validationId,
-                keccak256(validation.from),
-                keccak256(validation.to),
-                keccak256(validation.spender),
-                validation.amountMin,
-                validation.amountMax,
-                validation.token
-            )
-        );
+    /// @dev Wraps a ticket in the envelope, as the compliance does before sending it.
+    function encodeValidation(TicketMessage memory validation) internal pure returns (bytes memory) {
+        return abi.encode(Message.TICKET, VERSION, abi.encode(validation));
     }
 
-    /// @dev Wraps a compliance validation in the envelope, as the compliance does before dispatching a leg.
-    function encodeValidation(ComplianceValidation memory validation) internal pure returns (bytes memory) {
-        return abi.encode(Message.COMPLIANCE_VALIDATION, VERSION, abi.encode(validation));
-    }
-
-    /// @dev Unwraps a `COMPLIANCE_VALIDATION` body. Reverts on a body that is not one.
-    function decodeValidation(bytes memory body) internal pure returns (ComplianceValidation memory) {
-        return abi.decode(body, (ComplianceValidation));
+    /// @dev Unwraps a `TICKET` body. Reverts on a body that is not one.
+    function decodeValidation(bytes memory body) internal pure returns (TicketMessage memory) {
+        return abi.decode(body, (TicketMessage));
     }
 
     /// @dev Wraps a settlement notification in the envelope, as a satellite's Lite does before sending.
-    function encodeSettlement(SettlementNotification memory notification) internal pure returns (bytes memory) {
-        return abi.encode(Message.SETTLEMENT_NOTIFICATION, VERSION, abi.encode(notification));
+    function encodeSettlement(ReceiptMessage memory notification) internal pure returns (bytes memory) {
+        return abi.encode(Message.RECEIPT, VERSION, abi.encode(notification));
     }
 
-    /// @dev Unwraps a `SETTLEMENT_NOTIFICATION` body. Reverts on a body that is not one.
-    function decodeSettlement(bytes memory body) internal pure returns (SettlementNotification memory) {
-        return abi.decode(body, (SettlementNotification));
+    /// @dev Unwraps a `RECEIPT` body. Reverts on a body that is not one.
+    function decodeSettlement(bytes memory body) internal pure returns (ReceiptMessage memory) {
+        return abi.decode(body, (ReceiptMessage));
     }
 
-    /// @dev Unwraps a `MINT_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
-    function decodeMintInstruction(bytes memory body) internal pure returns (MintInstruction memory) {
-        return abi.decode(body, (MintInstruction));
+    /// @dev Unwraps a `MOVE_OUT` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeMintInstruction(bytes memory body) internal pure returns (MoveOutMessage memory) {
+        return abi.decode(body, (MoveOutMessage));
     }
 
-    /// @dev Unwraps a `RECALL_INSTRUCTION` body, as a satellite's Lite does. Reverts on a body that is not one.
-    function decodeRecallInstruction(bytes memory body) internal pure returns (RecallInstruction memory) {
-        return abi.decode(body, (RecallInstruction));
+    /// @dev Unwraps a `BRING_HOME` body, as a satellite's Lite does. Reverts on a body that is not one.
+    function decodeBringHome(bytes memory body) internal pure returns (BringHomeMessage memory) {
+        return abi.decode(body, (BringHomeMessage));
     }
 
-    /// @dev Wraps a burn proof in the envelope, as a satellite's Lite does before sending.
-    function encodeBurnProof(BurnProof memory proof) internal pure returns (bytes memory) {
-        return abi.encode(Message.BURN_PROOF, VERSION, abi.encode(proof));
-    }
-
-    /// @dev Unwraps a `BURN_PROOF` body. Reverts on a body that is not one.
-    function decodeBurnProof(bytes memory body) internal pure returns (BurnProof memory) {
-        return abi.decode(body, (BurnProof));
+    /// @dev The key of one half of a move: what one away chain answers with one receipt. Half 0, the away token's
+    ///  execution of the ticket, is keyed by the ticket id itself.
+    function halfKeyOf(bytes32 ticketId, uint8 half) internal pure returns (bytes32) {
+        if (half == 0) return ticketId;
+        return keccak256(abi.encode(ticketId, half));
     }
 
     /// @dev The per-chain key every route, peer and per-chain setting is stored under.

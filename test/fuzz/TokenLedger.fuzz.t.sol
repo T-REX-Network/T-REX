@@ -108,29 +108,26 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         } else if (kind == 4) {
             try token.freezePartialTokens(actors[from], amount % (token.freeBalanceOf(actors[from]) + 1)) { } catch { }
         } else if (kind == 5) {
-            try ledger.ledgerDelegateOut(
+            try ledger.ledgerMoveOut(
                 actors[from], satellites[from], amount % (token.freeBalanceOf(actors[from]) + 1)
             ) { }
                 catch { }
         } else if (kind == 6) {
-            try ledger.ledgerRecall(
-                satellites[from], actors[from], amount % (token.bridgedBalanceOf(satellites[from]) + 1)
+            try ledger.ledgerBringHome(
+                satellites[from], actors[from], amount % (token.awayBalanceOf(satellites[from]) + 1)
             ) { }
                 catch { }
         } else if (kind == 7) {
             try ledger.bridgedTransfer(
                 satellites[from],
                 satellites[to],
-                amount % (token.bridgedBalanceOf(satellites[from]) + 1),
+                amount % (token.awayBalanceOf(satellites[from]) + 1),
                 bytes32(uint256(op))
             ) { }
                 catch { }
         } else {
             try ledger.settleToNative(
-                satellites[from],
-                actors[to],
-                amount % (token.bridgedBalanceOf(satellites[from]) + 1),
-                bytes32(uint256(op))
+                satellites[from], actors[to], amount % (token.awayBalanceOf(satellites[from]) + 1), bytes32(uint256(op))
             ) { }
                 catch { }
         }
@@ -141,7 +138,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         for (uint256 i = 0; i < actors.length; i++) {
             freeSum += token.freeBalanceOf(actors[i]);
             frozenSum += token.getFrozenTokens(actors[i]);
-            bridgedSum += token.bridgedBalanceOf(satellites[i]);
+            bridgedSum += token.awayBalanceOf(satellites[i]);
         }
     }
 
@@ -157,7 +154,7 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         (uint256 freeSum, uint256 frozenSum, uint256 bridgedSum) = _sums();
         assertEq(freeSum + frozenSum + bridgedSum, token.totalSupply(), "buckets do not sum to the supply");
-        assertEq(bridgedSum, token.totalBridged(), "bridged total != bridged sum");
+        assertEq(bridgedSum, token.totalAwayBalance(), "bridged total != bridged sum");
         assertEq(token.balanceOf(address(token)), 0, "the token holds no escrow");
         for (uint256 i = 0; i < actors.length; i++) {
             assertEq(
@@ -176,20 +173,20 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
         token.freezePartialTokens(alice, frozen);
-        ledger.ledgerDelegateOut(alice, satellites[0], delegated);
+        ledger.ledgerMoveOut(alice, satellites[0], delegated);
 
         assertEq(token.balanceOf(alice), mintAmount - delegated, "balance after delegation");
         assertEq(token.getFrozenTokens(alice), frozen, "frozen after delegation");
-        assertEq(token.bridgedBalanceOf(satellites[0]), delegated, "bridged after delegation");
+        assertEq(token.awayBalanceOf(satellites[0]), delegated, "bridged after delegation");
         assertEq(token.totalSupply(), mintAmount, "supply after delegation");
 
-        ledger.ledgerRecall(satellites[0], alice, delegated);
+        ledger.ledgerBringHome(satellites[0], alice, delegated);
         vm.stopPrank();
 
         assertEq(token.balanceOf(alice), mintAmount, "balance after recall");
         assertEq(token.getFrozenTokens(alice), frozen, "frozen after recall");
-        assertEq(token.bridgedBalanceOf(satellites[0]), 0, "bridged after recall");
-        assertEq(token.totalBridged(), 0, "bridged total after recall");
+        assertEq(token.awayBalanceOf(satellites[0]), 0, "bridged after recall");
+        assertEq(token.totalAwayBalance(), 0, "bridged total after recall");
         assertEq(token.totalSupply(), mintAmount, "supply after recall");
     }
 
@@ -202,13 +199,13 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         vm.startPrank(agent);
         token.mint(alice, mintAmount);
-        ledger.ledgerDelegateOut(alice, satellites[0], delegated);
+        ledger.ledgerMoveOut(alice, satellites[0], delegated);
         ledger.bridgedTransfer(satellites[0], satellites[2], settled, bytes32(uint256(1)));
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellites[0]), delegated - settled);
-        assertEq(token.bridgedBalanceOf(satellites[2]), settled);
-        assertEq(token.totalBridged(), delegated);
+        assertEq(token.awayBalanceOf(satellites[0]), delegated - settled);
+        assertEq(token.awayBalanceOf(satellites[2]), settled);
+        assertEq(token.totalAwayBalance(), delegated);
         assertEq(token.totalSupply(), mintAmount);
     }
 
@@ -225,10 +222,10 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         token.mint(alice, mintAmount);
         token.freezePartialTokens(alice, frozen);
         // the counterparty wallet is bob's, so the settlement back crosses identities
-        ledger.ledgerDelegateOut(alice, satellites[1], settled);
+        ledger.ledgerMoveOut(alice, satellites[1], settled);
 
         assertEq(token.balanceOf(alice), mintAmount - settled, "balance after delegating out");
-        assertEq(token.bridgedBalanceOf(satellites[1]), settled, "bridged after delegating out");
+        assertEq(token.awayBalanceOf(satellites[1]), settled, "bridged after delegating out");
         assertEq(token.totalSupply(), mintAmount, "supply after delegating out");
 
         ledger.settleToNative(satellites[1], alice, settled, bytes32(uint256(2)));
@@ -236,8 +233,8 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         assertEq(token.balanceOf(alice), mintAmount, "balance after settling back");
         assertEq(token.getFrozenTokens(alice), frozen, "frozen after settling back");
-        assertEq(token.bridgedBalanceOf(satellites[1]), 0, "bridged after settling back");
-        assertEq(token.totalBridged(), 0, "bridged total after settling back");
+        assertEq(token.awayBalanceOf(satellites[1]), 0, "bridged after settling back");
+        assertEq(token.totalAwayBalance(), 0, "bridged total after settling back");
         assertEq(token.totalSupply(), mintAmount, "supply after settling back");
     }
 
@@ -248,12 +245,12 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
 
         vm.startPrank(agent);
         token.mint(alice, 1000);
-        ledger.ledgerDelegateOut(alice, satellites[0], 500);
+        ledger.ledgerMoveOut(alice, satellites[0], 500);
 
         vm.expectRevert(expected);
-        ledger.ledgerDelegateOut(alice, padded, amount % 500);
+        ledger.ledgerMoveOut(alice, padded, amount % 500);
         vm.expectRevert(expected);
-        ledger.ledgerRecall(padded, alice, amount % 500);
+        ledger.ledgerBringHome(padded, alice, amount % 500);
         vm.expectRevert(expected);
         ledger.bridgedTransfer(padded, satellites[1], amount % 500, bytes32(uint256(1)));
         vm.expectRevert(expected);
@@ -262,8 +259,8 @@ contract TokenLedgerFuzzTest is TREXSuiteTest {
         ledger.settleToNative(padded, alice, amount % 500, bytes32(uint256(1)));
         vm.stopPrank();
 
-        assertEq(token.bridgedBalanceOf(satellites[0]), 500);
-        assertEq(token.totalBridged(), 500);
+        assertEq(token.awayBalanceOf(satellites[0]), 500);
+        assertEq(token.totalAwayBalance(), 500);
     }
 
 }

@@ -40,10 +40,16 @@ jobs:
         run: "! grep -rn 'msg\\.data' contracts/"
         id: msg-data
 
-      # Fails if any contract under contracts/ exceeds EIP-170 (runtime) or EIP-3860 (initcode).
+      # Fails if a contract in forge's size table exceeds EIP-170 (runtime) or EIP-3860 (initcode).
       - name: Run build
         run: forge build --sizes contracts
         id: build
+
+      # Forge's size table leaves out every contract with no function in its ABI, such as a linked library whose
+      # functions all take `storage` parameters. This step reads the build output and checks every contract.
+      - name: Check the size of every contract, linked libraries included
+        run: bash scripts/check-contract-sizes.sh
+        id: all-sizes
 
       # ONCHAINID ships with via-IR; under T-REX's profile IdentityFactory is over EIP-170 and the step above
       # never lists it. Build the eight ONCHAINID contracts the deployment uses the way they ship (`onchainid`

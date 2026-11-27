@@ -120,7 +120,7 @@ contract PlatformSuiteSeparationTest is TREXSuiteTest {
 
         vm.prank(suiteOwner);
         vm.expectRevert(unauthorized);
-        trustedGatewayRegistry.setTrustedGateway(makeAddr("gateway"), true);
+        trustedGatewayRegistry.trustReceiptBridge(makeAddr("gateway"));
     }
 
     /// @notice A role id is only meaningful on the manager it was granted on: the deployer holds the suite

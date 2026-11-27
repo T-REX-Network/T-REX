@@ -62,7 +62,7 @@ contract TokenReservationStub {
         bridged[keccak256(wallet)] = amount;
     }
 
-    function bridgedBalanceOf(bytes calldata wallet) external view returns (uint256) {
+    function awayBalanceOf(bytes calldata wallet) external view returns (uint256) {
         return bridged[keccak256(wallet)];
     }
 
@@ -76,20 +76,56 @@ contract TokenReservationStub {
         return held < balance ? balance - held : 0;
     }
 
-    function reserveForValidation(bytes calldata wallet, uint256 amount) external {
+    function reserveForTicket(bytes calldata wallet, uint256 amount) external {
         reserved[keccak256(wallet)] += amount;
     }
 
-    function releaseFromValidation(bytes calldata wallet, uint256 amount) external {
+    function releaseFromTicket(bytes calldata wallet, uint256 amount) external {
         bytes32 key = keccak256(wallet);
         uint256 held = reserved[key];
         reserved[key] = held < amount ? 0 : held - amount;
     }
 
-    function holdInTransit(bytes calldata wallet, uint256, bytes32, uint256 amountReserved) external {
-        bytes32 key = keccak256(wallet);
-        uint256 held = reserved[key];
-        reserved[key] = held < amountReserved ? 0 : held - amountReserved;
+    /// @dev Money on hold per ticket: what left the wallet between two halves of a move.
+    mapping(bytes32 ticketId => uint256) public onHoldOf;
+    /// @dev When a hostile change of each away chain's peer ends; zero for a chain never replaced.
+    mapping(bytes32 chainKey => uint64) public hostileChangeEndsAt;
+    /// @dev The ticket bridge each away chain's tickets go out on; zero when it has none.
+    mapping(bytes32 chainKey => address) public ticketRouteFor;
+    /// @dev How many messages went out on the receipt route, and the last one, so a test can tell where a ticket went.
+    uint256 public receiptRouteSends;
+    bytes32 public lastReceiptRouteChainKey;
+    bytes32 public lastReceiptRouteHalfKey;
+
+    function setHostileChangeEndsAt(bytes32 chainKey, uint64 endsAt) external {
+        hostileChangeEndsAt[chainKey] = endsAt;
+    }
+
+    function setTicketRoute(bytes32 chainKey, address bridge) external {
+        ticketRouteFor[chainKey] = bridge;
+    }
+
+    /// @dev The first half landed: the wallet no longer holds the amount, the ticket does.
+    function putOnHold(bytes calldata wallet, uint256 amount, bytes32 ticketId) external {
+        bridged[keccak256(wallet)] -= amount;
+        onHoldOf[ticketId] += amount;
+    }
+
+    /// @dev What each ticket's applied receipt moved, as the token's `finishMove` would record it.
+    mapping(bytes32 ticketId => uint256) public finishedOf;
+
+    /// @dev A receipt applied: what left `from`, or its money on hold, reaches `to`; only the amount is recorded,
+    ///  since the unit tests check the compliance's side and read the call's arguments with `expectCall`.
+    function finishMove(bytes calldata, bytes calldata, uint256 amount, bytes32 ticketId) external {
+        finishedOf[ticketId] += amount;
+    }
+
+    /// @dev A message on the receipt route, recorded; nothing is delivered.
+    function sendOnReceiptRoute(bytes32 chainKey, bytes32 halfKey, uint8, bytes calldata) external returns (bytes32) {
+        receiptRouteSends += 1;
+        lastReceiptRouteChainKey = chainKey;
+        lastReceiptRouteHalfKey = halfKey;
+        return bytes32(receiptRouteSends);
     }
 
 }

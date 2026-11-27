@@ -41,17 +41,19 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev A validation leg is pinned to the gateway and the peer it was sent to. A peer change does not strand
-///      it, and closing the chain stops it like every other message from that chain.
-///      The validations are dispatched by the token alone, never issued by the compliance, so a leg that
-///      passes the transport reaches `handleSettlement`, which is what these tests read.
+/// @dev A half is pinned to the receipt bridge and the peer it was sent to. Its receipt is taken from that pair or
+///      from the current one, so a peer change does not strand it, and closing the receipt route stops it like every
+///      other message from that chain.
+///      The tickets are sent by the token alone, never written by the compliance, so a receipt that passes the
+///      transport reaches `receiveReceipt`, which announces it whatever becomes of it: that announcement is what
+///      these tests read.
 contract PinnedOriginTest is InteropSuiteTest {
 
     ERC7786GatewayMock gateway;
@@ -66,23 +68,20 @@ contract PinnedOriginTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        gateway = _newTrustedGateway(POLYGON);
+        gateway = _newReceiptBridge(POLYGON);
         compliance = address(token.compliance());
         _openEvmChain(token, POLYGON, address(gateway));
 
         vm.prank(compliance);
-        token.dispatchComplianceValidation(satellite, inFlight, abi.encode("validation"));
+        token.sendOnTicketRoute(satellite, inFlight, abi.encode("validation"));
 
         vm.prank(agent);
         token.unpause();
     }
 
-    function _settlementFrom(address author, bytes32 validationId) private returns (uint256) {
+    function _settlementFrom(address author, bytes32 ticketId) private returns (uint256) {
         return _queue(
-            gateway,
-            author,
-            token,
-            MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
+            gateway, author, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(ticketId, POLYGON, amount))
         );
     }
 
@@ -91,8 +90,11 @@ contract PinnedOriginTest is InteropSuiteTest {
         token.setPeer(satellite, InteroperableAddress.formatEvmV1(POLYGON, newLite));
     }
 
-    function _expectHandled() private {
-        vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 1);
+    /// @dev The receipt got through the transport and reached the compliance, which announces it.
+    function _expectHandled(bytes32 ticketId) private {
+        MessageTypesLib.ReceiptMessage memory receipt = _sameChainSettlement(ticketId, POLYGON, amount);
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptReceived(satellite, ticketId, receipt.from, receipt.to, receipt.amount);
     }
 
     function _expectNotPeer(address author) private {
@@ -109,37 +111,51 @@ contract PinnedOriginTest is InteropSuiteTest {
         uint256 index = _settlementFrom(address(token), inFlight);
         _changePeer();
 
-        _expectHandled();
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 
-    function testTheNewPeerCannotSettleWhatThePreviousOneWasSent() public {
+    function test_receiveMessage_acceptsAReceiptFromTheCurrentPeer_whenTheHalfIsPinnedToThePreviousOne() public {
         _changePeer();
         uint256 index = _settlementFrom(newLite, inFlight);
 
-        _expectNotPeer(newLite);
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 
-    function testRedispatchAfterAPeerChangeIsRefused() public {
+    /// @dev A peer that is neither the pinned one nor the current one is refused.
+    function testAPeerThatIsNeitherPinnedNorCurrentIsRefused() public {
+        _changePeer();
+        address strangerLite = makeAddr("strangerLite");
+        uint256 index = _settlementFrom(strangerLite, inFlight);
+
+        _expectNotPeer(strangerLite);
+        gateway.relay(index);
+    }
+
+    /// @dev Inside the change window an ask goes to the peer the ticket was pinned to, the former one: the away token
+    ///      that holds it is the one that answers.
+    function testRedispatchAfterAPeerChangeGoesToThePinnedFormerPeer() public {
         _changePeer();
 
         vm.prank(compliance);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, inFlight, satellite, address(gateway))
-        );
-        token.dispatchComplianceValidation(satellite, inFlight, abi.encode("validation"));
+        token.sendOnTicketRoute(satellite, inFlight, abi.encode("validation"));
+
+        uint256 last = gateway.queueLength() - 1;
+        assertEq(gateway.queuedMessage(last).recipient, InteroperableAddress.formatEvmV1(POLYGON, address(token)));
     }
 
+    /// @dev Once the change window is over, a half never sent follows the current peer only.
     function testAnUnpinnedSettlementFollowsTheCurrentPeer() public {
         _changePeer();
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
         uint256 fromPrevious = _settlementFrom(address(token), neverDispatched);
         uint256 fromCurrent = _settlementFrom(newLite, neverDispatched);
 
         _expectNotPeer(address(token));
         gateway.relay(fromPrevious);
 
-        _expectHandled();
+        _expectHandled(neverDispatched);
         gateway.relay(fromCurrent);
     }
 
@@ -147,7 +163,7 @@ contract PinnedOriginTest is InteropSuiteTest {
 
     function testAClosedChainRefusesAPinnedSettlement() public {
         uint256 index = _settlementFrom(address(token), inFlight);
-        _openEvmChain(token, POLYGON, address(0));
+        _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         gateway.relay(index);
@@ -155,13 +171,13 @@ contract PinnedOriginTest is InteropSuiteTest {
 
     function testReopeningTheChainLetsThePinnedSettlementLand() public {
         uint256 index = _settlementFrom(address(token), inFlight);
-        _openEvmChain(token, POLYGON, address(0));
+        _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         gateway.relay(index);
 
         _openEvmChain(token, POLYGON, address(gateway));
-        _expectHandled();
+        _expectHandled(inFlight);
         gateway.relay(index);
     }
 

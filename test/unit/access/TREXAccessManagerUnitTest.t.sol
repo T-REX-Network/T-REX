@@ -54,7 +54,7 @@ import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityReg
 import { IERC3643IdentityRegistryStorage } from "contracts/ERC-3643/IERC3643IdentityRegistryStorage.sol";
 import { IERC3643TrustedIssuersRegistry } from "contracts/ERC-3643/IERC3643TrustedIssuersRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
-import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
@@ -479,11 +479,11 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IERC3643.setOnchainID.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.setIdentityRegistry.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.setCompliance.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
-        _assertRow(target, token, ITREXMessaging.setRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _assertRow(target, token, ITREXMessaging.setReceiptRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _assertRow(target, token, ITREXMessaging.closeReceiptRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
+        _assertRow(target, token, ITREXMessaging.setTicketRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setPeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
-        _assertRow(target, token, IToken.delegateOut.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(target, token, IToken.instructRecall.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(target, token, IToken.resend.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, token, ITREXMessaging.replaceHostilePeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.mint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.batchMint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.burn.selector, domainId, RolesLib.Role.AGENT_BURNER);
@@ -507,7 +507,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, IERC3643.batchForcedTransfer.selector, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER);
         _assertRow(target, token, IERC3643.pause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, token, IERC3643.unpause.selector, domainId, RolesLib.Role.AGENT_PAUSER);
-        _assertRow(target, token, ITREXMessaging.setInboundPaused.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         // Registry
         _assertRow(target, registry, ITREXRegistry.disableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, registry, ITREXRegistry.enableEligibilityChecks.selector, domainId, RolesLib.Role.OWNER);
@@ -583,45 +582,19 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, compliance, IModularCompliance.resyncModuleTypes.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IERC3643Compliance.bindToken.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IERC3643Compliance.unbindToken.selector, domainId, RolesLib.Role.OWNER);
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setDefaultValidityWindow.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
-        );
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setReconciliationWindow.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
-        );
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.setIssuancePaused.selector,
-            domainId,
-            RolesLib.Role.COMPLIANCE_MANAGER
-        );
-        _assertRow(
-            target, compliance, ITransferValidation.requestTransferValidation.selector, domainId, RolesLib.Role.AGENT
-        );
-        _assertRow(target, compliance, ITransferValidation.resendValidation.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.discardExpiredValidations.selector,
-            domainId,
-            RolesLib.Role.VALIDATION_KEEPER
-        );
-        _assertRow(
-            target,
-            compliance,
-            ITransferValidation.resolveStuckValidation.selector,
-            domainId,
-            RolesLib.Role.VALIDATION_KEEPER
-        );
+        _assertRow(target, compliance, ITickets.setValidityWindows.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setWaitingTime.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setMeasuredTimes.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setTicketLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAsksPaused.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAskLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAskLimitOf.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.askToMove.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.bringHome.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.blockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, compliance, ITickets.unblockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, compliance, ITickets.refuseWaitingReceipt.selector, domainId, RolesLib.Role.AGENT_PAUSER);
+        _assertRow(target, compliance, ITickets.closeByHand.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         // Who hands out which role
         _assertAdmin(target, domainId, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
@@ -632,7 +605,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
-        _assertAdmin(target, domainId, RolesLib.Role.VALIDATION_KEEPER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.COMPLIANCE_MANAGER, RolesLib.Role.SUITE_ADMIN);

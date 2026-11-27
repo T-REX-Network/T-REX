@@ -44,7 +44,7 @@ import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessMa
 import { IERC3643Compliance } from "contracts/ERC-3643/IERC3643Compliance.sol";
 import { IERC3643IdentityRegistry } from "contracts/ERC-3643/IERC3643IdentityRegistry.sol";
 import { IModularCompliance } from "contracts/compliance/modular/IModularCompliance.sol";
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
+import { IReceiptHandler } from "contracts/interop/IReceiptHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { RolesLib } from "contracts/libraries/RolesLib.sol";
 
@@ -76,7 +76,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
         // setCompliance also requires the target to advertise, via ERC-165, every interface the token calls.
         mockSupportsInterface(newCompliance, type(IERC3643Compliance).interfaceId);
         mockSupportsInterface(newCompliance, type(IModularCompliance).interfaceId);
-        mockSupportsInterface(newCompliance, type(ISettlementHandler).interfaceId);
+        mockSupportsInterface(newCompliance, type(IReceiptHandler).interfaceId);
     }
 
     function testTokenSetComplianceRevertsWhenUnauthorized(address caller) public {
@@ -127,7 +127,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     }
 
     /// @notice A compliance with only the standard interface is refused: the token calls `canSpenderCall` on
-    ///  every `transferFrom` and `handleSettlement` on every settlement delivery, and those would revert.
+    ///  every `transferFrom` and `receiveReceipt` on every settlement delivery, and those would revert.
     function testTokenSetComplianceRevertsWhenOnlyStandardInterface() public {
         address standardOnly = makeAddr("StandardOnlyCompliance");
         vm.mockCall(standardOnly, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
@@ -144,7 +144,7 @@ contract TokenSetComplianceUnitTest is TokenBaseUnitTest {
     }
 
     /// @notice A compliance that is modular but cannot receive settlements is refused as well.
-    function testTokenSetComplianceRevertsWhenNoSettlementHandler() public {
+    function test_setCompliance_reverts_when_theComplianceDoesNotDeclareTheReceiptHandler() public {
         address noSettlement = makeAddr("NoSettlementCompliance");
         vm.mockCall(noSettlement, abi.encodeCall(IAccessManaged.authority, ()), abi.encode(address(suiteManager)));
         vm.mockCall(

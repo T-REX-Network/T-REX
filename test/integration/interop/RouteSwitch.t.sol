@@ -42,7 +42,6 @@ pragma solidity 0.8.30;
 import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Recipient.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ISettlementHandler } from "contracts/interop/ISettlementHandler.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -50,12 +49,13 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev Routes are snapshot at dispatch. An issuer switching a chain's gateway affects new validations
-///      only; the legs of one already in flight are matched against the gateway that carried it out.
-///      The validations here are dispatched by the token alone, never issued by the compliance, so every leg
-///      that passes the transport is parked by the compliance under its id and pauses the satellite's inbound,
-///      the token itself staying open: the transport verdict is what these tests read, and the parking is
-///      asserted where a leg gets through.
+/// @dev Each half is pinned to the receipt route and the peer it left through. An issuer changing an away chain's
+///      receipt bridge sends new tickets through the new one; a receipt for a half already in flight is taken from
+///      its pinned pair or from the current one, so the change never strands it.
+///      The tickets here are sent by the token alone, never written by the compliance, so every receipt that passes
+///      the transport reaches the compliance, which announces it and keeps it for an id it has no record of: the
+///      delivery is consumed, nothing is blocked. The transport verdict is what these tests read. Home keeps the old
+///      route as the former one for four waiting times after the change and takes every receipt from it meanwhile.
 contract RouteSwitchTest is InteropSuiteTest {
 
     ERC7786GatewayMock oldGateway;
@@ -75,8 +75,8 @@ contract RouteSwitchTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
 
-        oldGateway = _newTrustedGateway(POLYGON);
-        newGateway = _newTrustedGateway(POLYGON);
+        oldGateway = _newReceiptBridge(POLYGON);
+        newGateway = _newReceiptBridge(POLYGON);
         compliance = address(token.compliance());
 
         _openEvmChain(token, POLYGON, address(oldGateway));
@@ -89,49 +89,46 @@ contract RouteSwitchTest is InteropSuiteTest {
         token.unpause();
     }
 
-    function _dispatch(bytes32 validationId) private {
+    function _dispatch(bytes32 ticketId) private {
         vm.prank(compliance);
-        token.dispatchComplianceValidation(satellite, validationId, validationBody);
+        token.sendOnTicketRoute(satellite, ticketId, validationBody);
     }
 
-    function _settlementFrom(ERC7786GatewayMock gateway, bytes32 validationId) private returns (uint256) {
-        return _liteSends(
-            gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(validationId, POLYGON, amount))
-        );
+    function _settlementFrom(ERC7786GatewayMock gateway, bytes32 ticketId) private returns (uint256) {
+        return
+            _liteSends(
+                gateway, token, MessageTypesLib.encodeSettlement(_sameChainSettlement(ticketId, POLYGON, amount))
+            );
     }
 
-    function _expectHandled(bytes32 validationId) private {
-        vm.expectCall(
-            compliance,
-            abi.encodeCall(
-                ISettlementHandler.handleSettlement, (satellite, _sameChainSettlement(validationId, POLYGON, amount))
-            )
-        );
+    /// @dev The receipt got through the transport and reached the compliance, which announces it.
+    function _expectHandled(bytes32 ticketId) private {
+        MessageTypesLib.ReceiptMessage memory receipt = _sameChainSettlement(ticketId, POLYGON, amount);
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.SettlementParked(validationId, satellite, amount, bytes32(0));
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.InboundPaused(satellite);
+        emit EventsLib.ReceiptReceived(satellite, ticketId, receipt.from, receipt.to, receipt.amount);
     }
 
-    /// @dev A leg that got through: parked under its id, its chain's inbound paused, the token itself open.
-    function _assertParked(ERC7786GatewayMock gateway, uint256 index, bytes32 validationId) private view {
+    /// @dev A receipt the compliance kept for an unknown id: consumed, nothing blocked, the token open.
+    function _assertLeftDeliverable(ERC7786GatewayMock gateway, uint256 index) private view {
         assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "consumed");
-        assertTrue(boundCompliance.parkedLegOf(validationId, satellite).exists, "parked");
-        assertTrue(token.isInboundPaused(satellite), "never issued by the compliance: the chain's inbound pauses");
+        assertFalse(boundCompliance.isAwayChainBlocked(satellite), "an unknown id blocks nobody");
         assertFalse(token.paused(), "the token itself stays open");
     }
 
-    function _expectNotPinned(ERC7786GatewayMock gateway, bytes32 validationId) private {
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.GatewayNotPinned.selector, address(gateway), validationId, satellite)
-        );
+    /// @dev Past the four waiting times home keeps the old route as the former one.
+    function _endTheChangeWindow() private {
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
+    }
+
+    function _expectNotOnRoute(ERC7786GatewayMock gateway) private {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(gateway), satellite));
     }
 
     /* ----- The old leg ----- */
 
     function testTheSwitchIsInPlace() public view {
-        assertEq(token.routeFor(satellite), address(newGateway));
-        assertEq(token.pinnedRouteFor(inFlight, satellite), address(oldGateway));
+        assertEq(token.receiptRouteFor(satellite), address(newGateway));
+        assertEq(_pinnedBridgeOf(inFlight), address(oldGateway));
     }
 
     function testOldLegIsAcceptedFromThePinnedGatewayAfterTheSwitch() public {
@@ -140,36 +137,29 @@ contract RouteSwitchTest is InteropSuiteTest {
         _expectHandled(inFlight);
         oldGateway.relay(index);
 
-        _assertParked(oldGateway, index, inFlight);
+        _assertLeftDeliverable(oldGateway, index);
     }
 
-    function testOldLegIsRefusedFromTheNewRoute() public {
+    function test_receiveMessage_acceptsAReceiptOnTheCurrentRoute_whenTheHalfIsPinnedToTheOldOne() public {
         uint256 index = _settlementFrom(newGateway, inFlight);
 
-        _expectNotPinned(newGateway, inFlight);
+        _expectHandled(inFlight);
         newGateway.relay(index);
 
-        assertFalse(token.messageReceived(address(newGateway), newGateway.receiveIdFor(index)));
+        _assertLeftDeliverable(newGateway, index);
     }
 
-    /// @dev Cross-chain: the second leg of the same validation, from the same chain, keeps the same pin. The pin
-    ///      is checked at admission, ahead of the inbound pause the first leg's parking raised.
-    function testEveryLegOfTheOldValidationHonoursThePin() public {
-        uint256 burnLeg = _liteSends(
-            oldGateway,
-            token,
-            MessageTypesLib.encodeSettlement(
-                _settlement(inFlight, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("From")), "", amount)
-            )
-        );
-        uint256 replayOnNewRoute = _settlementFrom(newGateway, inFlight);
+    /// @dev The receipt of the old ticket is taken from the pinned or the current route alike: both reach the
+    ///      compliance.
+    function testEveryLegOfTheOldTicketIsTakenFromThePinnedOrTheCurrentRoute() public {
+        uint256 viaOld = _settlementFrom(oldGateway, inFlight);
+        uint256 viaNew = _settlementFrom(newGateway, inFlight);
 
-        vm.expectCall(compliance, abi.encodeWithSelector(ISettlementHandler.handleSettlement.selector), 1);
-        oldGateway.relay(burnLeg);
-        _assertParked(oldGateway, burnLeg, inFlight);
+        _expectHandled(inFlight);
+        oldGateway.relay(viaOld);
 
-        _expectNotPinned(newGateway, inFlight);
-        newGateway.relay(replayOnNewRoute);
+        _expectHandled(inFlight);
+        newGateway.relay(viaNew);
     }
 
     /* ----- The new validation ----- */
@@ -179,63 +169,78 @@ contract RouteSwitchTest is InteropSuiteTest {
 
         assertEq(oldGateway.queueLength(), 1, "only the in-flight one went through the old gateway");
         assertEq(newGateway.queueLength(), 1);
-        assertEq(token.pinnedRouteFor(issuedAfterSwitch, satellite), address(newGateway));
+        assertEq(_pinnedBridgeOf(issuedAfterSwitch), address(newGateway));
     }
 
     function testNewValidationSettlesThroughTheNewRouteOnly() public {
         _dispatch(issuedAfterSwitch);
+        _endTheChangeWindow();
 
         uint256 viaOld = _settlementFrom(oldGateway, issuedAfterSwitch);
         uint256 viaNew = _settlementFrom(newGateway, issuedAfterSwitch);
 
-        _expectNotPinned(oldGateway, issuedAfterSwitch);
+        _expectNotOnRoute(oldGateway);
         oldGateway.relay(viaOld);
 
         _expectHandled(issuedAfterSwitch);
         newGateway.relay(viaNew);
-        _assertParked(newGateway, viaNew, issuedAfterSwitch);
+        _assertLeftDeliverable(newGateway, viaNew);
     }
 
     /* ----- What was never pinned follows the current route ----- */
 
-    /// @dev An id this token never dispatched is not refused by transport: the compliance must see it to park
-    ///      the leg and pause the chain. It follows the current route, like any unpinned message.
+    /// @dev An id this token never sent is not refused by transport: the compliance must see it. It follows the
+    ///      current route, like any unpinned message.
     function testUnpinnedSettlementFollowsTheCurrentRoute() public {
+        _endTheChangeWindow();
         uint256 viaOld = _settlementFrom(oldGateway, neverDispatched);
         uint256 viaNew = _settlementFrom(newGateway, neverDispatched);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotRouted.selector, address(oldGateway), satellite));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(oldGateway), satellite));
         oldGateway.relay(viaOld);
 
         _expectHandled(neverDispatched);
         newGateway.relay(viaNew);
-        _assertParked(newGateway, viaNew, neverDispatched);
+        _assertLeftDeliverable(newGateway, viaNew);
     }
 
-    /// @dev A recall carries no validation, so it checks against the current route: old gateway refused.
-    function testBurnProofFollowsTheCurrentRoute() public {
-        bytes memory payload =
-            MessageTypesLib.encodeBurnProof(_burnProof(1, _satelliteEnvelope(POLYGON, makeAddr("Burned")), amount));
+    /// @dev A second half this token never sent has no pin, so it checks against the current route once the change
+    ///      window is over: the old gateway is refused, the new one reaches the compliance, which announces it.
+    function testAnUnsentSecondHalfFollowsTheCurrentRoute() public {
+        _endTheChangeWindow();
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.ReceiptMessage({
+            ticketId: neverDispatched,
+            from: _satelliteEnvelope(POLYGON, makeAddr("Burned")),
+            to: "",
+            amount: amount,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 1,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
+        bytes memory payload = MessageTypesLib.encodeSettlement(receipt);
 
         uint256 viaOld = _liteSends(oldGateway, token, payload);
         uint256 viaNew = _liteSends(newGateway, token, payload);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.GatewayNotRouted.selector, address(oldGateway), satellite));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(oldGateway), satellite));
         oldGateway.relay(viaOld);
 
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptUnknown(MessageTypesLib.halfKeyOf(neverDispatched, 1), satellite);
         newGateway.relay(viaNew);
-        assertTrue(token.messageReceived(address(newGateway), newGateway.receiveIdFor(viaNew)));
     }
 
     /* ----- Emergency removal of the pinned gateway ----- */
 
-    /// @dev Removal invalidates pinned routes too: the old leg can arrive through nothing, and the
-    ///      validation will expire and be discarded by the slot lifecycle. Safe, and loud.
-    function testRemovingThePinnedGatewayOrphansTheOldLeg() public {
+    /// @dev Distrust reaches pinned routes too: nothing arrives through the old bridge any more, and the old half's
+    ///      receipt lands through the current route instead.
+    function testDistrustingThePinnedBridgeLetsTheOldHalfLandOnTheCurrentRoute() public {
         uint256 viaOld = _settlementFrom(oldGateway, inFlight);
         uint256 viaNew = _settlementFrom(newGateway, inFlight);
 
-        trustedGatewayRegistry.setTrustedGateway(address(oldGateway), false);
+        trustedGatewayRegistry.distrustBridge(address(oldGateway));
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -246,10 +251,11 @@ contract RouteSwitchTest is InteropSuiteTest {
         );
         oldGateway.relay(viaOld);
 
-        _expectNotPinned(newGateway, inFlight);
+        _expectHandled(inFlight);
         newGateway.relay(viaNew);
+        _assertLeftDeliverable(newGateway, viaNew);
 
-        assertEq(token.pinnedRouteFor(inFlight, satellite), address(oldGateway), "the pin is a record, not a lever");
+        assertEq(_pinnedBridgeOf(inFlight), address(oldGateway), "the pin is a record, not a lever");
     }
 
 }

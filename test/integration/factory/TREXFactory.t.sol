@@ -1511,7 +1511,19 @@ contract TREXFactoryTest is TREXSuiteTest {
         );
         assertEq(
             platformManager.getTargetFunctionRole(
-                address(trustedGatewayRegistry), TrustedGatewayRegistry.setTrustedGateway.selector
+                address(trustedGatewayRegistry), TrustedGatewayRegistry.trustTicketBridge.selector
+            ),
+            bridgeOps
+        );
+        assertEq(
+            platformManager.getTargetFunctionRole(
+                address(trustedGatewayRegistry), TrustedGatewayRegistry.trustReceiptBridge.selector
+            ),
+            bridgeOps
+        );
+        assertEq(
+            platformManager.getTargetFunctionRole(
+                address(trustedGatewayRegistry), TrustedGatewayRegistry.distrustBridge.selector
             ),
             bridgeOps
         );

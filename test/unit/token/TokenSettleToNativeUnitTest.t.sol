@@ -59,7 +59,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -67,8 +67,8 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 10);
-        assertEq(token.totalBridged(), 10);
+        assertEq(token.awayBalanceOf(satellite1), 10);
+        assertEq(token.totalAwayBalance(), 10);
         assertEq(token.balanceOf(user2), 50);
         assertEq(token.freeBalanceOf(user2), 50, "the credit lands free, never frozen");
         assertEq(token.getFrozenTokens(user2), 0);
@@ -88,24 +88,23 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
     }
 
     /// @dev The whole point of the transition: an indexer reading the trail must not see a relocation.
-    function test_settleToNative_NeverEmitsRecalled() public {
+    function test_settleToNative_EmitsOnlyTransferAndSettledToNative() public {
         vm.recordLogs();
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 2, "only Transfer and SettledToNative are emitted");
-        for (uint256 i = 0; i < logs.length; i++) {
-            assertTrue(logs[i].topics[0] != EventsLib.Recalled.selector, "a settlement emitted Recalled");
-        }
+        assertEq(logs[0].topics[0], IERC20.Transfer.selector, "the mint comes first");
+        assertEq(logs[1].topics[0], EventsLib.SettledToNative.selector, "then the settlement");
     }
 
     /// @dev The two differ by their event only, so a drift in either one's arithmetic shows up here.
-    function test_settleToNative_LeavesTheSameBucketsAsARecall() public {
+    function test_settleToNative_LeavesTheSameBucketsAsABringHome() public {
         uint256 snapshot = vm.snapshotState();
 
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user2, 50);
+        ledger.ledgerBringHome(satellite1, user2, 50);
         (uint256 free, uint256 bridged, uint256 bridgedTotal, uint256 supply) = _buckets();
 
         vm.revertToState(snapshot);
@@ -116,7 +115,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
 
         assertEq(free2, free, "free balance diverged");
         assertEq(bridged2, bridged, "bridged position diverged");
-        assertEq(bridgedTotal2, bridgedTotal, "totalBridged diverged");
+        assertEq(bridgedTotal2, bridgedTotal, "totalAwayBalance diverged");
         assertEq(supply2, supply, "totalSupply diverged");
     }
 
@@ -124,22 +123,22 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 60, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 0);
-        assertEq(token.totalBridged(), 0);
+        assertEq(token.awayBalanceOf(satellite1), 0);
+        assertEq(token.totalAwayBalance(), 0);
         assertEq(token.balanceOf(user2), 60);
         _assertPartition();
     }
 
     /// @notice A settled position comes back out through a delegation-out, the only native-to-satellite move.
-    function test_settleToNative_ThenDelegatesBackOut() public {
+    function test_settleToNative_ThenMovesBackOut() public {
         vm.startPrank(agent);
         ledger.settleToNative(satellite1, user2, 50, VALIDATION_ID);
-        ledger.ledgerDelegateOut(user2, satellite3, 50);
+        ledger.ledgerMoveOut(user2, satellite3, 50);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 0);
-        assertEq(token.bridgedBalanceOf(satellite3), 50);
-        assertEq(token.totalBridged(), 60);
+        assertEq(token.awayBalanceOf(satellite3), 50);
+        assertEq(token.totalAwayBalance(), 60);
         _assertPartition();
     }
 
@@ -149,7 +148,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         vm.prank(agent);
         ledger.settleToNative(satellite1, user2, 0, VALIDATION_ID);
 
-        assertEq(token.bridgedBalanceOf(satellite1), 60);
+        assertEq(token.awayBalanceOf(satellite1), 60);
         assertEq(token.balanceOf(user2), 0);
     }
 
@@ -184,9 +183,11 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
         ledger.settleToNative(satellite2, user2, 1, VALIDATION_ID);
     }
 
+    /// @notice A home wallet holds no away balance: outside a hold of its own move out, the ledger has nothing to
+    ///         take from it.
     function test_settleToNative_RevertWhen_SenderIsOnTheReferenceChain() public {
         bytes memory native = satelliteEnvelope(block.chainid, user1);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, native, 0, 10));
         vm.prank(agent);
         ledger.settleToNative(native, user2, 10, VALIDATION_ID);
     }
@@ -209,7 +210,7 @@ contract TokenSettleToNativeUnitTest is TokenLedgerBaseUnitTest {
 
     function _buckets() private view returns (uint256 free, uint256 bridged, uint256 bridgedTotal, uint256 supply) {
         return
-            (token.freeBalanceOf(user2), token.bridgedBalanceOf(satellite1), token.totalBridged(), token.totalSupply());
+            (token.freeBalanceOf(user2), token.awayBalanceOf(satellite1), token.totalAwayBalance(), token.totalSupply());
     }
 
 }

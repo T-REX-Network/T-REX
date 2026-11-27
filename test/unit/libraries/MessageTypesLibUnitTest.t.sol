@@ -60,31 +60,19 @@ contract MessageTypesHarness {
         return MessageTypesLib.decode(payload);
     }
 
-    function decodeSettlement(bytes calldata body)
-        external
-        pure
-        returns (MessageTypesLib.SettlementNotification memory)
-    {
+    function decodeSettlement(bytes calldata body) external pure returns (MessageTypesLib.ReceiptMessage memory) {
         return MessageTypesLib.decodeSettlement(body);
     }
 
-    function decodeBurnProof(bytes calldata body) external pure returns (MessageTypesLib.BurnProof memory) {
-        return MessageTypesLib.decodeBurnProof(body);
-    }
-
-    function decodeMintInstruction(bytes calldata body) external pure returns (MessageTypesLib.MintInstruction memory) {
+    function decodeMintInstruction(bytes calldata body) external pure returns (MessageTypesLib.MoveOutMessage memory) {
         return MessageTypesLib.decodeMintInstruction(body);
     }
 
-    function decodeRecallInstruction(bytes calldata body)
-        external
-        pure
-        returns (MessageTypesLib.RecallInstruction memory)
-    {
-        return MessageTypesLib.decodeRecallInstruction(body);
+    function decodeBringHome(bytes calldata body) external pure returns (MessageTypesLib.BringHomeMessage memory) {
+        return MessageTypesLib.decodeBringHome(body);
     }
 
-    function decodeValidation(bytes calldata body) external pure returns (MessageTypesLib.ComplianceValidation memory) {
+    function decodeValidation(bytes calldata body) external pure returns (MessageTypesLib.TicketMessage memory) {
         return MessageTypesLib.decodeValidation(body);
     }
 
@@ -131,12 +119,11 @@ contract MessageTypesLibUnitTest is Test {
     /* ----- Envelope codec ----- */
 
     function testRoundTripPreservesTypeAndBody() public view {
-        MessageTypesLib.Message[5] memory types = [
-            MessageTypesLib.Message.COMPLIANCE_VALIDATION,
-            MessageTypesLib.Message.MINT_INSTRUCTION,
-            MessageTypesLib.Message.RECALL_INSTRUCTION,
-            MessageTypesLib.Message.SETTLEMENT_NOTIFICATION,
-            MessageTypesLib.Message.BURN_PROOF
+        MessageTypesLib.Message[4] memory types = [
+            MessageTypesLib.Message.TICKET,
+            MessageTypesLib.Message.MOVE_OUT,
+            MessageTypesLib.Message.BRING_HOME,
+            MessageTypesLib.Message.RECEIPT
         ];
 
         for (uint256 i = 0; i < types.length; i++) {
@@ -160,12 +147,11 @@ contract MessageTypesLibUnitTest is Test {
 
     /// @dev The wire codes are the member positions, so a reorder must not pass unnoticed.
     function testMemberNumberingIsTheWireFormat() public pure {
-        assertEq(uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION), 0);
-        assertEq(uint8(MessageTypesLib.Message.MINT_INSTRUCTION), 1);
-        assertEq(uint8(MessageTypesLib.Message.RECALL_INSTRUCTION), 2);
-        assertEq(uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION), 3);
-        assertEq(uint8(MessageTypesLib.Message.BURN_PROOF), 4);
-        assertEq(uint8(type(MessageTypesLib.Message).max), 4);
+        assertEq(uint8(MessageTypesLib.Message.TICKET), 0);
+        assertEq(uint8(MessageTypesLib.Message.MOVE_OUT), 1);
+        assertEq(uint8(MessageTypesLib.Message.BRING_HOME), 2);
+        assertEq(uint8(MessageTypesLib.Message.RECEIPT), 3);
+        assertEq(uint8(type(MessageTypesLib.Message).max), 3);
     }
 
     /// @dev The bound is inclusive on the valid side, so the refusal above it is not an off-by-one.
@@ -174,183 +160,124 @@ contract MessageTypesLibUnitTest is Test {
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) = harness.decode(payload);
 
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BURN_PROOF));
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECEIPT));
         assertEq(decodedBody, body);
     }
 
     function testDecodeRevertsOnUnsupportedVersion(uint8 messageVersion) public {
         vm.assume(messageVersion != MessageTypesLib.VERSION);
 
-        bytes memory payload = abi.encode(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION, messageVersion, body);
+        bytes memory payload = abi.encode(MessageTypesLib.Message.RECEIPT, messageVersion, body);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, messageVersion));
+        harness.decode(payload);
+    }
+
+    /// @dev A message in the format before this one, a peer that was not upgraded, is refused instead of decoded
+    ///  wrong: its receipt has no ask block hash and no echo of the copy.
+    function test_decode_RevertWhen_TheMessageIsVersionOne() public {
+        assertEq(MessageTypesLib.VERSION, 2, "this format is version 2");
+        uint8 versionOne = 1;
+        bytes memory payload = abi.encode(MessageTypesLib.Message.RECEIPT, versionOne, abi.encode(_settlement()));
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, versionOne));
         harness.decode(payload);
     }
 
     /* ----- Typed bodies ----- */
 
     function testSettlementRoundTrip() public view {
-        MessageTypesLib.SettlementNotification memory n = MessageTypesLib.SettlementNotification({
-            validationId: bytes32(uint256(7)),
-            from: hex"0001000001890114",
-            to: "",
-            amount: 42,
-            hash: bytes32(uint256(99))
-        });
+        MessageTypesLib.ReceiptMessage memory receipt = _settlement();
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
-            harness.decode(MessageTypesLib.encodeSettlement(n));
-        MessageTypesLib.SettlementNotification memory back = harness.decodeSettlement(decodedBody);
+            harness.decode(MessageTypesLib.encodeSettlement(receipt));
+        MessageTypesLib.ReceiptMessage memory back = harness.decodeSettlement(decodedBody);
 
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.SETTLEMENT_NOTIFICATION));
-        assertEq(back.validationId, n.validationId);
-        assertEq(back.from, n.from);
-        assertEq(back.to, n.to);
-        assertEq(back.amount, n.amount);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECEIPT));
+        assertEq(back.ticketId, receipt.ticketId);
+        assertEq(back.from, receipt.from);
+        assertEq(back.to, receipt.to);
+        assertEq(back.amount, receipt.amount);
+        assertEq(back.askBlockHash, receipt.askBlockHash);
+        assertEq(back.seenMax, receipt.seenMax);
+        assertEq(back.seenValidUntil, receipt.seenValidUntil);
+        assertEq(back.half, receipt.half);
+        assertEq(uint8(back.answer), uint8(receipt.answer));
     }
 
-    function testBurnProofRoundTrip() public view {
-        MessageTypesLib.BurnProof memory p =
-            MessageTypesLib.BurnProof({ recallId: 7, burnedWallet: hex"0001000001890114", amount: 9 });
-
-        (MessageTypesLib.Message messageType, bytes memory decodedBody) =
-            harness.decode(MessageTypesLib.encodeBurnProof(p));
-        MessageTypesLib.BurnProof memory back = harness.decodeBurnProof(decodedBody);
-
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BURN_PROOF));
-        assertEq(back.recallId, p.recallId);
-        assertEq(back.burnedWallet, p.burnedWallet);
-        assertEq(back.amount, p.amount);
+    /// @dev The answer travels as its member position, so a reorder must not pass unnoticed.
+    function testReceiptAnswerNumberingIsTheWireFormat() public pure {
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.Executed), 0);
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.Expired), 1);
+        assertEq(uint8(MessageTypesLib.ReceiptAnswer.StillOpen), 2);
+        assertEq(uint8(type(MessageTypesLib.ReceiptAnswer).max), 2);
     }
 
     function testMintInstructionRoundTrip() public view {
-        MessageTypesLib.MintInstruction memory i = MessageTypesLib.MintInstruction({
-            delegationId: 4, toWallet: hex"0001000001890114", amount: 12, holder: address(0xBEEF)
+        MessageTypesLib.MoveOutMessage memory i = MessageTypesLib.MoveOutMessage({
+            ticketId: bytes32(uint256(4)),
+            half: 1,
+            toWallet: hex"0001000001890114",
+            amount: 12,
+            validUntil: 1_700_000_000
         });
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
-            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.MINT_INSTRUCTION, abi.encode(i)));
-        MessageTypesLib.MintInstruction memory back = harness.decodeMintInstruction(decodedBody);
+            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.MOVE_OUT, abi.encode(i)));
+        MessageTypesLib.MoveOutMessage memory back = harness.decodeMintInstruction(decodedBody);
 
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MINT_INSTRUCTION));
-        assertEq(back.delegationId, i.delegationId);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MOVE_OUT));
+        assertEq(back.ticketId, i.ticketId);
+        assertEq(back.half, i.half);
         assertEq(back.toWallet, i.toWallet);
         assertEq(back.amount, i.amount);
-        assertEq(back.holder, i.holder);
+        assertEq(back.validUntil, i.validUntil);
     }
 
-    function testRecallInstructionRoundTrip() public view {
-        MessageTypesLib.RecallInstruction memory i = MessageTypesLib.RecallInstruction({
-            recallId: 3, wallet: hex"0001000001890114", amount: 40, nativeWallet: address(0xCAFE)
+    function testBringHomeRoundTrip() public view {
+        MessageTypesLib.BringHomeMessage memory i = MessageTypesLib.BringHomeMessage({
+            ticketId: bytes32(uint256(3)), half: 2, wallet: hex"0001000001890114", amount: 40, validUntil: 1_700_000_001
         });
 
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
-            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.RECALL_INSTRUCTION, abi.encode(i)));
-        MessageTypesLib.RecallInstruction memory back = harness.decodeRecallInstruction(decodedBody);
+            harness.decode(MessageTypesLib.encode(MessageTypesLib.Message.BRING_HOME, abi.encode(i)));
+        MessageTypesLib.BringHomeMessage memory back = harness.decodeBringHome(decodedBody);
 
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.RECALL_INSTRUCTION));
-        assertEq(back.recallId, i.recallId);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BRING_HOME));
+        assertEq(back.ticketId, i.ticketId);
+        assertEq(back.half, i.half);
         assertEq(back.wallet, i.wallet);
         assertEq(back.amount, i.amount);
-        assertEq(back.nativeWallet, i.nativeWallet);
+        assertEq(back.validUntil, i.validUntil);
     }
 
     function testValidationRoundTrip() public view {
-        MessageTypesLib.ComplianceValidation memory v = _validation(hex"0001000001890114");
+        MessageTypesLib.TicketMessage memory v = _validation(hex"0001000001890114");
         (MessageTypesLib.Message messageType, bytes memory decodedBody) =
             harness.decode(MessageTypesLib.encodeValidation(v));
-        MessageTypesLib.ComplianceValidation memory back = harness.decodeValidation(decodedBody);
+        MessageTypesLib.TicketMessage memory back = harness.decodeValidation(decodedBody);
 
-        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.COMPLIANCE_VALIDATION));
-        assertEq(back.validationId, v.validationId);
+        assertEq(uint8(messageType), uint8(MessageTypesLib.Message.TICKET));
+        assertEq(back.ticketId, v.ticketId);
         assertEq(back.from, v.from);
         assertEq(back.to, v.to);
         assertEq(back.spender, v.spender);
         assertEq(back.amountMin, v.amountMin);
         assertEq(back.amountMax, v.amountMax);
+        assertEq(back.requestedMax, v.requestedMax);
         assertEq(back.token, v.token);
-        assertEq(back.expiry, v.expiry);
-        assertEq(back.reconciliationWindow, v.reconciliationWindow);
+        assertEq(back.validUntil, v.validUntil);
+        assertEq(back.askBlockHash, v.askBlockHash);
+        assertEq(back.salt, v.salt);
     }
 
     function testValidationRoundTripPreservesAnEmptySpender() public view {
-        MessageTypesLib.ComplianceValidation memory v = _validation("");
+        MessageTypesLib.TicketMessage memory v = _validation("");
         (, bytes memory decodedBody) = harness.decode(MessageTypesLib.encodeValidation(v));
-        MessageTypesLib.ComplianceValidation memory back = harness.decodeValidation(decodedBody);
+        MessageTypesLib.TicketMessage memory back = harness.decodeValidation(decodedBody);
 
         assertEq(back.spender.length, 0);
         assertEq(back.from, v.from);
-    }
-
-    function testValidationTypehashMatchesItsTypeString() public pure {
-        assertEq(
-            MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
-            keccak256(
-                "ComplianceValidation(bytes32 validationId,bytes from,bytes to,bytes spender,uint256 amountMin,uint256 amountMax,address token)"
-            )
-        );
-    }
-
-    /// @dev EIP-712 hashStruct of the terms: dynamic members hash to their keccak256, static members encode in
-    ///  place, and the two clock-derived fields are not part of it.
-    function testHashValidationIsTheEip712StructHashOfTheTerms() public pure {
-        MessageTypesLib.ComplianceValidation memory v = _validation(hex"0001000001890114");
-        bytes32 expected = keccak256(
-            abi.encode(
-                MessageTypesLib.COMPLIANCE_VALIDATION_TYPEHASH,
-                v.validationId,
-                keccak256(v.from),
-                keccak256(v.to),
-                keccak256(v.spender),
-                v.amountMin,
-                v.amountMax,
-                v.token
-            )
-        );
-
-        assertEq(MessageTypesLib.hashValidation(v), expected);
-    }
-
-    function testHashValidationChangesWithEveryTerm() public pure {
-        MessageTypesLib.ComplianceValidation memory v = _validation("");
-        bytes32 base = MessageTypesLib.hashValidation(v);
-
-        v.validationId = bytes32(uint256(8));
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.validationId = bytes32(uint256(7));
-        v.from = hex"00010000010a0114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.from = hex"0001000001890114";
-        v.to = hex"0001000001890114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.to = hex"00010000010a0114";
-        v.amountMin -= 1;
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.amountMin += 1;
-        v.amountMax += 1;
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.amountMax -= 1;
-        v.token = address(0xCAFE);
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-        v.token = address(0xBEEF);
-        v.spender = hex"0001000001890114";
-        assertTrue(MessageTypesLib.hashValidation(v) != base);
-    }
-
-    /// @dev A body re-issued after a reorg dropped the first issuance carries a later `expiry`; the terms it
-    ///  commits to are the same, so it must hash the same, or the hash could not tell an orphaned body from a
-    ///  re-issued one.
-    function testHashValidationIgnoresExpiryAndReconciliationWindow() public pure {
-        MessageTypesLib.ComplianceValidation memory v = _validation("");
-        bytes32 base = MessageTypesLib.hashValidation(v);
-
-        v.expiry += 1 days;
-        assertEq(MessageTypesLib.hashValidation(v), base);
-        v.reconciliationWindow += 1 hours;
-        assertEq(MessageTypesLib.hashValidation(v), base);
-        // The id commits to the salt already.
-        v.salt = bytes32(uint256(6));
-        assertEq(MessageTypesLib.hashValidation(v), base);
     }
 
     function testTypedDecodeRevertsOnAForeignBody() public {
@@ -358,40 +285,42 @@ contract MessageTypesLibUnitTest is Test {
         harness.decodeSettlement(hex"deadbeef");
 
         vm.expectRevert();
-        harness.decodeBurnProof(abi.encode(uint256(1)));
-
-        vm.expectRevert();
         harness.decodeMintInstruction(abi.encode(uint256(1)));
 
         vm.expectRevert();
-        harness.decodeRecallInstruction(hex"deadbeef");
+        harness.decodeBringHome(hex"deadbeef");
 
         vm.expectRevert();
         harness.decodeValidation(abi.encode(_settlement()));
     }
 
-    function _validation(bytes memory spender) private pure returns (MessageTypesLib.ComplianceValidation memory) {
-        return MessageTypesLib.ComplianceValidation({
-            validationId: bytes32(uint256(7)),
+    function _validation(bytes memory spender) private pure returns (MessageTypesLib.TicketMessage memory) {
+        return MessageTypesLib.TicketMessage({
+            ticketId: bytes32(uint256(7)),
             salt: bytes32(uint256(5)),
             from: hex"0001000001890114",
             to: hex"00010000010a0114",
             spender: spender,
             amountMin: 9,
             amountMax: 11,
+            requestedMax: 12,
             token: address(0xBEEF),
-            expiry: 1_700_000_000,
-            reconciliationWindow: 3600
+            validUntil: 1_700_000_000,
+            askBlockHash: bytes32(uint256(13))
         });
     }
 
-    function _settlement() private pure returns (MessageTypesLib.SettlementNotification memory) {
-        return MessageTypesLib.SettlementNotification({
-            validationId: bytes32(uint256(7)),
+    function _settlement() private pure returns (MessageTypesLib.ReceiptMessage memory) {
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: bytes32(uint256(7)),
             from: hex"0001000001890114",
             to: "",
             amount: 42,
-            hash: bytes32(uint256(99))
+            askBlockHash: bytes32(uint256(99)),
+            seenMax: 50,
+            seenValidUntil: 1_700_000_000,
+            half: 0,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
         });
     }
 
@@ -445,7 +374,7 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function testRelayDeliversTheExactPayloadOnce() public {
-        bytes memory payload = MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, body);
+        bytes memory payload = MessageTypesLib.encode(MessageTypesLib.Message.TICKET, body);
         _sendRaw(payload);
 
         gateway.relay(0);
@@ -486,8 +415,8 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function testOutOfOrderRelayDeliversInTheRelayedOrder() public {
-        bytes memory first = MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, abi.encode("first"));
-        bytes memory second = MessageTypesLib.encode(MessageTypesLib.Message.MINT_INSTRUCTION, abi.encode("second"));
+        bytes memory first = MessageTypesLib.encode(MessageTypesLib.Message.TICKET, abi.encode("first"));
+        bytes memory second = MessageTypesLib.encode(MessageTypesLib.Message.MOVE_OUT, abi.encode("second"));
         _sendRaw(first);
         _sendRaw(second);
 
@@ -499,7 +428,7 @@ contract MessageTypesLibUnitTest is Test {
     }
 
     function _send(bytes memory messageBody) private {
-        _sendRaw(MessageTypesLib.encode(MessageTypesLib.Message.COMPLIANCE_VALIDATION, messageBody));
+        _sendRaw(MessageTypesLib.encode(MessageTypesLib.Message.TICKET, messageBody));
     }
 
     function _sendRaw(bytes memory payload) private {
