@@ -69,9 +69,10 @@ import { TicketLib } from "./TicketLib.sol";
 
 /**
  * @title Tickets
- * @dev The compliance's issuance layer for satellite movements: the validity windows, the waiting times and their
- * floors, the limits on asks, the block of an away chain, the record of every ticket, the ask itself, the pending
- * reservation it writes, the ask for the receipt, the receipt and the cancel. Own ERC-7201 namespace, so the module registry's layout is untouched.
+ * @dev The compliance's layer for moves between chains: the validity windows, the waiting times and their floors,
+ * the limits on asks, the block of an away chain, the record of every ticket, the ask itself, the reservation it
+ * writes, the ask for the receipt, the receipt and the cancel. Its own ERC-7201 namespace, so the module registry's
+ * layout is untouched.
  *
  * Four flows, each readable top to bottom, each in a library deployed once and linked so the compliance stays
  * under the contract size limit: {TicketLib-request} issues, {ReceiptLib-receiveReceipt} records what an away
@@ -83,7 +84,7 @@ import { TicketLib } from "./TicketLib.sol";
  * A ticket goes to the sender's away chain only: the away token that executes it physically holds the position it
  * moves. A home wallet has no ticket to execute: its move out burns at home in the ask and is a second half only.
  *
- * `validUntil` is the satellite's hard deadline. One waiting time later anyone may ask the away token for the
+ * `validUntil` is the away token's hard deadline. One waiting time later anyone may ask the away token for the
  * receipt, and one waiting time after an unanswered ask anyone may cancel the ticket, never a refusal of a late
  * receipt. Tickets expire; receipts never do.
  */

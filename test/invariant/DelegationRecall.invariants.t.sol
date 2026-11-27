@@ -90,21 +90,21 @@ contract MoveCountingTracker is RecordingModule {
 /// token send a stored receipt again, and relays or drops queued messages in any order, so tickets, halves, receipts
 /// and duplicates interleave. Every delivery that reverts is recorded: a handler step never hides a broken receipt.
 ///
-///   DR-1  positionOf(identity) == home balance + away balance of its wallet + its money on hold (total owned, S1)
+///   DR-1  positionOf(identity) == home balance + away balance of its wallet + its money on hold (total owned)
 ///   DR-2  sum of positions == totalSupply()
 ///   DR-3  totalAwayBalance == away token balances + what is in flight: move outs on hold not minted yet, burns done
 ///         on the away token whose receipt home has not applied, tickets to a home wallet executed and not applied
 ///   DR-4  the away token minted exactly the move outs it answered, once each
 ///   DR-5  what is away is what moved out less what every finished bring home and ticket to a home wallet took home
-///   DR-6  an honest away token never blocks its chain or stops the token (no honest chain is blocked, S5)
-///   S0    no balance or amount on hold below zero: the totals are the sums of their parts, and no wallet has more
+///   DR-6  an honest away token never blocks its chain or stops the token (no honest chain is blocked)
+///   DR-7  no balance or amount on hold below zero: the totals are the sums of their parts, and no wallet has more
 ///         reserved than its away balance
-///   S2    the away chain holds no more than home counts away
-///   S7    every away balance equals home's record plus what is provably in flight
-///   S9    a total owned falls only through its own requests
-///   S13   the trackers are told about each move between chains once
-///   L1    once nothing is left to deliver, every ticket, move out and bring home ends Done or Cancelled
-///   L3    once nothing is left to deliver, nothing is reserved and nothing is on hold
+///   DR-8  the away chain holds no more than home counts away
+///   DR-9  every away balance equals home's record plus what is provably in flight
+///   DR-10 a total owned falls only through its own requests
+///   DR-11 the trackers are told about each move between chains once
+///   DR-12 once nothing is left to deliver, every ticket, move out and bring home ends Done or Cancelled
+///   DR-13 once nothing is left to deliver, nothing is reserved and nothing is on hold
 contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -158,7 +158,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     /// @dev Set once a fault a step injected did not take effect.
     bool public anInjectedFaultDidNotHappen;
 
-    /// @dev Checks S9 around a step: an identity whose total owned fell must have a request of its own that moved in
+    /// @dev Checks DR-10 around a step: an identity whose total owned fell must have a request of its own that moved in
     ///  the step, or be the sender of the step's home transfer.
     modifier positionsFallOnlyThroughOwnRequests() {
         uint256[] memory positionsBefore = _positions();
@@ -440,41 +440,45 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "DR-6");
     }
 
-    function invariant_S0_noBalanceOrAmountOnHoldBelowZero() public view {
+    function invariant_DR7_noBalanceOrAmountOnHoldBelowZero() public view {
         uint256 awayBalances;
         for (uint256 i = 0; i < ACTORS; i++) {
             uint256 awayBalance = token.awayBalanceOf(satellites[i]);
             awayBalances += awayBalance;
-            assertLe(token.reservedOf(satellites[i]), awayBalance, "S0: reserved above the away balance");
+            assertLe(token.reservedOf(satellites[i]), awayBalance, "reserved above the away balance");
         }
-        assertEq(awayBalances + token.totalOnHold(), token.totalAwayBalance(), "S0: away total");
-        assertEq(_everyHold(), token.totalOnHold(), "S0: on hold total");
+        assertEq(awayBalances + token.totalOnHold(), token.totalAwayBalance(), "away total");
+        assertEq(_everyHold(), token.totalOnHold(), "on hold total");
     }
 
-    function invariant_S2_theAwayChainHoldsNoMoreThanHomeCounts() public view {
+    function invariant_DR8_theAwayChainHoldsNoMoreThanHomeCounts() public view {
         uint256 liteBalances;
         for (uint256 i = 0; i < ACTORS; i++) {
             liteBalances += lite.balanceOf(satellites[i]);
         }
-        assertLe(liteBalances, token.totalAwayBalance(), "S2");
+        assertLe(liteBalances, token.totalAwayBalance(), "the away chain holds more than home counts");
     }
 
     /// @dev What the away token holds for a wallet, plus what it moved or burned out of it that home has not applied,
     ///  is home's away balance plus what it moved or minted into it that home has not applied.
-    function invariant_S7_eachAwayBalanceIsHomesRecordPlusWhatIsInFlight() public view {
+    function invariant_DR9_eachAwayBalanceIsHomesRecordPlusWhatIsInFlight() public view {
         for (uint256 i = 0; i < ACTORS; i++) {
             uint256 awayTokenSide = lite.balanceOf(satellites[i]) + _leftNotApplied(i);
             uint256 homeSide = token.awayBalanceOf(satellites[i]) + _arrivedNotApplied(i);
-            assertEq(awayTokenSide, homeSide, "S7");
+            assertEq(awayTokenSide, homeSide, "away balance against home's record plus what is in flight");
         }
     }
 
-    function invariant_S9_aTotalOwnedFallsOnlyThroughItsOwnRequests() public view {
-        assertFalse(positionFellWithoutItsRequest, "S9");
+    function invariant_DR10_aTotalOwnedFallsOnlyThroughItsOwnRequests() public view {
+        assertFalse(positionFellWithoutItsRequest, "a total owned fell without its own request");
     }
 
-    function invariant_S13_theTrackersAreToldAboutEachMoveOnce() public view {
-        assertEq(tracker.movesBetweenChainsTold(), _movesDone(), "S13");
+    function invariant_DR11_theTrackersAreToldAboutEachMoveOnce() public view {
+        assertEq(
+            tracker.movesBetweenChainsTold(),
+            _movesDone(),
+            "the trackers were told a move between chains more or less than once"
+        );
     }
 
     /// @dev A delivery that reverts stays deliverable, so a step that swallowed it would hide a receipt home cannot
@@ -494,7 +498,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         console.log("sends again, relays:", callsSendAgain, callsRelay);
     }
 
-    /// @notice L1 and L3: at the end of each run every message is let through, the clock moves on and every due ask,
+    /// @notice DR-12 and DR-13: at the end of each run every message is let through, the clock moves on and every due ask,
     ///  cancel and half is sent, until nothing is left to deliver. A move out out of new halves is closed by hand, the
     ///  designed way out. Then every request has ended and nothing stays reserved or on hold.
     function afterInvariant() public virtual {
@@ -509,18 +513,18 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 i = 1; i < ticketIds.length; i++) {
             ITickets.TicketStatus status = boundCompliance.ticketOf(ticketIds[i]).status;
             bool ended = status == ITickets.TicketStatus.Done || status == ITickets.TicketStatus.Cancelled;
-            assertTrue(ended, "L1: a ticket ended");
+            assertTrue(ended, "a ticket ended");
         }
         for (uint256 i = 1; i < moveOutIds.length; i++) {
-            _assertDone(moveOutIds[i], "L1: a move out ended");
+            _assertDone(moveOutIds[i], "a move out ended");
         }
         for (uint256 i = 1; i < bringHomeIds.length; i++) {
-            _assertDone(bringHomeIds[i], "L1: a bring home ended");
+            _assertDone(bringHomeIds[i], "a bring home ended");
         }
         for (uint256 i = 0; i < ACTORS; i++) {
-            assertEq(token.reservedOf(satellites[i]), 0, "L3: nothing reserved");
+            assertEq(token.reservedOf(satellites[i]), 0, "nothing reserved");
         }
-        assertEq(token.totalOnHold(), 0, "L3: nothing on hold");
+        assertEq(token.totalOnHold(), 0, "nothing on hold");
         invariant_noDeliveryReverts();
     }
 

@@ -120,10 +120,10 @@ library TokenLedgerLib {
 
     /// @dev See {IToken-availableOf}. An open bring home reserves in the same table as every ticket.
     function availableOf(bytes calldata wallet) external view returns (uint256) {
-        TokenStorage storage s = layout();
+        TokenStorage storage tokenStorage = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
-        uint256 balance = s.awayBalance[key];
-        uint256 reservedForTickets = s.reservedForTickets[key];
+        uint256 balance = tokenStorage.awayBalance[key];
+        uint256 reservedForTickets = tokenStorage.reservedForTickets[key];
         return reservedForTickets < balance ? balance - reservedForTickets : 0;
     }
 
@@ -151,10 +151,10 @@ library TokenLedgerLib {
     function putOnHold(bytes calldata fromWallet, uint256 amount, bytes32 ticketId) external {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
 
-        TokenStorage storage s = layout();
-        _debit(s, fromWallet, fromKey, amount);
-        s.inTransit[ticketId] += amount;
-        s.totalOnHold += amount;
+        TokenStorage storage tokenStorage = layout();
+        _debit(tokenStorage, fromWallet, fromKey, amount);
+        tokenStorage.inTransit[ticketId] += amount;
+        tokenStorage.totalOnHold += amount;
 
         emit EventsLib.HeldInTransit(fromKey, ticketId, fromWallet, amount);
     }
@@ -170,11 +170,11 @@ library TokenLedgerLib {
         (, holder) = WalletKeyLib.isReferenceChain(fromWallet);
         require(holder != address(0), ErrorsLib.ZeroAddress());
 
-        TokenStorage storage s = layout();
-        require(s.inTransit[ticketId] == 0, ErrorsLib.TransitAlreadyHeld(ticketId));
-        s.inTransit[ticketId] = amount;
-        s.totalOnHold += amount;
-        s.totalAwayBalance += amount;
+        TokenStorage storage tokenStorage = layout();
+        require(tokenStorage.inTransit[ticketId] == 0, ErrorsLib.TransitAlreadyHeld(ticketId));
+        tokenStorage.inTransit[ticketId] = amount;
+        tokenStorage.totalOnHold += amount;
+        tokenStorage.totalAwayBalance += amount;
 
         emit EventsLib.HeldInTransit(keccak256(fromWallet), ticketId, fromWallet, amount);
     }
@@ -191,17 +191,17 @@ library TokenLedgerLib {
         returns (bool toNative, address recipient, bytes32 fromKey)
     {
         fromKey = WalletKeyLib.canonicalKey(from);
-        TokenStorage storage s = layout();
-        _takeFromHoldOrWallet(s, from, fromKey, amount, ticketId);
+        TokenStorage storage tokenStorage = layout();
+        _takeFromHoldOrWallet(tokenStorage, from, fromKey, amount, ticketId);
 
         (toNative, recipient) = WalletKeyLib.isReferenceChain(to);
         if (toNative) {
-            s.totalAwayBalance -= amount;
+            tokenStorage.totalAwayBalance -= amount;
             return (toNative, recipient, fromKey);
         }
 
         bytes32 toKey = WalletKeyLib.satelliteKey(to);
-        s.awayBalance[toKey] += amount;
+        tokenStorage.awayBalance[toKey] += amount;
 
         emit EventsLib.BridgedTransfer(fromKey, toKey, ticketId, from, to, amount);
     }
@@ -220,19 +220,19 @@ library TokenLedgerLib {
     /// @dev Takes `amount` off the ticket's hold when it has one: the second half of a move, or the end of a home
     ///  wallet's move out. Off `from`'s away balance otherwise: a move inside one away chain.
     function _takeFromHoldOrWallet(
-        TokenStorage storage s,
+        TokenStorage storage tokenStorage,
         bytes calldata from,
         bytes32 fromKey,
         uint256 amount,
         bytes32 ticketId
     ) private {
-        uint256 held = s.inTransit[ticketId];
+        uint256 held = tokenStorage.inTransit[ticketId];
         if (held == 0) {
-            _debit(s, from, fromKey, amount);
+            _debit(tokenStorage, from, fromKey, amount);
             return;
         }
-        s.inTransit[ticketId] = held - amount;
-        s.totalOnHold -= amount;
+        tokenStorage.inTransit[ticketId] = held - amount;
+        tokenStorage.totalOnHold -= amount;
     }
 
     /// @dev Gives back what a validation reserved against a wallet. Floors at zero rather than reverting: the
@@ -247,10 +247,10 @@ library TokenLedgerLib {
         emit EventsLib.ReleasedFromValidation(key, wallet, released);
     }
 
-    function _debit(TokenStorage storage s, bytes calldata wallet, bytes32 key, uint256 amount) private {
-        uint256 balance = s.awayBalance[key];
+    function _debit(TokenStorage storage tokenStorage, bytes calldata wallet, bytes32 key, uint256 amount) private {
+        uint256 balance = tokenStorage.awayBalance[key];
         require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
-        s.awayBalance[key] = balance - amount;
+        tokenStorage.awayBalance[key] = balance - amount;
     }
 
 }
