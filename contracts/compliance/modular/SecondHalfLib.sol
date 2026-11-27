@@ -249,6 +249,9 @@ library SecondHalfLib {
         bytes32 chainKey = _chainKeyOf(wallet);
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(chainKey);
+        // The receipt that sent the money on hold came from the sender's chain: nothing goes out on its word while
+        // that chain is blocked.
+        TicketLib.requireAwayChainNotBlocked(ticket.fromChainKey);
         TicketLib.requireNoHostileChange(token, chainKey);
 
         if (ticket.secondHalfOwed) {
@@ -495,18 +498,21 @@ library SecondHalfLib {
         _sendBackToTheAwayWallet(ticket, ticketId, receipt.from, token);
     }
 
-    /// @dev Whether the bring home's home wallet is still linked to the identity it was asked for, and verified.
+    /// @dev Whether the bring home's home wallet is still linked to the identity it was asked for, verified, and not
+    ///  holding tokens the ledger counts under another identity: a mint there would revert the delivery.
     function _homeWalletStillTheirs(ITickets.Ticket storage ticket, address token) private view returns (bool) {
         ITREXRegistry registry = _registryOf(token);
         address homeWallet = ticket.homeWallet;
-        bool linkedToTheSameIdentity = address(registry.identity(homeWallet)) == ticket.fromIdentity;
+        address identity = ticket.fromIdentity;
+        bool linkedToTheSameIdentity = address(registry.identity(homeWallet)) == identity;
         bool verified = registry.isVerified(homeWallet);
-        return linkedToTheSameIdentity && verified;
+        bool countedUnderAnother = ComplianceLedgerLib.isFundedUnderAnotherIdentity(token, homeWallet, identity);
+        return linkedToTheSameIdentity && verified && !countedUnderAnother;
     }
 
     /// @dev Ends a bring home at its home wallet: what was burned leaves the away wallet and is minted there. The
     ///  position keeps its owner, so only the trackers are told, as a `RECALL`. A funded home wallet the ledger counts
-    ///  under another identity reverts the delivery, which stays deliverable, as a transfer into it would be refused.
+    ///  under another identity never gets here, see {_homeWalletStillTheirs}: the money goes back to the away wallet.
     function _mintAtHome(ITickets.Ticket storage ticket, bytes32 ticketId, address token) private {
         address homeWallet = ticket.homeWallet;
         address identity = ticket.fromIdentity;
@@ -621,18 +627,33 @@ library SecondHalfLib {
     }
 
     /// @dev Whether the receiver may take the money now: it is eligible, its chain takes second halves (a home wallet
-    ///  needs none), and the rules allow the amount, unless both wallets are one identity's.
+    ///  needs none, but must not hold tokens the ledger counts under another identity, or the mint would revert), and
+    ///  the rules allow the amount, unless both wallets are one identity's.
     function _receiverMayTakeIt(ITickets.Ticket storage ticket, bytes calldata to, uint256 amount, address token)
         private
         view
         returns (bool)
     {
         bool receiverEligible = _registryOf(token).isWalletVerified(to);
-        (bool receiverAtHome,) = WalletKeyLib.isReferenceChain(to);
-        bool chainTakesIt = receiverAtHome || _awayChainTakesHalves(ticket.toChainKey, token);
+        (bool receiverAtHome, address homeReceiver) = WalletKeyLib.isReferenceChain(to);
+        bool chainTakesIt;
+        if (receiverAtHome) chainTakesIt = !_homeReceiverCountedUnderAnother(ticket, homeReceiver, token);
+        if (!receiverAtHome) chainTakesIt = _awayChainTakesHalves(ticket.toChainKey, token);
         bool rulesAllowIt = ComplianceLedgerLib.isRelocation(ticket.fromIdentity, ticket.toIdentity);
         if (!rulesAllowIt) rulesAllowIt = amount <= ModuleSetLib.callCheckTransfer(_askedMove(ticket, to, amount));
         return receiverEligible && chainTakesIt && rulesAllowIt;
+    }
+
+    /// @dev Whether a home receiver holds tokens the ledger counts under another identity than the one it would be
+    ///  credited to, see {_receiverIdentityNow}.
+    function _homeReceiverCountedUnderAnother(ITickets.Ticket storage ticket, address homeReceiver, address token)
+        private
+        view
+        returns (bool)
+    {
+        address resolved = address(_registryOf(token).identity(homeReceiver));
+        if (resolved == address(0)) resolved = ticket.toIdentity;
+        return ComplianceLedgerLib.isFundedUnderAnotherIdentity(token, homeReceiver, resolved);
     }
 
     /// @dev The move as the rules are asked about it at the receipt.
@@ -690,14 +711,19 @@ library SecondHalfLib {
     }
 
     /// @dev Sends the latest half for the first time inside a receipt's delivery. Below `SECOND_HALF_SEND_GAS` the
-    ///  whole delivery reverts and stays deliverable. A send that fails is caught: the receipt stays applied, and the
-    ///  half stays owed under its own number for anyone to send.
+    ///  whole delivery reverts and stays deliverable. A send that fails is caught, and nothing is sent while the
+    ///  sender's chain is blocked: the receipt stays applied, and the half stays owed under its own number for anyone
+    ///  to send.
     function trySendInsideTheDelivery(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
         bytes memory wallet,
         address token
     ) internal {
+        if (TicketLib.layout().blockedAwayChains[ticket.fromChainKey]) {
+            _leaveTheHalfOwed(ticket, ticketId);
+            return;
+        }
         bytes32 chainKey = _chainKeyOf(wallet);
         _writeTheFirstSend(ticket, chainKey);
         bytes memory body = _moveOutBody(ticket, ticketId, wallet);
@@ -715,10 +741,17 @@ library SecondHalfLib {
                 ticket.secondHalfValidUntil
             );
         } catch {
-            ticket.secondHalfSends = 0;
-            ticket.secondHalfOwed = true;
-            emit EventsLib.SecondHalfNotSent(ticketId, ticket.half);
+            _leaveTheHalfOwed(ticket, ticketId);
         }
+    }
+
+    /// @dev The latest half did not leave: it stays owed under its own number for anyone to send. No copy of it was
+    ///  sent, so no valid until binds it, and close by hand need not wait for one.
+    function _leaveTheHalfOwed(ITickets.Ticket storage ticket, bytes32 ticketId) private {
+        ticket.secondHalfSends = 0;
+        ticket.secondHalfOwed = true;
+        ticket.secondHalfValidUntil = 0;
+        emit EventsLib.SecondHalfNotSent(ticketId, ticket.half);
     }
 
     /// @dev Sends the latest half as recorded: its number, its wallet, its amount and its valid until. A half that

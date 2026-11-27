@@ -170,6 +170,19 @@ library ComplianceLedgerLib {
         emit EventsLib.WalletOwnerChanged(wallet, previous, owner, 0);
     }
 
+    /// @dev Whether {currentOwner} would refuse `wallet` for `resolved`: it holds tokens the ledger counts under
+    ///  another identity. A caller that must not revert asks this first and takes another path.
+    /// @param token the token the compliance is bound to
+    function isFundedUnderAnotherIdentity(address token, address wallet, address resolved)
+        internal
+        view
+        returns (bool)
+    {
+        address recorded = layout().ownerOf[wallet];
+        bool anotherIdentityRecorded = resolved != address(0) && recorded != address(0) && recorded != resolved;
+        return anotherIdentityRecorded && IERC20(token).balanceOf(wallet) != 0;
+    }
+
     /// @dev One identity on both sides. Two wallets that resolve to nobody are not that. The one definition of
     ///  a relocation, for the ledger and the validation flow alike.
     function isRelocation(address fromIdentity, address toIdentity) internal pure returns (bool) {

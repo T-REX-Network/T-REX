@@ -192,11 +192,13 @@ library HoldLib {
     }
 
     /// @dev Whether the ask mined again may take the money on hold of `ticket`: a record a receipt created, still on
-    ///  hold with no destination, and no cancel of it started.
+    ///  hold with no destination, and no cancel of it started. A ticket home wrote and never sent was booked on hold
+    ///  too, but an ask wrote it: nothing takes it over, its money waits for its cancel.
     function isATakeableHold(ITickets.Ticket storage ticket) internal view returns (bool) {
         bool heldWithoutTicket = !ticket.written && ticket.status == ITickets.TicketStatus.OnHold;
         bool noCancelStarted = ticket.secondHalfToKey == bytes32(0) && !ticket.shortCancel;
-        return heldWithoutTicket && noCancelStarted;
+        bool noAskWroteIt = ticket.requestedMax == 0;
+        return heldWithoutTicket && noCancelStarted && noAskWroteIt;
     }
 
     /* ----- The ask mined again ----- */

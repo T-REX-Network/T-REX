@@ -219,6 +219,39 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         _assertStatus(id, ITickets.TicketStatus.Done);
     }
 
+    /* ----- The sender's chain and a half that never left ----- */
+
+    /// @notice The money on hold came on A's word: nothing goes to B on it while A is blocked.
+    function test_sendSecondHalf_reverts_when_theSendersChainIsBlocked() public {
+        bytes32 id = _firstHalfLanded(MOVED);
+        _deliver(optimismGateway, _expired(id, 1, bobOnB));
+        assertTrue(boundCompliance.ticketOf(id).secondHalfOwed, "a new half is owed");
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(polygon);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.sendSecondHalf(id, bobOnB);
+    }
+
+    /// @notice A half whose send was caught never left, so no valid until binds it: close by hand returns the money
+    ///         at once, on any reading of B's clock.
+    function test_closeByHand_returnsAHalfWhoseSendWasCaught_atOnce() public {
+        bytes32 id = _askAToB(MOVED);
+        _bSendsFail();
+        _aSendsTheTicketsReceipt(id, bobOnB, MOVED);
+        vm.clearMockedCalls();
+        assertEq(boundCompliance.ticketOf(id).secondHalfValidUntil, 0, "no valid until for a half never sent");
+        _closeEvmChain(token, OPTIMISM);
+
+        ITickets.AwayChainReading memory reading;
+        reading.blockNumber = uint64(block.number);
+        reading.awayClockTime = uint64(block.timestamp);
+        vm.prank(deployer);
+        boundCompliance.closeByHand(id, bobOnB, reading);
+
+        assertEq(boundCompliance.ticketOf(id).secondHalfToKey, keccak256(aliceOnA), "the money goes back to A");
+    }
+
     /* ----- Bad second-half receipts: each refused, B blocked, nothing moved ----- */
 
     function test_receiveReceipt_refusesASecondHalfReceipt_whenItNamesASender() public {
@@ -633,6 +666,29 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         assertEq(token.balanceOf(bob), cap - MOVED + 1, "nothing minted to Bob");
         MessageTypesLib.MoveOutMessage memory back = _queuedMoveOut(polygonGateway, _lastIndex(polygonGateway));
         assertEq(back.toWallet, aliceOnA);
+        assertEq(back.amount, MOVED);
+    }
+
+    /// @notice A funded home receiver the registry now names under another identity than the one the ledger counts
+    ///         its tokens under cannot be minted to: the delivery does not revert, the money goes back to A. The
+    ///         registry's answer is mocked for Bob only: sticky bindings leave no real flow to that state today.
+    function test_receiveReceipt_sendsTheMoneyBackToA_whenTheHomeReceiverIsCountedUnderAnotherIdentity() public {
+        uint256 bobsOwnTokens = 1;
+        vm.prank(agent);
+        token.mint(bob, bobsOwnTokens);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceOnA, bobHome, MOVED, MOVED);
+        vm.mockCall(
+            address(token.identityRegistry()),
+            abi.encodeWithSignature("identity(address)", bob),
+            abi.encode(address(charlieIdentity))
+        );
+
+        _aSendsTheTicketsReceipt(id, bobHome, MOVED);
+
+        _assertStatus(id, ITickets.TicketStatus.OnHold);
+        assertEq(token.balanceOf(bob), bobsOwnTokens, "nothing minted to Bob");
+        MessageTypesLib.MoveOutMessage memory back = _queuedMoveOut(polygonGateway, _lastIndex(polygonGateway));
+        assertEq(back.toWallet, aliceOnA, "the money goes back to A");
         assertEq(back.amount, MOVED);
     }
 

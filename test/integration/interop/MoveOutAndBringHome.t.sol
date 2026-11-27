@@ -142,11 +142,13 @@ contract MoveOutAndBringHomeTest is InteropSuiteTest {
         _assertPartition();
     }
 
-    function test_askToMove_succeeds_whenTheIdentityAsksForItsHomeWallet() public {
+    /// @notice A home wallet moves its own tokens: its identity contract does not ask for it.
+    function test_askToMove_reverts_when_theIdentityAsksForItsHomeWallet() public {
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.askToMove(aliceHome, aliceSat, 100, 100, "", _salt());
-
-        assertEq(token.onHoldOf(id), 100);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(aliceIdentity), aliceHome)
+        );
+        boundCompliance.askToMove(aliceHome, aliceSat, 100, 100, "", _salt());
     }
 
     function test_askToMove_succeeds_whenAnAgentAsksForTheHomeWallet() public {

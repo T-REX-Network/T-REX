@@ -449,8 +449,8 @@ interface ITickets {
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` and `to` not both home wallets; otherwise reverts with `NotACrossChainMove`.
     /// - No spender for a home `from`; otherwise reverts with `ValidationSpenderRefused`.
-    /// - The caller is the identity `from` is linked to, a home `from` itself, or authorised by the AccessManager for
-    ///   this selector; otherwise reverts with `NotAuthorizedForWallet`. Every ask counts in the limits of `from`'s
+    /// - The caller is the identity an away `from` is linked to, a home `from` itself (never its identity), or
+    ///   authorised by the AccessManager for this selector; otherwise reverts with `NotAuthorizedForWallet`. Every ask counts in the limits of `from`'s
     ///   identity, a home wallet's included.
     /// - The token not paused; otherwise reverts with `TokenPaused`.
     /// - A validity window set, and the chain the first message goes to with a waiting time; otherwise
@@ -760,8 +760,9 @@ interface ITickets {
     /// - It must hold money on hold with a second half, or be an open bring home, and that half must be owed or have
     ///   sends left; otherwise reverts with `SecondHalfNotOwed`.
     /// - `wallet` must have the key of the half's wallet; otherwise reverts with `ValidationBodyMismatch`.
-    /// - The token must not be paused, `wallet`'s chain not blocked and no hostile change running on it; otherwise
-    ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
+    /// - The token must not be paused, `wallet`'s chain and the sender's chain not blocked, and no hostile change
+    ///   running on `wallet`'s chain; otherwise reverts with `TokenPaused`, `AwayChainBlocked` or
+    ///   `HostileChangeNotOver`.
     /// - A send again only at or after its fixed time; otherwise reverts with `SendNotDue`.
     /// - A new half only below `MAX_NEW_HALVES`; otherwise reverts with `NoNewHalfLeft`.
     /// - A send again only to the half's pinned peer; otherwise the token reverts with `PeerChanged`.

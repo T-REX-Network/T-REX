@@ -392,6 +392,27 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.askToMove(aliceSat, bobSat, FOUR, FOUR, "", salt);
     }
 
+    /// @notice A ticket home wrote and never sent was booked on hold by a receipt: an ask wrote that id, so once the
+    ///         approval module is gone the same ask mined again still cannot take the money over.
+    function test_askToMove_reverts_when_theHoldIsOfATicketHomeWroteAndNeverSent() public {
+        AsyncApprovalModule module = _bindApprovalModule(approver);
+        (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        _askAgain(aliceSat, bobSat, FOUR, salt);
+        polygonGateway.relay(receiptIndex);
+        _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "booked on hold");
+        // Money on hold keeps the module set as it is; only the owner's forced removal takes the module out.
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
+        boundCompliance.forceRemoveModule(address(module));
+        boundCompliance.setAsksPaused(false);
+        vm.stopPrank();
+        _unblockPolygon();
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TicketAlreadyWritten.selector, ticketId));
+        boundCompliance.askToMove(aliceSat, bobSat, FOUR, FOUR, "", salt);
+    }
+
     function test_askToMove_reverts_when_theTokenIsPausedAtTheTake() public {
         (, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);

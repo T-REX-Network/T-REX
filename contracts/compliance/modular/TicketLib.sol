@@ -405,15 +405,17 @@ library TicketLib {
         return store.askLimits.asksPerIdentityPerWindow;
     }
 
-    /// @dev Who may ask: the identity the sending wallet is linked to, a home wallet itself, or an address the
-    ///  AccessManager authorised for this selector. An away wallet has no address here, so its identity asks for it.
+    /// @dev Who may ask: for an away wallet, the identity it is linked to, since that wallet has no address here; for a
+    ///  home wallet, the wallet itself, never its identity; or an address the AccessManager authorised for this
+    ///  selector.
     function _requireCallerOwnsTheWallet(Draft memory draft, bytes calldata from, address token, address authority)
         private
         view
     {
         draft.fromIdentity = address(_registryOf(token).resolveIdentity(from));
         require(draft.fromIdentity != address(0), ErrorsLib.UnverifiedWallet(from));
-        bool callerIsTheWalletsIdentity = msg.sender == draft.fromIdentity;
+        bool anAwayWallet = draft.homeWallet == address(0);
+        bool callerIsTheWalletsIdentity = anAwayWallet && msg.sender == draft.fromIdentity;
         bool callerIsTheHomeWallet = msg.sender == draft.homeWallet;
         bool callerOwnsTheWallet = callerIsTheWalletsIdentity || callerIsTheHomeWallet;
         require(
