@@ -11,7 +11,7 @@ reference chain against it.
 
 | Direction | Type | Body | What the Lite does |
 |---|---|---|---|
-| in | `TICKET` | `TicketMessage { ticketId, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId` |
+| in | `TICKET` | `TicketMessage { ticketId, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId`; a later copy is an ask for the receipt, see rule 3 |
 | in | `MOVE_OUT` | `MoveOutMessage { ticketId, half, toWallet, amount, validUntil }` | the second half of a move: mints `amount` to `toWallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
 | in | `BRING_HOME` | `BringHomeMessage { ticketId, half, wallet, amount, validUntil }` | the half of a bring home: burns `min(amount, balance)` of `wallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
 | out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, askBlockHash, seenMax, seenValidUntil, half, answer }` | one per ticket it executed, echoing the copy it executed under: its `askBlockHash`, its `amountMax` as `seenMax` and its `validUntil` as `seenValidUntil`; `half` is 0 and `answer` is `Executed`. One per move out it answered: `half` is the move out's, `from` is empty, `to` is `toWallet`, the ticket fields are zero, and either `amount` is the move out's and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired`. One per bring home half it answered: `half` is the bring home's, `from` is `wallet`, `to` is empty, the ticket fields are zero, and either `amount` is what it burned, possibly 0, and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired` |
@@ -77,9 +77,12 @@ other chain, and blocks that chain.
 ### Validations
 
 3. **Execute a ticket once, and keep the first copy per id.** A ticket delivered again under a known id is never
-   held in place of the first: a resend repeats it, and a later copy of the same ask, mined again in another block
-   after a reorg (another `askBlockHash`, maybe another `amountMax` or `validUntil`), is ignored. The receipt echoes
-   the copy held, and the reference chain tells which one it was.
+   held in place of the first, whether home sent it again or it is a copy of the same ask mined again in another
+   block after a reorg (another `askBlockHash`, maybe another `amountMax` or `validUntil`): it is an ask for the
+   receipt. The Lite answers it with the receipt it stored, with a stored zero receipt (`Expired`) once the first
+   copy's valid until has passed, or with a still open answer before. A first copy that arrives at or after its
+   valid until is answered with a stored zero receipt and never executed. The receipt echoes the copy held, and the
+   reference chain tells which one it was.
 4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
 6. Execute only for the named wallets, by `from` or by the named `spender`.
@@ -160,7 +163,8 @@ chain's current pair, and the compliance sends a new half to the current pair in
 A ticket's receipt is taken from the bridge and the peer it was pinned to, so after a route switch or a peer change an
 ask for its receipt still goes to the pinned pair while that pair is the former one inside its window (the away token
 holding the ticket is the one that answers), and to the current pair after. Its reservation comes back through a
-cancel once an ask for its receipt went unanswered. A bring home is never cancelled: it ends on its receipt.
+cancel once an ask for its receipt went unanswered. A bring home is never cancelled: it ends on its receipt, or by
+`closeByHand` while its chain is closed.
 
 ## Changing a route or a peer
 
@@ -190,13 +194,14 @@ containment the operator also distrusts its bridge.
 | a good receipt that cannot be applied yet: the token stopped, its away chain blocked, or the sender's away balance too low (for a receipt with no ticket, its away balance and the uncounted credit it may carry) | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
 | 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
 | 9: a move out's receipt from a chain the half was not sent to, naming a sender, minting another amount, or minting an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
-| a move out's receipt with less gas left than home's send of a new half needs, where one is sent | reverts with `NotEnoughGasForTheSecondHalf` and stays deliverable |
+| a move out's receipt with less gas left than home's send of a new half needs, where one is sent | reverts with `NotEnoughGasForTheSecondHalf` and stays deliverable: home asks for 550,000 gas left before that send |
+| a zero answer (`Expired`) that comes late for a half close by hand already decided, or for an older half, judged against the wallet that half was sent to | `ReceiptApplied`, consumed, nothing changes, nothing blocked |
 | 5: an amount outside the range, or other terms echoed, under home's own ask block hash; or, under another ask block hash, a copy above `requestedMax` or the per-ticket cap | applied as it happened, then the compliance blocks that away chain |
 | 10: a bring home's receipt from another chain, for another wallet, naming a receiver, burning more than the bring home's amount, or burning for an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
 
 A receipt for a ticket home knows never reverts for what it carries: it is applied as it happened or refused, and
-consumed either way, see "Lanes". A receipt for an id home does not know reverts and stays deliverable,
-blocking nobody. A reverted
+consumed either way, see "Lanes". A receipt for an id home does not know blocks nobody: a first half is put on
+hold under its sender, a second half is announced (`ReceiptUnknown`) and consumed. A reverted
 delivery, from a tracker module for instance, can be redelivered once the cause is understood, on the assumption
 that the ERC-7786 gateway keeps a reverted execution retryable; a gateway that marks it failed for good loses the
 message, and its author has to send it again. The block of an away chain and the stop of the token are lifted by the
@@ -241,4 +246,5 @@ on the bridge and peer that brought it, so one from a bridge distrusted meanwhil
 - **A home wallet unlinked or no longer verified after a bring home was written:** what the away token burned goes
   back to the away wallet by a `MOVE_OUT`; the agent brings it home again to a wallet of the identity. An identity
   deleted while a satellite position is outstanding is re-registered first.
-- **A lost message is recovered by retry, not by write-off.** A bring home is not cancelled; it ends on its receipt.
+- **A lost message is recovered by retry, not by write-off.** A bring home is not cancelled; it ends on its receipt,
+  or by close by hand while its chain is closed.

@@ -57,7 +57,6 @@ methods {
     function getFrozenTokens(address)   external returns (uint256) envfree;
     function isFrozen(address)          external returns (bool)    envfree;
     function paused()                   external returns (bool)    envfree;
-    function isInboundPaused(bytes32)   external returns (bool)    envfree;
     function freeBalanceOf(address)     external returns (uint256) envfree;
     function authorityAddress()         external returns (address) envfree;
     function complianceAddress()        external returns (address) envfree;
@@ -285,23 +284,6 @@ definition isRestricted(method f) returns bool =
     || f.selector == sig:forcedTransfer(address,address,uint256).selector
     || f.selector == sig:pause().selector
     || f.selector == sig:unpause().selector
-    || f.selector == sig:setInboundPaused(bytes32,bool).selector
     || f.selector == sig:setReceiptRoute(bytes2,bytes,address,uint64,bytes).selector
     || f.selector == sig:closeReceiptRoute(bytes32).selector
     || f.selector == sig:setPeer(bytes32,bytes).selector;
-
-/* -------------------------------------------------------------------------- */
-/*  Per-chain inbound pause                                                    */
-/* -------------------------------------------------------------------------- */
-
-/// A chain's inbound pause moves through two doors only: the pauser's `setInboundPaused`, and a delivery
-/// (`receiveMessage`), where the handler can ask for a chain pause on a replayed settlement or a conflicting proof.
-rule inboundPauseMovesOnlyThroughThePauserOrADelivery(method f, env e, calldataarg args, bytes32 chainKey)
-    filtered { f -> f.selector != sig:receiveMessage(bytes32,bytes,bytes).selector }
-{
-    sane(e);
-    bool before = isInboundPaused(chainKey);
-    f(e, args);
-    assert isInboundPaused(chainKey) != before => f.selector == sig:setInboundPaused(bytes32,bool).selector,
-        "a chain's inbound pause moved outside setInboundPaused and a delivery";
-}
