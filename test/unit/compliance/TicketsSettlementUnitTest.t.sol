@@ -116,9 +116,6 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
-        vm.mockCall(token, abi.encodeWithSelector(IToken.finishMove.selector), "");
-        vm.mockCall(token, abi.encodeWithSelector(IToken.putOnHold.selector), "");
-        vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         _bind(fromSat, aliceIdentity);
         _bind(nativeBob, bobIdentity);
         // A settlement to a native wallet resolves its owner again through the registry's native lookup.

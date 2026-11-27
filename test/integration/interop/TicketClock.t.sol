@@ -220,7 +220,7 @@ contract TicketClockTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, polygon, 0, homesAskBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));

@@ -186,10 +186,9 @@ interface IToken is IERC3643 {
 
     /// @dev Sends a message for one half of a move, a `MOVE_OUT`, a `BRING_HOME`, or a `TICKET` the compliance put on
     ///  the receipt route, to this token's peer on `chainKey` on the receipt route, at full finality, and pins
-    ///  `halfKey` to that route and peer at its first send. A second half sent again goes only to the pair it was
-    ///  pinned to, while it is the chain's current pair; otherwise reverts with `PeerChanged`. A ticket's ask for its
-    ///  receipt goes as {sendOnTicketRoute}'s does: to the pinned pair, the former pair inside its window, or the
-    ///  current pair. Reverts with `ChainNotOpen` when the chain has no open receipt route. Callable by the bound
+    ///  `halfKey` to that route and peer at its first send. A half sent again goes as a ticket's ask for its receipt
+    ///  goes, see {sendOnTicketRoute}: to the pinned pair, the former pair inside its window, or the current pair. A
+    ///  second half goes only to the peer it was pinned to; otherwise reverts with `PeerChanged`. Reverts with `ChainNotOpen` when the chain has no open receipt route. Callable by the bound
     ///  compliance alone; reverts with `OnlyBoundCompliance` otherwise. Emits `HalfPinned` at the first send and
     ///  `ProtocolMessageSent`.
     /// @param chainKey the away chain the half goes to

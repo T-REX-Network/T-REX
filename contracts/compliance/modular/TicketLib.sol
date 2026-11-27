@@ -81,15 +81,15 @@ import { IModule } from "./modules/IModule.sol";
 
 /**
  * @title TicketLib
- * @dev The layout of the compliance's validation record, and the issuance half of a validation's life,
- * deployed once and linked: the questions a request must answer, then the id built from the whole request,
+ * @dev The layout of the compliance's ticket record, and the first part of a ticket's life, deployed once and
+ * linked: the questions a request must answer, then the id built from the whole request,
  * the record, the reservation, the announcement and the ticket the away token will execute against; the
  * answer of an approval; the ask for the receipt; and the table of what each ticket state keeps reserved, {moveTo}.
  *
  * That is storage writes and ABI encoding the compliance would otherwise carry, and it is what kept it over
  * EIP-170. The compliance reaches it by DELEGATECALL, so the storage is its own namespaces at the slots they
  * always had, the token and the modules see the compliance as their caller, and every event is the
- * compliance's. What happens once a satellite executed, or never did, is {ReceiptLib}.
+ * compliance's. What happens once an away token executed, or never did, is {ReceiptLib}.
  */
 library TicketLib {
 
@@ -101,7 +101,7 @@ library TicketLib {
         ITickets.ValidityWindows validityWindows;
         /// The waiting time of each away chain. Zero blocks asks from that chain.
         mapping(bytes32 chainKey => uint64 window) waitingTimes;
-        /// Every requested validation, kept forever, under its id, see {ticketIdOf}.
+        /// Every ticket, kept forever, under its id, see {ticketIdOf}.
         mapping(bytes32 ticketId => ITickets.Ticket validation) validations;
         /// Good receipts that could not be applied yet, per half, see {ITickets-WaitingReceipt}. Written by the
         /// receipt path, deleted when applied or refused by hand.
@@ -197,7 +197,7 @@ library TicketLib {
         bool onReceiptRoute;
     }
 
-    /// @dev Issues a validation, see {ITickets-askToMove}. Where is this going and may the caller ask for it; then the
+    /// @dev Writes a ticket, see {ITickets-askToMove}. Where is this going and may the caller ask for it; then the
     ///  id of the request, and the take of money on hold a receipt for that id put there first, before any question
     ///  on limits or balances: those tokens already left the sender's wallet, so asking for them again would refuse
     ///  the ask. Then by when must it happen, how much may actually move, and may the named spender execute it.
@@ -230,7 +230,7 @@ library TicketLib {
             ITickets.TicketKind.MOVE,
             draft.fromKey,
             draft.toKey,
-            keccak256(spender),
+            spenderKeyOf(spender),
             draft.amountMin,
             draft.requestedMax,
             salt
@@ -421,7 +421,7 @@ library TicketLib {
         );
     }
 
-    /// @dev Whether the AccessManager lets the caller request a validation for any wallet, now. Asked only when
+    /// @dev Whether the AccessManager lets the caller ask for any wallet, now. Asked only when
     ///  the caller is not the wallet's identity, so an identity pays no call to the manager.
     function _mayRequestForAnyWallet(address authority) private view returns (bool) {
         (bool immediate,) =
@@ -465,7 +465,7 @@ library TicketLib {
     ///  identity, since relocating your own tokens changes no position and no distribution rule applies.
     function _capAtWhatTheRulesAllow(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (ComplianceLedgerLib.isRelocation(draft.fromIdentity, draft.toIdentity)) return;
-        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+        IModule.TransferContext memory transferContext = TransferContextLib.issuance(
             draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
@@ -475,17 +475,17 @@ library TicketLib {
             draft.amountMax,
             spender
         );
-        uint256 allowed = ModuleSetLib.callCheckTransfer(ctx);
+        uint256 allowed = ModuleSetLib.callCheckTransfer(transferContext);
         if (allowed < draft.amountMax) draft.amountMax = allowed;
         require(draft.amountMin <= draft.amountMax, ErrorsLib.EmptyValidationRange(draft.amountMin, draft.amountMax));
     }
 
     /// @dev Who may execute: every `SPENDER` module must accept the named spender, since no module runs on the
-    ///  satellite and this is the only place it can be refused. A validation the sender executes itself names
+    ///  away chain and this is the only place it can be refused. A ticket the sender executes itself names
     ///  no spender and asks nobody. Asked on a relocation too: who executes is not about distribution.
     function _requireSpenderAllowed(Draft memory draft, bytes calldata to, bytes calldata spender) private view {
         if (spender.length == 0) return;
-        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+        IModule.TransferContext memory transferContext = TransferContextLib.issuance(
             draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
@@ -495,10 +495,10 @@ library TicketLib {
             draft.amountMax,
             spender
         );
-        require(ModuleSetLib.spenderAllowed(ctx), ErrorsLib.ValidationSpenderRefused(spender));
+        require(ModuleSetLib.spenderAllowed(transferContext), ErrorsLib.ValidationSpenderRefused(spender));
     }
 
-    /// @dev Turns a settled draft into a validation under its id: keep its terms and reserve the amount. With no
+    /// @dev Turns a finished draft into a ticket under its id: keep its terms and reserve the amount. With no
     ///  `APPROVAL` module bound, issue it at once: build the object the away token will execute against, announce it
     ///  and send it to the sender's away chain on the route chosen at the ask. With one bound, keep it
     ///  `WaitingForApproval` instead, sent nowhere until {answerApproval} opens it and anyone sends it, see {sendTicket}.
@@ -546,7 +546,7 @@ library TicketLib {
         _dispatch(token, ticketId, draft.fromChainKey, draft.validUntil, body);
     }
 
-    /// @dev Answers a validation awaiting approval, see {ITickets-answerApproval}. No rule runs again: every rule
+    /// @dev Answers a ticket awaiting approval, see {ITickets-answerApproval}. No rule runs again: every rule
     ///  ran and the range was reserved at the request, so an approval only narrows and opens the ticket. Nothing is
     ///  sent here: anyone makes the first send with {sendTicket}, so the approver never pays for a send, nor reverts
     ///  on a stopped token or a blocked chain.
@@ -554,29 +554,31 @@ library TicketLib {
     function answerApproval(bytes32 ticketId, uint256 approvedMax, address token) external {
         ValidationStorage storage store = layout();
         require(isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
-        ITickets.Ticket storage validation = store.validations[ticketId];
+        ITickets.Ticket storage ticket = store.validations[ticketId];
         require(
-            validation.status == ITickets.TicketStatus.WaitingForApproval,
-            ErrorsLib.ValidationNotAwaitingApproval(ticketId, uint8(validation.status))
+            ticket.status == ITickets.TicketStatus.WaitingForApproval,
+            ErrorsLib.ValidationNotAwaitingApproval(ticketId, uint8(ticket.status))
         );
         require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
-        require(block.timestamp < validation.validUntil, ErrorsLib.ValidationExpired(ticketId, validation.validUntil));
+        require(block.timestamp < ticket.validUntil, ErrorsLib.ValidationExpired(ticketId, ticket.validUntil));
         _requireNoReceiptWaitsForTheTicket(store, ticketId);
 
-        if (approvedMax == 0 || approvedMax < validation.amountMin) {
-            moveTo(validation, ITickets.TicketStatus.Cancelled, token);
+        bool refusedOutright = approvedMax == 0;
+        bool belowTheMinimum = approvedMax < ticket.amountMin;
+        if (refusedOutright || belowTheMinimum) {
+            moveTo(ticket, ITickets.TicketStatus.Cancelled, token);
             emit EventsLib.ValidationApprovalRefused(ticketId);
             return;
         }
 
         // The deadline stays the request's: the rules ran then, so the time spent waiting comes out of the
-        // satellite's time to execute rather than adding to how old the rules may be when it does. Both rows hold
+        // away token's time to execute rather than adding to how old the rules may be when it does. Both rows hold
         // the ask, so the narrowing alone gives something back.
-        if (approvedMax < validation.amountMax) {
-            _release(validation, validation.amountMax - approvedMax, token);
-            validation.amountMax = approvedMax;
+        if (approvedMax < ticket.amountMax) {
+            _release(ticket, ticket.amountMax - approvedMax, token);
+            ticket.amountMax = approvedMax;
         }
-        validation.status = ITickets.TicketStatus.Open;
+        ticket.status = ITickets.TicketStatus.Open;
     }
 
     /// @dev Sends a ticket, for anyone, see {ITickets-sendTicket}: the first send of a ticket the approver opened,
@@ -833,7 +835,7 @@ library TicketLib {
     }
 
     /// @dev Nothing goes out while the token is paused: an incident is under investigation, every receipt waits
-    ///  here unapplied, so a validation sent now could only be executed on a satellite with its report held, and
+    ///  here unapplied, so a ticket sent now could only be executed on an away chain with its receipt held, and
     ///  its window could run out before the pause is lifted. Ask, approval and ask for the receipt alike. For the same
     ///  reason no ticket whose receipt may be waiting is cancelled under it, see {requireTicketCanBeDecided}.
     function requireTokenRunning(address token) internal view {
@@ -872,7 +874,7 @@ library TicketLib {
         ValidationStorage storage store = layout();
         if (store.blockedAwayChains[chainKey]) return;
         store.blockedAwayChains[chainKey] = true;
-        emit EventsLib.AwayChainBlockStarted(chainKey);
+        emit EventsLib.AwayChainBlockSet(chainKey, true);
     }
 
     /// @dev Lifts the block of an away chain. The same state again changes nothing and emits nothing.
@@ -880,19 +882,20 @@ library TicketLib {
         ValidationStorage storage store = layout();
         if (!store.blockedAwayChains[chainKey]) return;
         store.blockedAwayChains[chainKey] = false;
-        emit EventsLib.AwayChainUnblocked(chainKey);
+        emit EventsLib.AwayChainBlockSet(chainKey, false);
     }
 
-    /// @dev Whether the id was taken: issued, or recorded awaiting approval. Every record names the identity the
-    ///  sender resolved to, which is never zero, so that field says whether the slot was written.
+    /// @dev Whether the id was taken: a ticket, a bring home, or a record a receipt with no ticket wrote. Every record
+    ///  names its sender's wallet key, a hash that is never zero, so that field says whether the slot was written. The
+    ///  sender's identity would not: a receipt can name a wallet linked to none.
     function isRecorded(ValidationStorage storage store, bytes32 ticketId) internal view returns (bool) {
-        return store.validations[ticketId].fromIdentity != address(0);
+        return store.validations[ticketId].fromKey != bytes32(0);
     }
 
     /// @dev The id of a ticket: a hash of the whole request, never of the block it is mined in. The same request
     ///  gets the same id in any block, so a ticket sent before a reorg keeps its id when the ask is mined again.
     ///  `requestedMax` is the maximum as asked: home narrows `amountMax` from the state of the block, so it is left
-    ///  out. `spenderKey` is `keccak256` of the spender's envelope, of empty bytes when there is none.
+    ///  out. `spenderKey` is {spenderKeyOf} the spender's envelope.
     function ticketIdOf(
         ITickets.TicketKind kind,
         bytes32 fromKey,
@@ -903,6 +906,13 @@ library TicketLib {
         bytes32 salt
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(kind, fromKey, toKey, spenderKey, amountMin, requestedMax, salt));
+    }
+
+    /// @dev The key of a spender in a ticket id: `keccak256` of its envelope, zero when there is none, so the away
+    ///  token builds the id of a ticket that names no spender without hashing an empty envelope.
+    function spenderKeyOf(bytes memory spender) internal pure returns (bytes32) {
+        if (spender.length == 0) return bytes32(0);
+        return keccak256(spender);
     }
 
     /// @dev The ask block hash: names the copy of a ticket written in this block, the ask's own block, or the
@@ -923,9 +933,9 @@ library TicketLib {
     ///  no honest receipt can be in flight. The reservation comes back.
     /// @param token the token the compliance is bound to
     function discardUnanswered(bytes32 ticketId, address token) internal {
-        ITickets.Ticket storage validation = layout().validations[ticketId];
-        require(block.timestamp >= validation.validUntil, ErrorsLib.CancelNotDue(ticketId, validation.validUntil));
-        moveTo(validation, ITickets.TicketStatus.Cancelled, token);
+        ITickets.Ticket storage ticket = layout().validations[ticketId];
+        require(block.timestamp >= ticket.validUntil, ErrorsLib.CancelNotDue(ticketId, ticket.validUntil));
+        moveTo(ticket, ITickets.TicketStatus.Cancelled, token);
         emit EventsLib.TicketCancelled(ticketId);
     }
 
@@ -937,7 +947,7 @@ library TicketLib {
         return aMove && noCopyLeft && _holdsTheAsk(ticket.status);
     }
 
-    /// @dev Keeps the validation forever and reserves its amount, with the route chosen for it. Everything written
+    /// @dev Keeps the ticket forever and reserves its amount, with the route chosen for it. Everything written
     ///  here is the issuance half of the lifecycle; the ask block hash is written at the first send, see
     ///  {_issueRecorded}. A ticket on the ticket route counts in that route's window.
     function _record(bytes32 ticketId, bytes calldata from, bytes calldata spender, Draft memory draft, address token)
@@ -1034,7 +1044,7 @@ library TicketLib {
         IToken(token).sendOnTicketRoute(chainKey, ticketId, body);
     }
 
-    /// @dev Keeps a recorded validation waiting for the approval module, and tells the module. The validity window
+    /// @dev Keeps a recorded ticket waiting for the approval module, and tells the module. The validity window
     ///  of the receipt route from now is the deadline for the answer and for the first send after it.
     function _awaitApproval(
         bytes32 ticketId,
@@ -1051,7 +1061,7 @@ library TicketLib {
             ticketId, from, to, spender, draft.amountMin, draft.amountMax, draft.validUntil
         );
 
-        IModule.TransferContext memory ctx = TransferContextLib.issuance(
+        IModule.TransferContext memory transferContext = TransferContextLib.issuance(
             draft.fromChainKey,
             draft.fromIdentity,
             draft.toIdentity,
@@ -1061,7 +1071,7 @@ library TicketLib {
             draft.amountMax,
             spender
         );
-        IApprovalModule(approvalModule).approvalRequested(ticketId, ctx, draft.validUntil);
+        IApprovalModule(approvalModule).approvalRequested(ticketId, transferContext, draft.validUntil);
     }
 
     /// @dev Moves a ticket to `next` and releases what its old row of the table holds and the new row does not.
@@ -1145,15 +1155,15 @@ library TicketLib {
     /// @dev Gives back `amount` of what a ticket reserved: in the ledger's total, against the identities unless both
     ///  wallets are one identity's, and against the sending away wallet on the token. {moveTo} gives back a whole
     ///  row; an approver's narrowing gives back part of it. A home wallet reserved nothing on the token.
-    function _release(ITickets.Ticket storage validation, uint256 amount, address token) private {
+    function _release(ITickets.Ticket storage ticket, uint256 amount, address token) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal -= amount;
-        if (!validation.relocation) {
-            ledger.pendingOut[validation.fromIdentity] -= amount;
-            ledger.pendingIn[validation.toIdentity] -= amount;
+        if (!ticket.relocation) {
+            ledger.pendingOut[ticket.fromIdentity] -= amount;
+            ledger.pendingIn[ticket.toIdentity] -= amount;
         }
-        (bool fromHome,) = WalletKeyLib.isReferenceChain(validation.fromWallet);
-        if (!fromHome) IToken(token).releaseFromTicket(validation.fromWallet, amount);
+        (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+        if (!fromHome) IToken(token).releaseFromTicket(ticket.fromWallet, amount);
     }
 
     /// @dev The bound `APPROVAL` module, or zero when none is: the compliance binds one at most.

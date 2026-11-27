@@ -20,8 +20,8 @@ Every message carries the envelope version 2 (`MessageTypesLib.VERSION`); a mess
 on both sides.
 
 The ticket id is built from the whole request: `keccak256(abi.encode(kind, fromKey, toKey, spenderKey, amountMin,
-requestedMax, salt))`, where the keys are `keccak256` of the canonical envelopes (of empty bytes for no spender) and
-`kind` is 0 for a move and 1 for a bring home. The same ask mined in any block gets the same id. The ask block hash,
+requestedMax, salt))`, where the keys are `keccak256` of the canonical envelopes, `spenderKey` is zero when there is
+no spender, and `kind` is 0 for a move and 1 for a bring home. The same ask mined in any block gets the same id. The ask block hash,
 `keccak256(abi.encode(block.number, blockhash(block.number - 1), amountMax, validUntil))` read in the block that
 issued the ticket, names the copy: two copies of one ask mined in two blocks share the id and differ in it.
 
@@ -82,14 +82,22 @@ other chain, and blocks that chain.
    receipt. The Lite answers it with the receipt it stored, with a stored zero receipt (`Expired`) once the first
    copy's valid until has passed, or with a still open answer before. A first copy that arrives at or after its
    valid until is answered with a stored zero receipt and never executed. The receipt echoes the copy held, and the
-   reference chain tells which one it was.
+   reference chain tells which one it was. A ticket whose `ticketId` is not the id of its own terms (the formula
+   above, with `kind` 0) is refused (`TicketIdMismatch`) and never held, so nobody puts other terms under a known id.
+   Answers to later copies are limited to six per half (`MAX_ANSWERS_PER_HALF`): home sends at most three asks for a
+   ticket's receipt and three sends of a half, so six covers home and a redelivery of each; past the limit the
+   delivery is consumed and nothing is sent (`AnswerNotSent`).
 4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
 6. Execute only for the named wallets, by `from` or by the named `spender`.
 7. Report every ticket it executed, exactly once, echoing the copy it executed under (`askBlockHash`, `seenMax`,
    `seenValidUntil`) with `answer` `Executed`, and both wallets. A report lost on the way may be sent again byte for
-   byte: the reference chain keeps one receipt per half, recognises the same one again (`ReceiptDuplicate`) and
-   changes nothing; another receipt for a half that already has one blocks the Lite's chain.
+   byte: the reference chain keeps one receipt per half, recognises the same one again and changes nothing; another
+   receipt for a half that already has one blocks the Lite's chain. Anyone may ask the Lite to send a stored receipt
+   again (`resendReceipt(ticketId, half)`), at most three times per half (`MAX_RECEIPT_RESENDS`), the first one
+   `receiptResendWait` after its last send, the next after two waits, the next after four: every send is paid from
+   the bridge's fee balance. The resends are counted apart from the answers of rule 3, so a resend by anyone never
+   uses up the answers home needs.
 
 ### Instructions
 
@@ -155,16 +163,38 @@ Nothing is written off; a lost message is sent again.
 | Lost | Who retries | How |
 |---|---|---|
 | ticket (an ask for its receipt) | anyone | `sendTicket(ticketId, chainKey, to, spender)`: while `Open`, three asks at most, the first one waiting time after the later of `validUntil` and `seenValidUntil`, each next one a waiting time later; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out on the route chosen at the ask (the ticket route falls back to the receipt route when its bridge is no longer trusted), to the pinned pair while it is the current pair or the former pair inside its window, and to the current pair otherwise; refused while that away chain is blocked or the token is paused; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
-| move out (a second half) | anyone | `sendSecondHalf(ticketId, wallet)`, `wallet` read off `SecondHalfSent`: an owed half (answered `Expired`, or its send failed inside the receipt's delivery) is sent as a new half with a fresh valid until, at most four halves per money on hold (`NoNewHalfLeft`); otherwise the latest half is sent again byte for byte, three sends at most, at fixed times: one waiting time of its chain after its valid until, then two more. A half whose pinned pair is no longer the chain's current pair goes to the current pair as a new half; otherwise it goes to the pinned pair only |
-| bring home, or its receipt | anyone | `sendSecondHalf(ticketId, awayWallet)` while the bring home is open, at the same fixed times as a move out; the Lite answers with its stored receipt or a zero receipt (`Expired`), which ends the bring home with nothing moved. A half whose pinned pair is no longer the chain's current pair goes to the current pair as a new half |
+| move out (a second half) | anyone | `sendSecondHalf(ticketId, wallet)`, `wallet` read off `SecondHalfSent`: an owed half (answered `Expired`, or its send failed inside the receipt's delivery) is sent as a new half with a fresh valid until, at most four halves per money on hold (`NoNewHalfLeft`); otherwise the latest half is sent again byte for byte, three sends at most, at fixed times: one waiting time of its chain after its valid until, then two more. A half sent again goes only to its pinned peer: through the former pair inside the window of a planned change, or the current route while that peer is still the chain's (`PeerChanged` otherwise) |
+| bring home, or its receipt | anyone | `sendSecondHalf(ticketId, awayWallet)` while the bring home is open, at the same fixed times as a move out; the Lite answers with its stored receipt or a zero receipt (`Expired`), which ends the bring home with nothing moved. Sent again only to its pinned peer, as a move out is |
 
-A half sent again never retargets: the token refuses it (`PeerChanged`) once its pinned pair is no longer the
-chain's current pair, and the compliance sends a new half to the current pair instead, past the old half's valid until.
+A half sent again never retargets: it goes to the peer it was pinned to, which holds it, and the token refuses it
+(`PeerChanged`) once that peer is gone. A new half is taken only after a zero answer or a failed send, never because a
+route or a peer changed: the old half may still mint, and a new half would mint the same money twice. A half whose peer
+was replaced as hostile keeps no former pair, so it is ended by closing its chain by hand. The old away token must stay
+alive until every half pinned to it is answered.
 A ticket's receipt is taken from the bridge and the peer it was pinned to, so after a route switch or a peer change an
 ask for its receipt still goes to the pinned pair while that pair is the former one inside its window (the away token
 holding the ticket is the one that answers), and to the current pair after. Its reservation comes back through a
 cancel once an ask for its receipt went unanswered. A bring home is never cancelled: it ends on its receipt, or by
 `closeByHand` while its chain is closed.
+
+### When a half is never answered
+
+Home bounds what it sends for one money on hold: three sends per half and four halves (`newHalves` on `ticketOf`
+reads the halves taken, and `NoNewHalfLeft` refuses a fifth). Three cases leave the money on hold with nothing more to send: the
+fourth half dies too (answered `Expired`), a half goes unanswered after its three sends, or an open bring home goes
+unanswered after its three sends. So does a half whose pinned peer was replaced as hostile (`PeerChanged`). Nothing on
+home's clock ends them: the away chain may still have minted or burned. The operator's exit:
+
+1. Find why the away chain does not answer (its away token, its bridge, the fee balance) and fix it if it can be
+   fixed: a half sent again inside its three sends, or a stored receipt sent again with `resendReceipt`, ends it the
+   normal way.
+2. Otherwise close the chain's receipt route (`closeReceiptRoute`, the identity manager). This stops every message
+   from and to that chain, for every ticket on it.
+3. Read the away token on that chain from one final block: its stored receipt for the half and its clock. Call
+   `closeByHand(ticketId, receiver, reading)` on the compliance. A stored receipt is applied as if it had arrived;
+   without one, once that chain's clock is past the half's valid until, the money goes back to the sender, and an
+   open bring home ends with nothing moved.
+4. Set the receipt route again once every ticket of that chain is decided.
 
 ## Changing a route or a peer
 

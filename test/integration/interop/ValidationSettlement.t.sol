@@ -205,7 +205,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(id, polygon, 80);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(below);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that broke the terms is blocked");
@@ -266,7 +266,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(index);
 
         assertTrue(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(index)));
@@ -315,7 +315,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(replay);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));
@@ -345,7 +345,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(waiting.deliveredBy, address(polygonGateway));
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainUnblocked(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, false);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
         vm.prank(makeAddr("anyone"));
@@ -489,7 +489,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(chainKey);
+        emit EventsLib.AwayChainBlockSet(chainKey, true);
         gateway.relay(index);
 
         assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "the leg is consumed");

@@ -101,7 +101,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(inventedId, optimism, FOUR, receipt.askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(optimism);
+        emit EventsLib.AwayChainBlockSet(optimism, true);
         optimismGateway.relay(index);
 
         assertEq(boundCompliance.ticketOf(inventedId).fromIdentity, address(0), "nothing booked");
@@ -238,6 +238,76 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "still on hold");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "a take that breaks the terms blocks nobody");
+    }
+
+    /// @notice A hostile away token books another holder's money under Bob's own request id. Bob's ask must not take
+    ///         it: the held receipt names Alice's wallet, not Bob's.
+    function test_askToMove_reverts_when_theHeldReceiptNamesOtherWallets() public {
+        bytes32 salt = _salt();
+        bytes32 bobsId = _ticketId(bobSat, bobHome, "", FOUR, FOUR, salt);
+        MessageTypesLib.ReceiptMessage memory aliceAsSender = _receiptWithNoTicket(bobsId, aliceSat, bobHome, FOUR);
+        polygonGateway.relay(_awayTokenSends(polygonGateway, polygonLite, aliceAsSender));
+        assertEq(token.onHoldOf(bobsId), FOUR, "alice's money is on hold under bob's id");
+
+        vm.prank(address(bobIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HeldReceiptBreaksItsTerms.selector, bobsId));
+        boundCompliance.askToMove(bobSat, bobHome, FOUR, FOUR, "", salt);
+
+        assertEq(token.balanceOf(bob), 0, "bob is minted nothing at home");
+        assertEq(token.onHoldOf(bobsId), FOUR, "the money stays on hold for its cancel");
+    }
+
+    /// @notice A receipt naming Alice's wallet waits under Bob's request id while the token is stopped; Bob's ask is
+    ///         then mined. Applying the waiting receipt judges it again against the ticket: it is refused and blocks
+    ///         its chain, and Bob is minted nothing.
+    function test_applyWaitingReceipt_refusesAReceiptNamingOtherWallets_onceTheTicketIsWritten() public {
+        vm.prank(agent);
+        token.mint(bob, FOUR);
+        vm.prank(bob);
+        boundCompliance.askToMove(bobHome, bobSat, FOUR, FOUR, "", _salt());
+        _relayAll(polygonGateway);
+        _relayAll(polygonGateway);
+        assertEq(token.awayBalanceOf(bobSat), FOUR, "bob holds 4 on Polygon");
+
+        bytes32 salt = _salt();
+        bytes32 bobsId = _ticketId(bobSat, bobHome, "", FOUR, FOUR, salt);
+        _pauseTheToken();
+        MessageTypesLib.ReceiptMessage memory aliceAsSender = _receiptWithNoTicket(bobsId, aliceSat, bobHome, FOUR);
+        polygonGateway.relay(_awayTokenSends(polygonGateway, polygonLite, aliceAsSender));
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(bobsId, 0);
+        assertTrue(boundCompliance.waitingReceiptOf(halfKey).bodyHash != bytes32(0), "it waits");
+        vm.prank(agent);
+        token.unpause();
+        vm.prank(address(bobIdentity));
+        boundCompliance.askToMove(bobSat, bobHome, FOUR, FOUR, "", salt);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptRefused(bobsId, polygon, FOUR, aliceAsSender.askBlockHash);
+        boundCompliance.applyWaitingReceipt(halfKey, aliceAsSender);
+
+        assertEq(token.balanceOf(bob), 0, "bob is minted nothing at home");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice keeps her away balance");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
+        assertEq(boundCompliance.waitingReceiptOf(halfKey).bodyHash, bytes32(0), "it no longer waits");
+        _assertStatus(bobsId, ITickets.TicketStatus.Open, "bob's ticket stays open");
+    }
+
+    /// @notice A zero receipt ended an id whose sender was linked to no identity. That id is recorded all the same:
+    ///         once the wallet is linked, an ask under it is refused, so no ticket is written over an answered id
+    ///         whose real receipt would then be refused as another body and block the chain.
+    function test_askToMove_reverts_when_aZeroReceiptFromAnUnlinkedWalletEndedTheId() public {
+        Account memory daveOnPolygon = makeAccount("daveOnPolygon");
+        bytes memory daveSat = InteroperableAddress.formatEvmV1(POLYGON, daveOnPolygon.addr);
+        bytes32 salt = _salt();
+        bytes32 ticketId = _ticketId(daveSat, bobSat, "", FOUR, FOUR, salt);
+        MessageTypesLib.ReceiptMessage memory nothingMoved = _receiptWithNoTicket(ticketId, daveSat, bobSat, 0);
+        polygonGateway.relay(_awayTokenSends(polygonGateway, polygonLite, nothingMoved));
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the id is ended");
+
+        _linkSatelliteWallet(aliceIdentity, POLYGON, daveOnPolygon);
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TicketAlreadyWritten.selector, ticketId));
+        boundCompliance.askToMove(daveSat, bobSat, FOUR, FOUR, "", salt);
     }
 
     function test_askToMove_reverts_when_theIdWasAnsweredWithZero() public {

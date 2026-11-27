@@ -108,7 +108,7 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         assertFalse(mc.isAwayChainBlocked(POLYGON));
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.AwayChainBlockStarted(POLYGON);
+        emit EventsLib.AwayChainBlockSet(POLYGON, true);
         mc.blockAwayChain(POLYGON);
 
         assertTrue(mc.isAwayChainBlocked(POLYGON));
@@ -119,7 +119,7 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.blockAwayChain(POLYGON);
 
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.AwayChainUnblocked(POLYGON);
+        emit EventsLib.AwayChainBlockSet(POLYGON, false);
         mc.unblockAwayChain(POLYGON);
 
         assertFalse(mc.isAwayChainBlocked(POLYGON));

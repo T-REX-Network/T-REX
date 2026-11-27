@@ -130,7 +130,7 @@ library TREXMessagingLib {
         /// when the route is closed, which only `closeReceiptRoute` does.
         mapping(bytes32 chainKey => address bridge) receiptRoutes;
 
-        /// This token's Lite on each chain, ERC-7930. Empty falls back to the token's own address.
+        /// This token's away token on each chain, its peer, ERC-7930. Empty falls back to the token's own address.
         mapping(bytes32 chainKey => bytes peer) peers;
 
         /// Transport-level replay guard, for nonzero receive ids. The pinned receiver base keeps no record of its own.
@@ -183,14 +183,14 @@ library TREXMessagingLib {
 
     /// @dev See {ITREXMessaging-peerFor}.
     function peerFor(bytes32 chainKey) public view returns (bytes memory) {
-        MessagingStorage storage s = layout();
+        MessagingStorage storage messagingStorage = layout();
 
-        bytes memory peer = s.peers[chainKey];
+        bytes memory peer = messagingStorage.peers[chainKey];
         if (peer.length > 0) {
             return peer;
         }
 
-        ChainPrefix storage chain = s.chains[chainKey];
+        ChainPrefix storage chain = messagingStorage.chains[chainKey];
         if (chain.chainType != MessageTypesLib.EVM_CHAIN_TYPE || chain.chainReference.length == 0) {
             return "";
         }
@@ -200,10 +200,13 @@ library TREXMessagingLib {
 
     /// @dev See {ITREXMessaging-isChainOpen}.
     function isChainOpen(bytes32 chainKey) external view returns (bool) {
-        MessagingStorage storage s = layout();
-        address gateway = s.receiptRoutes[chainKey];
+        MessagingStorage storage messagingStorage = layout();
+        address bridge = messagingStorage.receiptRoutes[chainKey];
 
-        return gateway != address(0) && s.registry.isReceiptBridge(gateway) && peerFor(chainKey).length > 0;
+        bool routeSet = bridge != address(0);
+        bool routeIsAReceiptBridge = messagingStorage.registry.isReceiptBridge(bridge);
+        bool peerKnown = peerFor(chainKey).length > 0;
+        return routeSet && routeIsAReceiptBridge && peerKnown;
     }
 
     /* ----- Configuration ----- */
@@ -226,17 +229,17 @@ library TREXMessagingLib {
         uint64 awayChainSelector,
         bytes calldata awayReceiptBridge
     ) external {
-        MessagingStorage storage s = layout();
+        MessagingStorage storage messagingStorage = layout();
 
         // A ticket bridge, a distrusted bridge and zero are all refused here: none is a receipt bridge.
-        require(s.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
-        bytes32 chainKey = _registerChain(s, chainType, chainReference);
+        require(messagingStorage.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
+        bytes32 chainKey = _registerChain(messagingStorage, chainType, chainReference);
         _requireFullFinality(bridge, chainKey, awayChainSelector, awayReceiptBridge);
-        _requireNoChangeInsideTheWindow(s, chainKey);
+        _requireNoChangeInsideTheWindow(messagingStorage, chainKey);
 
-        _keepTheFormerRoute(s, chainKey);
-        s.receiptRoutes[chainKey] = bridge;
-        AwayReceiptBridge storage awaySide = s.awayReceiptBridges[chainKey];
+        _keepTheFormerRoute(messagingStorage, chainKey);
+        messagingStorage.receiptRoutes[chainKey] = bridge;
+        AwayReceiptBridge storage awaySide = messagingStorage.awayReceiptBridges[chainKey];
         awaySide.chainSelector = awayChainSelector;
         awaySide.bridge = awayReceiptBridge;
 
@@ -245,53 +248,54 @@ library TREXMessagingLib {
 
     /// @dev See {ITREXMessaging-closeReceiptRoute}. Authorization is the caller's.
     function closeReceiptRoute(bytes32 chainKey) external {
-        MessagingStorage storage s = layout();
-        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+        MessagingStorage storage messagingStorage = layout();
+        require(messagingStorage.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
-        delete s.receiptRoutes[chainKey];
-        delete s.awayReceiptBridges[chainKey];
+        delete messagingStorage.receiptRoutes[chainKey];
+        delete messagingStorage.awayReceiptBridges[chainKey];
 
         emit EventsLib.ReceiptRouteClosed(chainKey);
     }
 
     /// @dev See {ITREXMessaging-setTicketRoute}. Authorization is the caller's.
     function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) external {
-        MessagingStorage storage s = layout();
+        MessagingStorage storage messagingStorage = layout();
 
         // A receipt bridge is never a ticket route: a bridge has one record, so it can never carry receipts in
         // for one away chain while it carries tickets ahead of finality for another.
         bool sendsTicketsOnTheReceiptRoute = bridge == address(0);
-        bool isTicketBridge = s.registry.isTrusted(bridge) && !s.registry.isReceiptBridge(bridge);
+        bool isTicketBridge =
+            messagingStorage.registry.isTrusted(bridge) && !messagingStorage.registry.isReceiptBridge(bridge);
         require(sendsTicketsOnTheReceiptRoute || isTicketBridge, ErrorsLib.NotATicketBridge(bridge));
 
-        bytes32 chainKey = _registerChain(s, chainType, chainReference);
-        s.ticketRoutes[chainKey] = bridge;
+        bytes32 chainKey = _registerChain(messagingStorage, chainType, chainReference);
+        messagingStorage.ticketRoutes[chainKey] = bridge;
 
         emit EventsLib.TicketRouteSet(chainKey, bridge);
     }
 
     /// @dev See {ITREXMessaging-setPeer}. Authorization is the caller's.
     function setPeer(bytes32 chainKey, bytes calldata peer) external {
-        MessagingStorage storage s = layout();
-        _requireNoChangeInsideTheWindow(s, chainKey);
-        _requireValidPeer(s, chainKey, peer);
+        MessagingStorage storage messagingStorage = layout();
+        _requireNoChangeInsideTheWindow(messagingStorage, chainKey);
+        _requireValidPeer(messagingStorage, chainKey, peer);
 
-        _keepTheFormerRoute(s, chainKey);
-        s.peers[chainKey] = peer;
+        _keepTheFormerRoute(messagingStorage, chainKey);
+        messagingStorage.peers[chainKey] = peer;
 
         emit EventsLib.PeerSet(chainKey, peer);
     }
 
     /// @dev See {ITREXMessaging-replaceHostilePeer}. Authorization is the caller's.
     function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external {
-        MessagingStorage storage s = layout();
-        _requireValidPeer(s, chainKey, peer);
+        MessagingStorage storage messagingStorage = layout();
+        _requireValidPeer(messagingStorage, chainKey, peer);
 
         // No former pair: home cannot tell a receipt of the hostile peer from an honest one.
         uint64 endsAt = uint64(block.timestamp) + _changeWindowOf(chainKey);
-        delete s.formerReceiptRoutes[chainKey];
-        s.hostileChangeEndsAt[chainKey] = endsAt;
-        s.peers[chainKey] = peer;
+        delete messagingStorage.formerReceiptRoutes[chainKey];
+        messagingStorage.hostileChangeEndsAt[chainKey] = endsAt;
+        messagingStorage.peers[chainKey] = peer;
 
         emit EventsLib.PeerSet(chainKey, peer);
         emit EventsLib.HostilePeerReplaced(chainKey, peer, endsAt);
@@ -300,56 +304,43 @@ library TREXMessagingLib {
     /* ----- Outbound ----- */
 
     /// @dev Sends a ticket the compliance put on the ticket route to this token's peer on `chainKey`, through the
-    /// chain's ticket route, and pins the half to the receipt route and the peer, see {_ticketPairOf}. A ticket bridge
+    /// chain's ticket route, and pins the half to the receipt route and the peer, see {_halfPairOf}. A ticket bridge
     /// the registry distrusted since falls back to the receipt route rather than stranding an ask: that only ever
     /// adds finality. A ticket the compliance put on the receipt route goes through {sendOnReceiptRoute}.
     function sendComplianceValidation(bytes32 chainKey, bytes32 ticketId, bytes memory body)
         external
         returns (bytes32 sendId)
     {
-        MessagingStorage storage s = layout();
-        (address receiptRoute, bytes memory peer) = _ticketPairOf(s, chainKey, MessageTypesLib.halfKeyOf(ticketId, 0));
+        MessagingStorage storage messagingStorage = layout();
+        (address receiptRoute, bytes memory peer) =
+            _halfPairOf(messagingStorage, chainKey, MessageTypesLib.halfKeyOf(ticketId, 0));
 
         // A ticket moves nothing on its own: sending it ahead of finality risks a ticket the away token executes
         // and this chain then loses to a reorg; the ask mined again takes the same id, and its receipt is applied
         // on older terms, see {IReceiptHandler-receiveReceipt}.
-        address ticketRoute = s.ticketRoutes[chainKey];
-        bool ticketRouteUsable = ticketRoute != address(0) && s.registry.isTrusted(ticketRoute);
+        address ticketRoute = messagingStorage.ticketRoutes[chainKey];
+        bool ticketRouteUsable = ticketRoute != address(0) && messagingStorage.registry.isTrusted(ticketRoute);
         address sendingGateway = ticketRouteUsable ? ticketRoute : receiptRoute;
 
         sendId = _send(sendingGateway, peer, chainKey, MessageTypesLib.Message.TICKET, body);
     }
 
     /// @dev Sends a message for one half of a move on the chain's receipt route, at full finality, and pins the half
-    /// to that route and peer at its first send. A second half sent again goes to the pair it was pinned to only,
-    /// while that pair is still the chain's current one: the away token that holds the half is the one that answers
-    /// it, so a send never retargets. A second half whose pair was replaced is the compliance's to send again as a
-    /// new half. A ticket has no new half: it goes where {_ticketPairOf} says.
+    /// to that route and peer at its first send. A ticket goes where {_halfPairOf} says. A second half sent again
+    /// goes only to the peer it was pinned to, which holds it: through the former pair inside the window of a planned
+    /// change, see {_halfPairOf}, or through the current route while that peer is still the chain's. Any other peer
+    /// would take it as a half it never saw and move the money a second time, so the send is refused instead.
     function sendOnReceiptRoute(
         bytes32 chainKey,
         bytes32 halfKey,
         MessageTypesLib.Message messageType,
         bytes memory body
     ) external returns (bytes32 sendId) {
-        MessagingStorage storage s = layout();
-        if (messageType == MessageTypesLib.Message.TICKET) {
-            (address ticketReceiptRoute, bytes memory ticketPeer) = _ticketPairOf(s, chainKey, halfKey);
-            return _send(ticketReceiptRoute, ticketPeer, chainKey, messageType, body);
-        }
-
-        (address receiptRoute, bytes memory peer) = _openRoute(s, chainKey);
-        bytes32 peerKey = keccak256(peer);
-
-        Pin storage pin = s.pins[halfKey];
-        if (pin.bridge == address(0)) {
-            pin.bridge = receiptRoute;
-            pin.peerKey = peerKey;
-
-            emit EventsLib.HalfPinned(halfKey, chainKey, receiptRoute);
-        } else {
-            bool pinnedToTheCurrentPair = pin.bridge == receiptRoute && pin.peerKey == peerKey;
-            require(pinnedToTheCurrentPair, ErrorsLib.PeerChanged(chainKey));
-        }
+        MessagingStorage storage messagingStorage = layout();
+        (address receiptRoute, bytes memory peer) = _halfPairOf(messagingStorage, chainKey, halfKey);
+        bool aTicket = messageType == MessageTypesLib.Message.TICKET;
+        bool toThePinnedPeer = messagingStorage.pins[halfKey].peerKey == keccak256(peer);
+        require(aTicket || toThePinnedPeer, ErrorsLib.PeerChanged(chainKey));
 
         sendId = _send(receiptRoute, peer, chainKey, messageType, body);
     }
@@ -375,7 +366,7 @@ library TREXMessagingLib {
         (bytes2 chainType, bytes calldata chainReference,) = InteroperableAddress.parseV1Calldata(sender);
         chainKey = MessageTypesLib.chainKey(chainType, chainReference);
 
-        MessagingStorage storage s = layout();
+        MessagingStorage storage messagingStorage = layout();
 
         body = _receiptBodyOf(payload);
 
@@ -383,14 +374,16 @@ library TREXMessagingLib {
         // message from that gateway. Its deliveries are still deduplicated by what they carry: a receipt by the hash
         // home keeps per half.
         if (receiveId != bytes32(0)) {
-            require(!s.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId));
-            s.received[gateway][receiveId] = true;
+            require(
+                !messagingStorage.received[gateway][receiveId], ErrorsLib.MessageAlreadyReceived(gateway, receiveId)
+            );
+            messagingStorage.received[gateway][receiveId] = true;
         }
 
-        _requireExpectedOrigin(s, gateway, chainKey, sender, _halfKeyOf(body));
+        _requireExpectedOrigin(messagingStorage, gateway, chainKey, sender, _halfKeyOf(body));
 
         // Everything a token receives reports value that moved, so the bridge must still wait for full finality.
-        AwayReceiptBridge storage awaySide = _awaySideOf(s, gateway, chainKey);
+        AwayReceiptBridge storage awaySide = _awaySideOf(messagingStorage, gateway, chainKey);
         _requireFullFinality(gateway, chainKey, awaySide.chainSelector, awaySide.bridge);
     }
 
@@ -417,26 +410,26 @@ library TREXMessagingLib {
         bytes32 halfKey,
         uint64 arrivedAt
     ) external view {
-        MessagingStorage storage s = layout();
-        require(s.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
+        MessagingStorage storage messagingStorage = layout();
+        require(messagingStorage.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
 
-        bool fromThePinnedPair = _isFromThePinnedPair(s, bridge, chainKey, senderPeerKey, halfKey);
-        bool fromTheFormerPair = _isFromTheFormerPair(s, bridge, chainKey, senderPeerKey, arrivedAt);
+        bool fromThePinnedPair = _isFromThePinnedPair(messagingStorage, bridge, chainKey, senderPeerKey, halfKey);
+        bool fromTheFormerPair = _isFromTheFormerPair(messagingStorage, bridge, chainKey, senderPeerKey, arrivedAt);
         if (!fromThePinnedPair && !fromTheFormerPair) {
             require(senderPeerKey == keccak256(peerFor(chainKey)), ErrorsLib.PeerChanged(chainKey));
-            _requireCurrentRoute(s, bridge, chainKey);
+            _requireCurrentRoute(messagingStorage, bridge, chainKey);
         }
 
-        AwayReceiptBridge storage awaySide = _awaySideOf(s, bridge, chainKey);
+        AwayReceiptBridge storage awaySide = _awaySideOf(messagingStorage, bridge, chainKey);
         _requireFullFinality(bridge, chainKey, awaySide.chainSelector, awaySide.bridge);
     }
 
-    /// @dev Hands an admitted settlement to `handler`, decoded, with the bridge and the peer that delivered it.
+    /// @dev Hands an admitted receipt to `handler`, decoded, with the bridge and the peer that delivered it.
     ///
     /// The token calls this from inside its own reentrancy check. Run by DELEGATECALL, so the handler sees the
     /// token as its caller, which is the only caller a compliance accepts.
     /// @param handler The token's bound compliance.
-    /// @param body A settlement body, as {acceptMessage} returned it.
+    /// @param body A receipt body, as {acceptMessage} returned it.
     function forwardSettlement(
         address handler,
         bytes32 chainKey,
@@ -459,18 +452,20 @@ library TREXMessagingLib {
     /* ----- Private ----- */
 
     /// @dev Records the prefix behind a chain key the first time it is seen, and returns the key.
-    function _registerChain(MessagingStorage storage s, bytes2 chainType, bytes calldata chainReference)
+    function _registerChain(MessagingStorage storage messagingStorage, bytes2 chainType, bytes calldata chainReference)
         private
         returns (bytes32 chainKey)
     {
-        require(
-            chainReference.length > 0 && (chainType != MessageTypesLib.EVM_CHAIN_TYPE || chainReference[0] != 0x00),
-            ErrorsLib.InvalidChainReference(chainType, chainReference)
-        );
+        bool hasAReference = chainReference.length > 0;
+        require(hasAReference, ErrorsLib.InvalidChainReference(chainType, chainReference));
+        // An EVM chain id is a number: a leading zero byte would give one chain two keys.
+        bool anEvmChain = chainType == MessageTypesLib.EVM_CHAIN_TYPE;
+        bool referenceIsCanonical = !anEvmChain || chainReference[0] != 0x00;
+        require(referenceIsCanonical, ErrorsLib.InvalidChainReference(chainType, chainReference));
 
         chainKey = MessageTypesLib.chainKey(chainType, chainReference);
 
-        ChainPrefix storage chain = s.chains[chainKey];
+        ChainPrefix storage chain = messagingStorage.chains[chainKey];
         if (chain.chainReference.length == 0) {
             chain.chainType = chainType;
             chain.chainReference = chainReference;
@@ -492,40 +487,43 @@ library TREXMessagingLib {
         emit EventsLib.ProtocolMessageSent(messageType, chainKey, sendId);
     }
 
-    /// @dev The receipt route and the peer a ticket's half goes to. The chain must be open on its receipt route
+    /// @dev The receipt route and the peer a half goes to. The chain must be open on its receipt route
     /// either way, since that is the route the receipt comes back through: the first send of the half records the
     /// receipt route and the peer, and its receipt is then taken from that pair, the chain's current one, or its
     /// former one inside the window of a planned change, so a later route or peer change does not strand it. An ask
     /// for the receipt goes out through the pinned pair while that pair is the current one or the former one inside
     /// its window, and through the current pair otherwise.
-    function _ticketPairOf(MessagingStorage storage s, bytes32 chainKey, bytes32 halfKey)
+    function _halfPairOf(MessagingStorage storage messagingStorage, bytes32 chainKey, bytes32 halfKey)
         private
         returns (address receiptRoute, bytes memory peer)
     {
-        (receiptRoute, peer) = _openRoute(s, chainKey);
+        (receiptRoute, peer) = _openRoute(messagingStorage, chainKey);
 
-        Pin storage pin = s.pins[halfKey];
+        Pin storage pin = messagingStorage.pins[halfKey];
         if (pin.bridge == address(0)) {
             pin.bridge = receiptRoute;
             pin.peerKey = keccak256(peer);
 
             emit EventsLib.HalfPinned(halfKey, chainKey, receiptRoute);
-        } else if (_isTheFormerPairToAsk(s, chainKey, pin)) {
+        } else if (_isTheFormerPairToAsk(messagingStorage, chainKey, pin)) {
             // The away token that holds the ticket is the one that answers the ask: until the away side switches,
             // that is the former peer, and its answer comes back on the former pair.
             receiptRoute = pin.bridge;
-            peer = s.formerReceiptRoutes[chainKey].peer;
+            peer = messagingStorage.formerReceiptRoutes[chainKey].peer;
         }
     }
 
-    /// @dev Resolves the gateway and peer for `chainKey`
-    function _openRoute(MessagingStorage storage s, bytes32 chainKey)
+    /// @dev The receipt route and the peer of `chainKey`, which must be open.
+    function _openRoute(MessagingStorage storage messagingStorage, bytes32 chainKey)
         private
         view
         returns (address gateway, bytes memory peer)
     {
-        gateway = s.receiptRoutes[chainKey];
-        require(gateway != address(0) && s.registry.isReceiptBridge(gateway), ErrorsLib.ChainNotOpen(chainKey));
+        gateway = messagingStorage.receiptRoutes[chainKey];
+        bool routeSet = gateway != address(0);
+        bool routeIsAReceiptBridge = messagingStorage.registry.isReceiptBridge(gateway);
+        require(routeSet, ErrorsLib.ChainNotOpen(chainKey));
+        require(routeIsAReceiptBridge, ErrorsLib.ChainNotOpen(chainKey));
 
         peer = peerFor(chainKey);
         require(peer.length > 0, ErrorsLib.ChainNotOpen(chainKey));
@@ -537,34 +535,35 @@ library TREXMessagingLib {
     ///  never sent has no pin and is taken from the current pair: whether it was sent, and to that chain, is the
     ///  receipt handler's question.
     function _requireExpectedOrigin(
-        MessagingStorage storage s,
+        MessagingStorage storage messagingStorage,
         address gateway,
         bytes32 chainKey,
         bytes calldata sender,
         bytes32 halfKey
     ) private view {
         bytes32 senderPeerKey = keccak256(sender);
-        bool fromThePinnedPair = _isFromThePinnedPair(s, gateway, chainKey, senderPeerKey, halfKey);
+        bool fromThePinnedPair = _isFromThePinnedPair(messagingStorage, gateway, chainKey, senderPeerKey, halfKey);
         if (fromThePinnedPair) return;
-        bool fromTheFormerPair = _isFromTheFormerPair(s, gateway, chainKey, senderPeerKey, uint64(block.timestamp));
+        bool fromTheFormerPair =
+            _isFromTheFormerPair(messagingStorage, gateway, chainKey, senderPeerKey, uint64(block.timestamp));
         if (fromTheFormerPair) return;
 
         _requireCurrentPeer(chainKey, sender);
-        _requireCurrentRoute(s, gateway, chainKey);
+        _requireCurrentRoute(messagingStorage, gateway, chainKey);
     }
 
     /// @dev Whether `gateway` and the peer `senderPeerKey` are the pair the half was pinned to. A closed chain is
     ///  refused first, pinned or not.
     function _isFromThePinnedPair(
-        MessagingStorage storage s,
+        MessagingStorage storage messagingStorage,
         address gateway,
         bytes32 chainKey,
         bytes32 senderPeerKey,
         bytes32 halfKey
     ) private view returns (bool) {
-        require(s.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
+        require(messagingStorage.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
-        Pin storage pin = s.pins[halfKey];
+        Pin storage pin = messagingStorage.pins[halfKey];
         return pin.bridge == gateway && pin.peerKey == senderPeerKey;
     }
 
@@ -586,20 +585,23 @@ library TREXMessagingLib {
         require(allowedFinality == FULL_FINALITY, ErrorsLib.ReceiptBridgeNotFullFinality(bridge, chainKey));
     }
 
-    function _requireCurrentRoute(MessagingStorage storage s, address gateway, bytes32 chainKey) private view {
-        require(s.receiptRoutes[chainKey] == gateway, ErrorsLib.BridgeNotOnRoute(gateway, chainKey));
+    function _requireCurrentRoute(MessagingStorage storage messagingStorage, address gateway, bytes32 chainKey)
+        private
+        view
+    {
+        require(messagingStorage.receiptRoutes[chainKey] == gateway, ErrorsLib.BridgeNotOnRoute(gateway, chainKey));
     }
 
     /// @dev Whether `gateway` and the peer `senderPeerKey` are the away chain's former pair, inside the window of its
     ///  planned change at `arrivedAt`. Taken for every receipt then, whatever pair its half was pinned to.
     function _isFromTheFormerPair(
-        MessagingStorage storage s,
+        MessagingStorage storage messagingStorage,
         address gateway,
         bytes32 chainKey,
         bytes32 senderPeerKey,
         uint64 arrivedAt
     ) private view returns (bool) {
-        FormerRoute storage former = s.formerReceiptRoutes[chainKey];
+        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
         bool sameBridge = former.bridge == gateway;
         bool samePeer = keccak256(former.peer) == senderPeerKey;
         bool insideTheWindow = arrivedAt < former.acceptedUntil;
@@ -608,50 +610,51 @@ library TREXMessagingLib {
 
     /// @dev Whether an ask for the receipt of the half pinned to `pin` goes to the former pair: the pin is that pair,
     ///  its window still runs, and its bridge is still a receipt bridge, so the answer can land.
-    function _isTheFormerPairToAsk(MessagingStorage storage s, bytes32 chainKey, Pin storage pin)
+    function _isTheFormerPairToAsk(MessagingStorage storage messagingStorage, bytes32 chainKey, Pin storage pin)
         private
         view
         returns (bool)
     {
-        bool pinnedToTheFormerPair = _isFromTheFormerPair(s, pin.bridge, chainKey, pin.peerKey, uint64(block.timestamp));
-        return pinnedToTheFormerPair && s.registry.isReceiptBridge(pin.bridge);
+        bool pinnedToTheFormerPair =
+            _isFromTheFormerPair(messagingStorage, pin.bridge, chainKey, pin.peerKey, uint64(block.timestamp));
+        return pinnedToTheFormerPair && messagingStorage.registry.isReceiptBridge(pin.bridge);
     }
 
     /// @dev The away side to ask `gateway`'s receiving policy about: the former one when the receipt came through the
     ///  former bridge and that bridge is no longer the route, the current one otherwise.
-    function _awaySideOf(MessagingStorage storage s, address gateway, bytes32 chainKey)
+    function _awaySideOf(MessagingStorage storage messagingStorage, address gateway, bytes32 chainKey)
         private
         view
         returns (AwayReceiptBridge storage)
     {
-        FormerRoute storage former = s.formerReceiptRoutes[chainKey];
+        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
         bool throughTheFormerBridge = former.bridge == gateway;
-        bool formerBridgeReplaced = s.receiptRoutes[chainKey] != gateway;
+        bool formerBridgeReplaced = messagingStorage.receiptRoutes[chainKey] != gateway;
         if (throughTheFormerBridge && formerBridgeReplaced) return former.awayReceiptBridge;
-        return s.awayReceiptBridges[chainKey];
+        return messagingStorage.awayReceiptBridges[chainKey];
     }
 
     /// @dev Changes of route or peer on one away chain stay a window apart: a second change would drop the former
     ///  pair while receipts sent on it may still be on their way.
-    function _requireNoChangeInsideTheWindow(MessagingStorage storage s, bytes32 chainKey) private view {
-        uint64 allowedAt = s.formerReceiptRoutes[chainKey].acceptedUntil;
+    function _requireNoChangeInsideTheWindow(MessagingStorage storage messagingStorage, bytes32 chainKey) private view {
+        uint64 allowedAt = messagingStorage.formerReceiptRoutes[chainKey].acceptedUntil;
         require(block.timestamp >= allowedAt, ErrorsLib.RouteChangedTooRecently(chainKey, allowedAt));
     }
 
     /// @dev Keeps the route and peer an open away chain has now as its former pair, for one window. Home changes
     ///  first: the away token switches after, and the receipts it sent before switching arrive on this pair. A
     ///  closed or never routed chain takes no receipt, so it has nothing to keep.
-    function _keepTheFormerRoute(MessagingStorage storage s, bytes32 chainKey) private {
-        address currentBridge = s.receiptRoutes[chainKey];
+    function _keepTheFormerRoute(MessagingStorage storage messagingStorage, bytes32 chainKey) private {
+        address currentBridge = messagingStorage.receiptRoutes[chainKey];
         if (currentBridge == address(0)) return;
 
         bytes memory currentPeer = peerFor(chainKey);
         uint64 acceptedUntil = uint64(block.timestamp) + _changeWindowOf(chainKey);
-        FormerRoute storage former = s.formerReceiptRoutes[chainKey];
+        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
         former.bridge = currentBridge;
         former.acceptedUntil = acceptedUntil;
         former.peer = currentPeer;
-        former.awayReceiptBridge = s.awayReceiptBridges[chainKey];
+        former.awayReceiptBridge = messagingStorage.awayReceiptBridges[chainKey];
 
         emit EventsLib.FormerRouteKept(chainKey, currentBridge, keccak256(currentPeer), acceptedUntil);
     }
@@ -667,7 +670,9 @@ library TREXMessagingLib {
     /// @dev Empty restores the default; anything else must be a canonical envelope for this very chain, whose prefix is
     ///  recorded on first sight. An EVM account is 20 bytes: a gateway reports its sender that way, so any other
     ///  length could never match.
-    function _requireValidPeer(MessagingStorage storage s, bytes32 chainKey, bytes calldata peer) private {
+    function _requireValidPeer(MessagingStorage storage messagingStorage, bytes32 chainKey, bytes calldata peer)
+        private
+    {
         if (peer.length > 0) {
             (bytes2 chainType, bytes calldata chainReference, bytes calldata account) =
                 InteroperableAddress.parseV1Calldata(peer);
@@ -677,11 +682,11 @@ library TREXMessagingLib {
             bool accountFitsItsChain = chainType != MessageTypesLib.EVM_CHAIN_TYPE || account.length == 20;
             require(hasAccount && noTrailingBytes && accountFitsItsChain, ErrorsLib.InvalidPeer(peer));
 
-            bytes32 peerChainKey = _registerChain(s, chainType, chainReference);
+            bytes32 peerChainKey = _registerChain(messagingStorage, chainType, chainReference);
             require(peerChainKey == chainKey, ErrorsLib.PeerChainMismatch(chainKey, peerChainKey));
         } else {
             // Nothing to restore on a chain the token has never seen, and the write would be a noop.
-            require(s.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
+            require(messagingStorage.chains[chainKey].chainReference.length > 0, ErrorsLib.ChainNotRegistered(chainKey));
         }
     }
 

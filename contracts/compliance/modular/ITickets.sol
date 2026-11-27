@@ -62,11 +62,10 @@ import { MessageTypesLib } from "../../libraries/MessageTypesLib.sol";
 
 /**
  * @title ITickets
- * @dev The compliance's issuance surface for satellite movements: the validity windows, waiting times, measured
- * times and limits a COMPLIANCE_MANAGER tunes, the block of an away chain, the receipts waiting to be applied, the
- * lifecycle of every ticket, the ask for its receipt and its cancel. A satellite executes a transfer only against a `TicketMessage` the reference chain issued for
- * that exact transfer;
- * this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
+ * @dev The compliance's surface for moves between chains: the validity windows, waiting times, measured times and
+ * limits a COMPLIANCE_MANAGER tunes, the block of an away chain, the receipts waiting to be applied, the lifecycle of
+ * every ticket, the ask for its receipt and its cancel. An away token executes a move only against a `TicketMessage`
+ * home wrote for that exact move; this is where it comes from. A ceiling on what may be issued is a rule, not a setting: a module answers it
  * from `checkTransfer`.
  */
 interface ITickets {
@@ -97,8 +96,7 @@ interface ITickets {
     );
     event WaitingReceiptApplied(bytes32 indexed halfKey, bytes32 indexed chainKey);
     event WaitingReceiptRefused(bytes32 indexed halfKey);
-    event AwayChainBlockStarted(bytes32 indexed chainKey);
-    event AwayChainUnblocked(bytes32 indexed chainKey);
+    event AwayChainBlockSet(bytes32 indexed chainKey, bool blocked);
     event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
     event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
     event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
@@ -115,7 +113,6 @@ interface ITickets {
         bytes32 indexed ticketId, uint8 half, bytes32 indexed chainKey, bytes wallet, uint256 amount, uint64 validUntil
     );
     event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
-    event NewHalfLimitReached(bytes32 indexed ticketId);
     event ReceiptWithoutTicket(
         bytes32 indexed ticketId, bytes32 indexed chainKey, bytes from, bytes to, uint256 amount
     );
@@ -123,7 +120,7 @@ interface ITickets {
     event HoldTaken(bytes32 indexed ticketId);
     event HoldCancelled(bytes32 indexed ticketId);
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
-    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
+    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount, uint64 awayBlockNumber, uint64 awayClockTime);
 
     error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     error NotACrossChainMove();
@@ -201,7 +198,7 @@ interface ITickets {
         Done
     }
 
-    /// @dev Everything the compliance keeps of an issued validation, keyed by its id and kept forever: every id
+    /// @dev Everything the compliance keeps of a ticket, keyed by its id and kept forever: every id
     /// stays classifiable against its stored status for good, which is what makes the emergency responses
     /// possible.
     ///
@@ -213,19 +210,19 @@ interface ITickets {
         /// Names the copy of the ticket home sent, see {TicketLib-askBlockHashOf}. Zero until the ticket is
         /// issued and sent.
         bytes32 askBlockHash;
-        /// Final inclusive lower bound, so a settlement's executed amount can be classified.
+        /// Final inclusive lower bound, so a receipt's executed amount can be judged.
         uint256 amountMin;
         /// Final inclusive upper bound, what the reservation was taken at. For a record a receipt created: the maximum
         /// the receipt echoed, then, once its money on hold is being cancelled, what the cancel's latest half moves.
         uint256 amountMax;
-        /// The satellite's hard deadline: no execution at or after it.
+        /// The away token's hard deadline: no execution at or after it.
         uint64 validUntil;
         /// The waiting time of the sender's away chain at the ask, kept so a later change of the setting does not
         /// move a ticket already out: the asks for the receipt and the cancel count in it.
         uint64 waitingTime;
-        /// `from`'s satellite chain, keyed as `MessageTypesLib.chainKey` computes it.
+        /// `from`'s away chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
-        /// Same for `to`'s chain; the reference chain's own key for a native wallet.
+        /// Same for `to`'s chain; home's own key for a home wallet.
         bytes32 toChainKey;
         /// `keccak256` of the canonical `from` envelope: what a receipt's `from` is matched against.
         bytes32 fromKey;
@@ -234,10 +231,10 @@ interface ITickets {
         bytes fromWallet;
         /// Same for `to`.
         bytes32 toKey;
-        /// The identity `from` resolved to at issuance: whose pending amount was reserved and whose position
-        /// settlement debits.
+        /// The identity `from` resolved to at the ask: whose pending amount was reserved and whose total owned the
+        /// receipt debits.
         address fromIdentity;
-        /// Same for `to`. Equal to `fromIdentity` on a relocation between one identity's wallets.
+        /// Same for `to`. Equal to `fromIdentity` on an internal move between one identity's wallets.
         address toIdentity;
 
         /* ----- Moved by the lifecycle ----- */
@@ -250,7 +247,7 @@ interface ITickets {
         /// What the away token reported it moved, or what a home wallet that moves out burned: the money on hold
         /// while the ticket is `OnHold`.
         uint256 moved;
-        /// The spender the validation names, empty when `from` executes itself. Kept so the `AFTER` modules
+        /// The spender the ticket names, empty when `from` executes itself. Kept so the `AFTER` modules
         /// are told who executed it when it settles.
         bytes spender;
 
@@ -478,10 +475,10 @@ interface ITickets {
     /// the current window of one waiting time; the ticket route otherwise. `validUntil` is the ask's time plus the
     /// validity window of that route.
     ///
-    /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the validation is recorded and
+    /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the ticket is recorded and
     /// reserved as `WaitingForApproval`, `TicketWaitingForApproval` is emitted, the module is told, and
     /// `answerApproval` decides. The deadline for the answer and for the first send is `validUntil`, and it stays
-    /// the satellite's deadline once the validation is issued.
+    /// the away token's deadline once the ticket is sent.
     /// @param from ERC-7930 interoperable address of the sender.
     /// @param to ERC-7930 interoperable address of the recipient.
     /// @param requestedMin Inclusive lower bound the caller proposes.
@@ -498,15 +495,15 @@ interface ITickets {
         bytes32 salt
     ) external returns (bytes32 ticketId);
 
-    /// @dev Answers a validation `WaitingForApproval`: issues it, at most at `approvedMax`, or refuses it. Only the
+    /// @dev Answers a ticket `WaitingForApproval`: issues it, at most at `approvedMax`, or refuses it. Only the
     /// bound `APPROVAL` module answers, before the deadline. A request nobody answered is discarded with
     /// `cancelTickets` once the deadline passed.
     ///
-    /// An answer below the requested minimum is a refusal: the reservation is released and the validation ends
+    /// An answer below the requested minimum is a refusal: the reservation is released and the ticket ends
     /// `Cancelled`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
     /// difference, and opens the ticket: nothing is sent, anyone makes the first send with `sendTicket`, so the
     /// approver never pays for a send. No rule runs again: they ran at the request. The deadline stays the
-    /// request's `validUntil`, so the time spent waiting comes out of the satellite's time to execute, and the
+    /// request's `validUntil`, so the time spent waiting comes out of the away token's time to execute, and the
     /// rules are never older than the validity window when it does.
     ///
     /// Requirements:
@@ -518,7 +515,7 @@ interface ITickets {
     ///   otherwise reverts with `ApplyWaitingReceiptFirst`.
     ///
     /// Emits nothing on an approval (`TicketWritten` comes with the first send), or `ValidationApprovalRefused`.
-    /// @param ticketId The validation awaiting approval.
+    /// @param ticketId The ticket awaiting approval.
     /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
 
@@ -609,7 +606,7 @@ interface ITickets {
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
-    /// Emits `AwayChainBlockStarted` when the chain was not blocked.
+    /// Emits `AwayChainBlockSet` with `true` when the chain was not blocked.
     /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
     function blockAwayChain(bytes32 chainKey) external;
 
@@ -620,7 +617,7 @@ interface ITickets {
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
-    /// Emits `AwayChainUnblocked` when the chain was blocked.
+    /// Emits `AwayChainBlockSet` with `false` when the chain was blocked.
     /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
     function unblockAwayChain(bytes32 chainKey) external;
 
@@ -640,10 +637,13 @@ interface ITickets {
     /// @dev Sets the caps on tickets toward the away chain `chainKey`. A receipt on older terms whose `seenMax` is
     /// above the per-ticket cap blocks that away chain. Raising a cap takes effect at once. Lowering the per-ticket
     /// cap waits until the latest valid until of a ticket sent toward the chain has passed: an honest copy sent under
-    /// the higher cap would otherwise echo a `seenMax` above the new one and block an honest chain. The per-window
-    /// cap is read at each ask: a ticket that would take the ticket route above it in the current window of one
-    /// waiting time travels the receipt route. A cap of zero sends every ticket toward the chain on the receipt
-    /// route.
+    /// the higher cap would otherwise echo a `seenMax` above the new one and block an honest chain. Every new ticket
+    /// pushes that time forward, so in practice the cap is lowered while asks are paused (`setAsksPaused`), once
+    /// the longest validity window has passed since the pause. The per-window cap is read at each ask: a ticket that would take the ticket
+    /// route above it in the current window of one waiting time travels the receipt route. The cap is shared by every
+    /// holder: one identity can fill it, within its own ask limits, and the others then travel the receipt route,
+    /// slower but never refused, until the window ends. A cap of zero sends every ticket toward the chain on the
+    /// receipt route.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -744,8 +744,9 @@ interface ITickets {
     /// Otherwise the latest half is sent again, byte for byte, as an ask for its receipt: the away token answers with
     /// its stored receipt or a zero receipt. At most `MAX_SENDS_PER_HALF` sends per half, at fixed times: the second
     /// once the half's valid until plus one waiting time has passed, the third two waiting times after that, never
-    /// counted from the last send. When the pair the half was pinned to is no longer the chain's current pair, the half
-    /// is past its valid until by then, so the next half goes to the current pair as a new half.
+    /// counted from the last send. It goes only to the peer it was pinned to, which holds it: through the former pair
+    /// inside the window of a planned change, or the current route while that peer is still the chain's. A new half is
+    /// taken only after a zero answer or a failed send, never because the pair changed: the old half may still mint.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
@@ -756,9 +757,10 @@ interface ITickets {
     ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
     /// - A send again only at or after its fixed time; otherwise reverts with `SendNotDue`.
     /// - A new half only below `MAX_NEW_HALVES`; otherwise reverts with `NoNewHalfLeft`.
+    /// - A send again only to the half's pinned peer; otherwise the token reverts with `PeerChanged`.
     ///
-    /// Emits `SecondHalfSent`, `NewHalfLimitReached` when the last new half leaves, then the token's `HalfPinned` for
-    /// a new half and `ProtocolMessageSent`.
+    /// Emits `SecondHalfSent`, then the token's `HalfPinned` for a new half and `ProtocolMessageSent`. The halves
+    /// taken so far are `ticketOf(ticketId).newHalves`.
     /// @param ticketId The ticket whose money is on hold.
     /// @param wallet ERC-7930 interoperable address of the wallet the half mints to.
     function sendSecondHalf(bytes32 ticketId, bytes calldata wallet) external;
@@ -852,7 +854,8 @@ interface ITickets {
     ///   receipt route open; otherwise reverts with `ReceiptRouteNotClosed`.
     /// - The token not paused, that chain not blocked and no hostile change running on it; otherwise reverts with
     ///   `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
-    /// - A stored receipt for `ticketId`; otherwise reverts with `ValidationBodyMismatch`.
+    /// - A stored receipt for `ticketId`, which home applies; otherwise reverts with `ValidationBodyMismatch`: a
+    ///   receipt home would refuse as bad, or keep waiting, is never taken from a read.
     /// With no stored receipt:
     /// - No receipt waiting under the latest half; otherwise reverts with `ApplyWaitingReceiptFirst`: the read and
     ///   home disagree, and the receipt read again applies it.
@@ -909,7 +912,9 @@ interface ITickets {
     /// {IReceiptHandler-receiveReceipt}: `WaitingReceiptApplied` is emitted, and the away chain is blocked when the
     /// receipt breaks its terms. Anyone may call it once the receipt can be applied. The route check runs again on
     /// the bridge and peer that delivered it, so a bridge distrusted, a route closed or a peer replaced meanwhile
-    /// refuses it. A receipt that reverts here, a tracker module that refuses it for instance, stays waiting.
+    /// refuses it. The receipt is judged again first, against the record as it is now, as a delivery is: a ticket
+    /// written since it arrived makes a receipt that names other wallets a bad receipt, refused, deleted and blocking
+    /// its chain. A receipt that reverts here, a tracker module that refuses it for instance, stays waiting.
     ///
     /// Requirements:
     /// - `receipt` must be the one waiting under `halfKey`; otherwise reverts with `NoWaitingReceipt`.
@@ -921,7 +926,8 @@ interface ITickets {
     /// - The route check of {ITREXMessaging-checkReceiptOrigin} must pass; otherwise the token reverts with its
     ///   error.
     ///
-    /// Emits `WaitingReceiptApplied`, and `AwayChainBlockStarted` on broken terms.
+    /// Emits `WaitingReceiptApplied`, and `AwayChainBlockSet` on broken terms; or `ReceiptRefused` and
+    /// `AwayChainBlockSet` for a receipt judged bad now.
     /// @param halfKey The half the receipt waits under, see {MessageTypesLib-halfKeyOf}.
     /// @param receipt The receipt, as `ReceiptWaiting` carried it.
     function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt) external;
@@ -931,14 +937,14 @@ interface ITickets {
     function waitingReceiptOf(bytes32 halfKey) external view returns (WaitingReceipt memory);
 
     /// @dev Everything kept for `ticketId`, all zeros when the id was never issued.
-    /// @param ticketId The validation to look up.
+    /// @param ticketId The ticket to look up.
     function ticketOf(bytes32 ticketId) external view returns (Ticket memory);
 
     /// @dev Where `ticketId` stands.
     ///
     /// Requirements:
     /// - `ticketId` must have been taken; otherwise reverts with `UnknownTicket`.
-    /// @param ticketId The validation to look up.
+    /// @param ticketId The ticket to look up.
     function statusOf(bytes32 ticketId) external view returns (TicketStatus);
 
 }

@@ -649,13 +649,38 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 salt = _salt();
         bytes32 fromKey = WalletKeyLib.canonicalKey(fromSat);
         bytes32 toKey = WalletKeyLib.canonicalKey(nativeAlice);
-        bytes32 noSpender = keccak256("");
+        bytes32 noSpender = bytes32(0);
 
         bytes32 moveId = TicketLib.ticketIdOf(ITickets.TicketKind.MOVE, fromKey, toKey, noSpender, 0, 50, salt);
         bytes32 bringHomeId =
             TicketLib.ticketIdOf(ITickets.TicketKind.BRING_HOME, fromKey, toKey, noSpender, 0, 50, salt);
 
         assertTrue(moveId != bringHomeId, "the kind is in the id");
+    }
+
+    /// @notice With no spender the spender key in the id is zero, so the away token computes the id from the ticket
+    ///         without hashing an empty envelope.
+    function test_askToMove_buildsTheIdWithAZeroSpenderKey_whenThereIsNoSpender() public configured {
+        bytes32 salt = _salt();
+        uint256 requestedMin = 10;
+        uint256 requestedMax = 40;
+        bytes32 noSpender = bytes32(0);
+        bytes32 expected = keccak256(
+            abi.encode(
+                ITickets.TicketKind.MOVE,
+                WalletKeyLib.canonicalKey(fromSat),
+                WalletKeyLib.canonicalKey(toSat),
+                noSpender,
+                requestedMin,
+                requestedMax,
+                salt
+            )
+        );
+
+        vm.prank(aliceIdentity);
+        bytes32 ticketId = mc.askToMove(fromSat, toSat, requestedMin, requestedMax, "", salt);
+
+        assertEq(ticketId, expected, "the id names no spender with a zero key");
     }
 
     function test_requestTransferValidation_Success_WhenIdsFollowTheSaltAndNeverRepeat() public configured {

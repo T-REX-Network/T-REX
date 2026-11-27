@@ -207,8 +207,6 @@ library EventsLib {
     /// @notice The send of the second half `half` of `ticketId`, tried inside its receipt's delivery, failed. The half
     ///         stays owed: anyone sends it with `sendSecondHalf`.
     event SecondHalfNotSent(bytes32 indexed ticketId, uint8 half);
-    /// @notice The money on hold for `ticketId` took its last new half: if that half dies too, a human ends it.
-    event NewHalfLimitReached(bytes32 indexed ticketId);
     /// @notice A receipt from `chainKey` for `ticketId`, which no ticket home sent answers, put `amount` on hold under
     ///         `from` with no destination. When `to` is on the same away chain, `amount` is its uncounted credit.
     event ReceiptWithoutTicket(
@@ -226,12 +224,12 @@ library EventsLib {
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
     /// @notice A human closed `ticketId` by hand from a read of its closed away chain. `returnedAmount` went back
     ///         toward the sender; zero when the read receipt was applied, a ticket cancelled or a bring home ended.
-    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount);
-    /// @notice The compliance blocked the away chain `chainKey`: by the pauser on suspicion, or on a bad receipt or
-    ///         receipt terms it broke. No ticket goes to it, none of its tickets is cancelled, and its receipts wait.
-    event AwayChainBlockStarted(bytes32 indexed chainKey);
-    /// @notice The pauser lifted the block of the away chain `chainKey`, after an investigation.
-    event AwayChainUnblocked(bytes32 indexed chainKey);
+    ///         `awayBlockNumber` and `awayClockTime` name the final block read, which the caller's role attests.
+    event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount, uint64 awayBlockNumber, uint64 awayClockTime);
+    /// @notice The block of the away chain `chainKey` was set to `blocked`. Set by the pauser on suspicion, or by the
+    ///         compliance on a bad receipt or receipt terms it broke: no ticket goes to it, none of its tickets is
+    ///         cancelled, and its receipts wait. Lifted by the pauser, after an investigation.
+    event AwayChainBlockSet(bytes32 indexed chainKey, bool blocked);
     /// @notice Emitted on issuance with the full envelopes, the asked and the final bounds, and the ask block hash
     ///         of the copy sent, so indexers need no reverse table.
     event TicketWritten(

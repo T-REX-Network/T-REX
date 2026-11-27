@@ -85,7 +85,7 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(conflicting);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));

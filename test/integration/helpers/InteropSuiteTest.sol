@@ -169,7 +169,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
             ITickets.TicketKind.MOVE,
             WalletKeyLib.canonicalKey(from),
             WalletKeyLib.canonicalKey(to),
-            keccak256(spender),
+            TicketLib.spenderKeyOf(spender),
             requestedMin,
             requestedMax,
             salt

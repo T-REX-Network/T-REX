@@ -97,13 +97,14 @@ interface IReceiptHandler {
     ///   same ask mined again takes it; otherwise anyone cancels it with `cancelHold`.
     /// - A bad receipt: another body for a half that already has one, applied or waiting. For the ticket's own half:
     ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
-    ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet that is not the half's, a chain that is not
-    ///   the one that wallet is on, a sender named, or anything but a mint of the money on hold or a zero answer that
-    ///   the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`), nothing is applied,
+    ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet
+    ///   that is not the half's, a chain that is not the one that wallet is on, a sender named, or anything but a
+    ///   mint of the money on hold or a zero answer that the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`), nothing is applied,
     ///   and the chain that sent it is blocked.
     /// - A receipt that cannot be applied yet: the token is stopped or its away chain is blocked; for the ticket's own
-    ///   half, also the sender's away balance is below its amount. It waits
-    ///   (`ReceiptWaiting`), tagged with `bridge` and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`.
+    ///   half, also the sender's away balance is below its amount. It waits (`ReceiptWaiting`), tagged with `bridge`
+    ///   and `senderPeerKey`, for anyone to apply with `applyWaitingReceipt`. It is judged again when it is applied,
+    ///   against the record as it is then: a ticket written meanwhile makes a receipt naming other wallets bad.
     /// - A zero receipt for the ticket's own half: the ticket ends `Done` with nothing moved. It is never a bad
     ///   receipt. A zero answer to the latest second half: that half is dead, the money stays on hold, and a new
     ///   half is owed (`sendSecondHalf`).

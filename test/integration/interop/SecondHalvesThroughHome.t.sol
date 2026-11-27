@@ -260,20 +260,18 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED));
     }
 
-    /// @notice An older half's zero answer after a new half went changes nothing: that half is dead already. Half 2
-    ///         left because half 1 was pinned to a peer B replaced; the former peer's zero for half 1 comes later.
-    function test_receiveReceipt_changesNothing_whenAnOlderHalfAnswersZeroAfterANewHalfWent() public {
+    /// @notice An older half's zero answer that comes again after a new half went changes nothing: that half is dead
+    ///         already. Half 2 left only because half 1 answered zero; the away token then sends that zero again.
+    function test_receiveReceipt_changesNothing_whenAnOlderHalfsZeroComesAgainAfterANewHalfWent() public {
         bytes32 id = _firstHalfLanded(MOVED);
-        vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
-        vm.warp(_secondSendDueAt(id));
+        _deliver(optimismGateway, _expired(id, 1, bobOnB));
         boundCompliance.sendSecondHalf(id, bobOnB);
         ITickets.Ticket memory before = boundCompliance.ticketOf(id);
         assertEq(before.half, 2);
         uint256 index = _liteSettles(optimismGateway, token, _expired(id, 1, bobOnB));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptApplied(id, optimism, 0);
+        emit EventsLib.ReceiptDuplicate(id, optimism);
         optimismGateway.relay(index);
 
         ITickets.Ticket memory afterwards = boundCompliance.ticketOf(id);
@@ -425,8 +423,6 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         boundCompliance.sendSecondHalf(id, bobOnB);
         _deliver(optimismGateway, _expired(id, 3, bobOnB));
 
-        vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.NewHalfLimitReached(id);
         boundCompliance.sendSecondHalf(id, bobOnB);
         assertEq(boundCompliance.ticketOf(id).newHalves, 4);
 
@@ -436,31 +432,77 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         assertEq(token.onHoldOf(id), MOVED, "still on hold, for a human to end");
     }
 
-    /// @notice Bob's chain had a planned peer change: half 1 is pinned to the former pair, whose away token can no
-    ///         longer be asked. At its due time the send goes to the current pair as half 2, which ends the move;
-    ///         the former pair's late zero for half 1 changes nothing.
-    function test_sendSecondHalf_goesToTheCurrentPeer_whenThePinnedHalfIsPastItsValidUntil() public {
+    /// @notice Bob's chain had a planned peer change: half 1 is pinned to the former pair. At its due time the send
+    ///         is the same half again, to the former peer that holds it, never a new half: a new half would be a
+    ///         second move out of the same money. Half 1's receipt then ends the move.
+    function test_sendSecondHalf_sendsTheSameHalfToTheFormerPeer_afterAPlannedPeerChange() public {
         bytes32 id = _firstHalfLanded(MOVED);
-        address newPeer = makeAddr("newOptimismPeer");
+        bytes memory formerPeer = token.peerFor(optimism);
         vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, newPeer));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
         vm.warp(_secondSendDueAt(id));
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.HalfPinned(MessageTypesLib.halfKeyOf(id, 2), optimism, address(optimismGateway));
         boundCompliance.sendSecondHalf(id, bobOnB);
 
-        assertEq(boundCompliance.ticketOf(id).half, 2, "a new half to the current pair");
-        (, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(id, 2));
-        assertEq(pinnedPeerKey, keccak256(InteroperableAddress.formatEvmV1(OPTIMISM, newPeer)));
-        optimismGateway.relay(
-            _queue(optimismGateway, newPeer, token, MessageTypesLib.encodeSettlement(_minted(id, 2, bobOnB, MOVED)))
-        );
-        _assertStatus(id, ITickets.TicketStatus.Done);
-        _deliver(optimismGateway, _expired(id, 1, bobOnB));
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        assertEq(ticket.half, 1, "the same half");
+        assertEq(ticket.secondHalfSends, 2, "sent a second time");
+        assertEq(optimismGateway.queuedMessage(_lastIndex(optimismGateway)).recipient, formerPeer, "to the former peer");
+        assertEq(_queuedMoveOut(optimismGateway, _lastIndex(optimismGateway)).half, 1);
+        _deliver(optimismGateway, _minted(id, 1, bobOnB, MOVED));
         _assertStatus(id, ITickets.TicketStatus.Done);
         assertEq(token.awayBalanceOf(bobOnB), MOVED, "minted once");
         assertFalse(boundCompliance.isAwayChainBlocked(optimism));
+    }
+
+    /// @notice Half 1 was minted on B in time but its receipt is late, and B's receipt bridge is changed as planned.
+    ///         The due send asks for half 1 again through the former bridge, and half 1's late receipt ends the move:
+    ///         no second move out leaves, and the honest chain is never blocked.
+    function test_sendSecondHalf_resendsTheSameHalf_whileItsReceiptIsLate_afterAPlannedBridgeChange() public {
+        bytes32 id = _firstHalfLanded(MOVED);
+        ERC7786GatewayMock newBridge = _newReceiptBridge(OPTIMISM);
+        _openEvmChain(token, OPTIMISM, address(newBridge));
+        vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + boundCompliance.waitingTimeOf(optimism));
+        uint256 queuedOnTheFormerBridge = optimismGateway.queueLength();
+
+        boundCompliance.sendSecondHalf(id, bobOnB);
+
+        assertEq(boundCompliance.ticketOf(id).half, 1, "the same half, not a new one");
+        assertEq(optimismGateway.queueLength(), queuedOnTheFormerBridge + 1, "asked through the former bridge");
+        assertEq(newBridge.queueLength(), 0, "no move out on the new bridge");
+        _deliver(optimismGateway, _minted(id, 1, bobOnB, MOVED));
+        _assertStatus(id, ITickets.TicketStatus.Done);
+        assertEq(token.awayBalanceOf(bobOnB), MOVED, "minted once");
+        assertFalse(boundCompliance.isAwayChainBlocked(optimism), "the honest chain is not blocked");
+    }
+
+    /// @notice After a planned peer change the former peer is asked only inside its window of four waiting times;
+    ///         the send due after it ends is refused rather than sent to the new peer, which does not hold the half.
+    function test_sendSecondHalf_reverts_when_theFormerPeersWindowEnded() public {
+        bytes32 id = _firstHalfLanded(MOVED);
+        vm.prank(deployer);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
+        vm.warp(_secondSendDueAt(id));
+        boundCompliance.sendSecondHalf(id, bobOnB);
+
+        uint64 thirdSendDueAt = boundCompliance.ticketOf(id).secondHalfValidUntil + 3 * OPTIMISM_WINDOW;
+        vm.warp(thirdSendDueAt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, optimism));
+        boundCompliance.sendSecondHalf(id, bobOnB);
+        assertEq(boundCompliance.ticketOf(id).half, 1, "no new half");
+    }
+
+    /// @notice The peer half 1 was pinned to was replaced as hostile: home keeps no former pair, so the half is never
+    ///         sent to the new peer, which does not hold it. Its exit is closing the chain by hand.
+    function test_sendSecondHalf_reverts_when_thePinnedPeerWasReplacedAsHostile() public {
+        bytes32 id = _firstHalfLanded(MOVED);
+        vm.prank(deployer);
+        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer")));
+        vm.warp(token.hostileChangeEndsAt(optimism) + 1);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, optimism));
+        boundCompliance.sendSecondHalf(id, bobOnB);
+        assertEq(boundCompliance.ticketOf(id).half, 1, "no new half");
     }
 
     function test_sendSecondHalf_reverts_when_theWalletIsNotTheHalfs() public {
@@ -688,10 +730,10 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         token.sendOnReceiptRoute(optimism, keccak256("half"), MessageTypesLib.Message.MOVE_OUT, "");
     }
 
-    function test_sendOnReceiptRoute_reverts_when_aPinnedHalfIsSentAfterAPeerChange() public {
+    function test_sendOnReceiptRoute_reverts_when_aPinnedHalfIsSentAfterAHostilePeerChange() public {
         bytes32 id = _firstHalfLanded(MOVED);
         vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
+        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
 
         vm.prank(address(boundCompliance));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, optimism));

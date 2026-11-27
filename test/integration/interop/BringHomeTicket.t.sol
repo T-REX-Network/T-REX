@@ -302,13 +302,6 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         _assertRefused(id, _minted(id, 1, aliceOnA, BROUGHT));
     }
 
-    function test_receiveReceipt_refusesABurnForAnOlderHalf() public {
-        bytes32 id = _bringHome(BROUGHT);
-        _replacePeerAndSendHalfTwo(id);
-
-        _assertRefused(id, _burned(id, 1, BROUGHT));
-    }
-
     function test_receiveReceipt_refusesASecondBodyForTheSameHalf() public {
         bytes32 id = _bringHome(BROUGHT);
         _deliver(polygonGateway, _burned(id, 1, BROUGHT));
@@ -353,50 +346,43 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         boundCompliance.sendTicket(id, polygon, aliceHome, "");
     }
 
-    /// @notice The bring home was pinned to a peer the chain replaced as planned. At its due time the send goes to the
-    ///         current pair as half 2, not refused; the new peer's receipt mints at home, and the former pair's late
-    ///         zero for half 1 changes nothing.
-    function test_sendSecondHalf_sendsABringHomePinnedToAReplacedPeerToTheCurrentPeer() public {
+    /// @notice The bring home was pinned to a peer the chain replaced as planned. At its due time the same half goes
+    ///         again to the former peer that holds it, never a second burn order; its receipt mints at home.
+    function test_sendSecondHalf_sendsABringHomePinnedToAReplacedPeerToTheFormerPeer() public {
         bytes32 id = _bringHome(BROUGHT);
-        address newPeer = _replacePeerAndSendHalfTwo(id);
+        bytes memory formerPeer = token.peerFor(polygon);
+        vm.prank(deployer);
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonPeer")));
+        vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + POLYGON_WINDOW);
 
-        polygonGateway.relay(
-            _queue(polygonGateway, newPeer, token, MessageTypesLib.encodeSettlement(_burned(id, 2, BROUGHT)))
-        );
+        boundCompliance.sendSecondHalf(id, aliceOnA);
+
+        assertEq(boundCompliance.ticketOf(id).half, 1, "the same half");
+        uint256 lastIndex = polygonGateway.queueLength() - 1;
+        assertEq(polygonGateway.queuedMessage(lastIndex).recipient, formerPeer, "to the former peer");
+        _deliver(polygonGateway, _burned(id, 1, BROUGHT));
         _assertStatus(id, ITickets.TicketStatus.Done);
-        assertEq(token.balanceOf(alice), MINTED - ALICE_ON_A + BROUGHT);
-
-        uint256 lateZero = _liteSettles(
-            polygonGateway, token, _bringHomeReceipt(id, 1, aliceOnA, 0, MessageTypesLib.ReceiptAnswer.Expired)
-        );
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptApplied(id, polygon, 0);
-        polygonGateway.relay(lateZero);
-
-        assertEq(token.balanceOf(alice), MINTED - ALICE_ON_A + BROUGHT, "nothing changes");
+        assertEq(token.balanceOf(alice), MINTED - ALICE_ON_A + BROUGHT, "minted once at home");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.reservedOf(aliceOnA), 0);
     }
 
-    /// @notice A hostile replacement freezes the chain for its window; after it, the pinned bring home goes to the
-    ///         new peer as a new half.
-    function test_sendSecondHalf_sendsABringHomePinnedToAHostilePeerToTheNewPeer_afterTheChange() public {
+    /// @notice A hostile replacement keeps no former pair: once the freeze is over, the pinned bring home is still
+    ///         never sent to the new peer, which does not hold it.
+    function test_sendSecondHalf_reverts_when_theBringHomesPeerWasReplacedAsHostile() public {
         bytes32 id = _bringHome(BROUGHT);
-        address newPeer = makeAddr("replacementPeer");
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, newPeer));
+        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementPeer")));
         vm.warp(token.hostileChangeEndsAt(polygon) + 1);
 
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, polygon));
         boundCompliance.sendSecondHalf(id, aliceOnA);
-
-        assertEq(boundCompliance.ticketOf(id).half, 2);
-        (, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(id, 2));
-        assertEq(pinnedPeerKey, keccak256(InteroperableAddress.formatEvmV1(POLYGON, newPeer)));
+        assertEq(boundCompliance.ticketOf(id).half, 1, "no new half");
     }
 
-    /// @notice The bridge the half was pinned to is distrusted: its receipt is refused, and once due the half goes as
-    ///         a new half through the chain's new route, whose receipt mints at home.
-    function test_sendSecondHalf_sendsANewHalfThroughTheNewRoute_whenThePinnedBridgeIsDistrusted() public {
+    /// @notice The bridge the half was pinned to is distrusted: its receipt is refused, and once due the same half
+    ///         goes again to the same peer through the chain's new route, whose receipt mints at home.
+    function test_sendSecondHalf_sendsTheSameHalfThroughTheNewRoute_whenThePinnedBridgeIsDistrusted() public {
         bytes32 id = _bringHome(BROUGHT);
         uint256 throughTheOldBridge = _liteSettles(polygonGateway, token, _burned(id, 1, BROUGHT));
         trustedGatewayRegistry.distrustBridge(address(polygonGateway));
@@ -414,9 +400,10 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         _openEvmChain(token, POLYGON, address(newGateway));
         vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + POLYGON_WINDOW);
         boundCompliance.sendSecondHalf(id, aliceOnA);
-        assertEq(boundCompliance.ticketOf(id).half, 2);
+        assertEq(boundCompliance.ticketOf(id).half, 1, "the same half");
+        assertEq(newGateway.queueLength(), 1, "sent through the new route");
 
-        _deliver(newGateway, _burned(id, 2, BROUGHT));
+        _deliver(newGateway, _burned(id, 1, BROUGHT));
         _assertStatus(id, ITickets.TicketStatus.Done);
         assertEq(token.balanceOf(alice), MINTED - ALICE_ON_A + BROUGHT);
     }
@@ -630,19 +617,6 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         returns (MessageTypesLib.ReceiptMessage memory)
     {
         return _bringHomeReceipt(id, half, aliceOnA, amount, MessageTypesLib.ReceiptAnswer.Executed);
-    }
-
-    /// @dev A planned peer change on A, then the due send of the bring home: half 2 to the new peer.
-    function _replacePeerAndSendHalfTwo(bytes32 id) private returns (address newPeer) {
-        newPeer = makeAddr("newPolygonPeer");
-        vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, newPeer));
-        vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + POLYGON_WINDOW);
-
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.HalfPinned(MessageTypesLib.halfKeyOf(id, 2), polygon, address(polygonGateway));
-        boundCompliance.sendSecondHalf(id, aliceOnA);
-        assertEq(boundCompliance.ticketOf(id).half, 2);
     }
 
     /// @dev A sends `receipt`: refused, A blocked, the bring home still open and reserved.

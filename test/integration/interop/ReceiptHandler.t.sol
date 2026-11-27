@@ -115,7 +115,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptRefused(ticketId, polygon, 45, boundCompliance.ticketOf(ticketId).askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(another);
 
         assertEq(token.awayBalanceOf(bobOnPolygon), 40, "the first receipt stands");
@@ -173,7 +173,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(ticketId, polygon, movedAboveTheTicket);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(index);
 
         assertEq(token.awayBalanceOf(bobOnPolygon), movedAboveTheTicket, "applied as it happened");
@@ -379,7 +379,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptOnOlderTerms(ticketId, polygon, 2);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "older terms above the per-ticket cap block the chain");

@@ -111,6 +111,15 @@ contract TokenReservationStub {
         onHoldOf[ticketId] += amount;
     }
 
+    /// @dev What each ticket's applied receipt moved, as the token's `finishMove` would record it.
+    mapping(bytes32 ticketId => uint256) public finishedOf;
+
+    /// @dev A receipt applied: what left `from`, or its money on hold, reaches `to`; only the amount is recorded,
+    ///  since the unit tests check the compliance's side and read the call's arguments with `expectCall`.
+    function finishMove(bytes calldata, bytes calldata, uint256 amount, bytes32 ticketId) external {
+        finishedOf[ticketId] += amount;
+    }
+
     /// @dev A message on the receipt route, recorded; nothing is delivered.
     function sendOnReceiptRoute(bytes32 chainKey, bytes32 halfKey, uint8, bytes calldata) external returns (bytes32) {
         receiptRouteSends += 1;

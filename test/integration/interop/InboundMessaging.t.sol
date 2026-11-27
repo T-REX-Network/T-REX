@@ -173,7 +173,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, compliance);
         emit EventsLib.ReceiptRefused(ticketId, originChain, amount, leg.askBlockHash);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(originChain);
+        emit EventsLib.AwayChainBlockSet(originChain, true);
         routedGateway.relay(index);
 
         assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(index)));

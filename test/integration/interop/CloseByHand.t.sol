@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -38,7 +39,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(ticketId, optimism, EIGHT);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, 0);
+        emit EventsLib.ClosedByHand(ticketId, 0, uint64(block.number), uint64(block.timestamp));
         _closeByHand(ticketId, bobOptimismSat, _readingWith(stored));
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move is finished");
@@ -107,7 +108,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptWithoutTicket(ticketId, polygon, aliceSat, bobSat, FOUR);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, 0);
+        emit EventsLib.ClosedByHand(ticketId, 0, uint64(block.number), uint64(block.timestamp));
         _closeByHand(ticketId, bobSat, _readingWith(polygonLite.storedReceipt(ticketId, 0)));
 
         _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "booked on hold");
@@ -160,7 +161,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(validUntil - 1));
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, EIGHT);
+        emit EventsLib.ClosedByHand(ticketId, EIGHT, uint64(block.number), validUntil);
         _closeByHand(ticketId, bobOptimismSat, _reading(validUntil));
         _relayAll(polygonGateway); // the new move out mints the 8 back to alice
 
@@ -284,7 +285,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.TicketCancelled(ticketId);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, 0);
+        emit EventsLib.ClosedByHand(ticketId, 0, uint64(block.number), latestValidUntil);
         _closeByHand(ticketId, bobSat, _readingOfTheTicket(ticketId, latestValidUntil));
 
         _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled on the away clock");
@@ -413,7 +414,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, movedOut);
+        emit EventsLib.ClosedByHand(ticketId, movedOut, uint64(block.number), validUntil);
         _closeByHand(ticketId, bobOptimismSat, _reading(validUntil));
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
@@ -435,7 +436,7 @@ contract CloseByHandTest is HoldsSuiteTest {
 
         vm.warp(stopWaitingAt);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(ticketId, 0);
+        emit EventsLib.ClosedByHand(ticketId, 0, uint64(block.number), stopWaitingAt);
         _closeByHand(ticketId, bobSat, _reading(stopWaitingAt));
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move inside polygon is applied");
@@ -483,7 +484,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         _closeEvmChain(token, POLYGON);
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ClosedByHand(aliceId, 0);
+        emit EventsLib.ClosedByHand(aliceId, 0, uint64(block.number), uint64(block.timestamp));
         _closeByHand(aliceId, bobSat, _reading(uint64(block.timestamp)));
 
         _assertStatus(aliceId, ITickets.TicketStatus.Done, "the rest applied inside polygon");
@@ -510,6 +511,45 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, ticketId));
         boundCompliance.closeByHand(ticketId, bobSat, _readingWith(another));
+    }
+
+    /// @notice A read that carries a receipt home would refuse, a mistake in the read for instance, is never taken:
+    ///         nothing is applied, the chain is not blocked, and no close by hand is announced.
+    function test_closeByHand_reverts_when_theStoredReceiptIsABadReceipt() public {
+        bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(EIGHT);
+        _closeEvmChain(token, OPTIMISM);
+        MessageTypesLib.ReceiptMessage memory mintedLess = MessageTypesLib.ReceiptMessage({
+            ticketId: ticketId,
+            from: "",
+            to: bobOptimismSat,
+            amount: EIGHT - 1,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: boundCompliance.ticketOf(ticketId).half,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
+
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, ticketId));
+        boundCompliance.closeByHand(ticketId, bobOptimismSat, _readingWith(mintedLess));
+
+        assertFalse(boundCompliance.isAwayChainBlocked(optimism), "the chain is not blocked");
+        _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "still on hold");
+    }
+
+    /// @notice A stored receipt that home cannot apply now would only wait, tagged with no bridge: the close by hand
+    ///         reverts instead, and is decided once the receipt can be applied. Here its sender has no identity.
+    function test_closeByHand_reverts_when_theStoredReceiptCannotBeAppliedNow() public {
+        bytes memory strangerSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("strangerOnPolygon"));
+        bytes32 unknownId = keccak256("from a wallet nobody linked");
+        MessageTypesLib.ReceiptMessage memory stored = _receiptWithNoTicket(unknownId, strangerSat, bobSat, FOUR);
+        _closeEvmChain(token, POLYGON);
+
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, unknownId));
+        boundCompliance.closeByHand(unknownId, bobSat, _readingWith(stored));
+        assertEq(boundCompliance.waitingReceiptOf(MessageTypesLib.halfKeyOf(unknownId, 0)).bodyHash, bytes32(0));
     }
 
     function test_closeByHand_reverts_when_theReceiverIsNotTheTickets() public {

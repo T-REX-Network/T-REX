@@ -324,13 +324,15 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         bytes32 executedUnder = orphaned.askBlockHash;
         _execute(id, 95);
 
-        // `orphaned` is a memory reference: `later` is the same body, narrowed in place, so the Lite sees another
-        // body under the id it already consumed.
+        // `orphaned` is a memory reference: `later` is the same request, narrowed in place as a copy mined in another
+        // block would be, so the away token sees another body under the id it already consumed. The id names the
+        // request, not the narrowed maximum: a body with other requested terms would be refused as another id.
         MessageTypesLib.TicketMessage memory later = orphaned;
-        later.amountMin = 90;
+        later.amountMax = 90;
+        later.askBlockHash = keccak256("another home block");
         _deliverToLite(polygonGateway, polygonLite, later);
 
-        assertEq(polygonLite.ticketOf(id).amountMin, 80, "consumed: the body held is the one executed");
+        assertEq(polygonLite.ticketOf(id).amountMax, 100, "consumed: the body held is the one executed");
         assertEq(polygonLite.ticketOf(id).askBlockHash, executedUnder);
     }
 

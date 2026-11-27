@@ -200,6 +200,76 @@ contract AwayTokenClockTest is InteropSuiteTest {
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
+    /* ----- The away token's own checks and limits ----- */
+
+    /// @notice A ticket whose id is not the id of its own terms is refused: nobody puts other terms under a known id.
+    function test_awayToken_refusesATicket_whenItsIdIsNotTheIdOfItsTerms() public {
+        bytes32 forgedId = keccak256("a ticket home never wrote");
+        MessageTypesLib.TicketMessage memory forged = _forgedCopy(forgedId, uint64(block.timestamp) + VALIDITY_WINDOW);
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(forged), new bytes[](0));
+
+        bytes32 idOfTheTerms = polygonLite.idOfTheTerms(forged);
+        uint256 forgedCopyIndex = _last();
+
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.TicketIdMismatch.selector, forgedId, idOfTheTerms));
+        polygonGateway.relay(forgedCopyIndex);
+        assertFalse(polygonLite.known(forgedId), "never held");
+    }
+
+    /// @notice Later copies of a ticket are answered six times at most; the seventh is consumed with nothing sent.
+    function test_awayToken_sendsNoAnswer_afterSixAnswersForTheTicket() public {
+        bytes32 ticketId = _askAndDeliver(10, 50);
+        MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
+        uint8 answers = polygonLite.MAX_ANSWERS_PER_HALF();
+        for (uint8 i = 0; i < answers; i++) {
+            _deliverToLite(heldCopy);
+        }
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(heldCopy), new bytes[](0));
+        uint256 queuedBeforeTheSeventh = polygonGateway.queueLength();
+        uint256 seventhCopyIndex = _last();
+
+        vm.expectEmit(true, false, false, true, address(polygonLite));
+        emit SatelliteLiteMock.AnswerNotSent(ticketId, 0);
+        polygonGateway.relay(seventhCopyIndex);
+
+        assertEq(polygonGateway.queueLength(), queuedBeforeTheSeventh, "nothing sent");
+    }
+
+    /// @notice Anyone may ask for a stored receipt again three times, the waits doubling from the set wait.
+    function test_resendReceipt_waitsTwiceAsLongEachTime_andStopsAfterThreeResends() public {
+        uint64 wait = 10 minutes;
+        polygonLite.setReceiptResendWait(wait);
+        bytes32 ticketId = _askAndDeliver(10, 50);
+        _execute(ticketId, 40);
+        uint64 sentAt = uint64(block.timestamp);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(SatelliteLiteMock.ReceiptResendTooSoon.selector, ticketId, 0, sentAt + wait)
+        );
+        polygonLite.resendReceipt(ticketId, 0);
+        vm.warp(sentAt + wait);
+        polygonLite.resendReceipt(ticketId, 0);
+
+        uint64 secondAllowedAt = sentAt + wait + 2 * wait;
+        vm.warp(secondAllowedAt - 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(SatelliteLiteMock.ReceiptResendTooSoon.selector, ticketId, 0, secondAllowedAt)
+        );
+        polygonLite.resendReceipt(ticketId, 0);
+        vm.warp(secondAllowedAt);
+        polygonLite.resendReceipt(ticketId, 0);
+        vm.warp(secondAllowedAt + 4 * wait);
+        polygonLite.resendReceipt(ticketId, 0);
+
+        vm.warp(block.timestamp + 100 days);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NoReceiptResendLeft.selector, ticketId, 0));
+        polygonLite.resendReceipt(ticketId, 0);
+    }
+
     /* ----- Helpers ----- */
 
     /// @dev Alice asks to move to Bob on Polygon, and the ticket reaches the away token.

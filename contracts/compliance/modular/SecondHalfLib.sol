@@ -259,14 +259,8 @@ library SecondHalfLib {
         uint64 dueAt = _nextSendDueAt(ticket, store.waitingTimes[chainKey]);
         require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
 
-        // Past its valid until by now: a half pinned to a pair the chain no longer has goes to the current pair, as a
-        // new half, since its old away token can no longer be asked.
-        if (!_pinnedToTheCurrentPair(ticketId, ticket.half, chainKey, token)) {
-            takeANewHalf(ticket, ticketId);
-            sendTheLatestHalf(ticket, ticketId, wallet, token);
-            return;
-        }
-
+        // The same half again, never a new one: only a zero answer or a failed send makes a new half owed. The token
+        // sends it to the peer it was pinned to, and refuses with `PeerChanged` once that peer is gone.
         ticket.secondHalfSends += 1;
         _send(ticket, ticketId, chainKey, wallet, token);
     }
@@ -402,7 +396,7 @@ library SecondHalfLib {
         returns (bytes32)
     {
         bytes32 homeWalletKey = WalletKeyLib.canonicalKey(_homeEnvelopeOf(homeWallet));
-        bytes32 noSpender = keccak256("");
+        bytes32 noSpender = bytes32(0);
         return
             TicketLib.ticketIdOf(ITickets.TicketKind.BRING_HOME, walletKey, homeWalletKey, noSpender, 0, amount, salt);
     }
@@ -667,12 +661,11 @@ library SecondHalfLib {
 
     /* ----- Sending a half, shared with {HoldLib} ----- */
 
-    /// @dev Numbers a new second half, within the bound of new halves per money on hold, and announces the last one.
+    /// @dev Numbers a new second half, within the bound of new halves per money on hold.
     function takeANewHalf(ITickets.Ticket storage ticket, bytes32 ticketId) internal {
         require(ticket.newHalves < MAX_NEW_HALVES, ErrorsLib.NoNewHalfLeft(ticketId));
         ticket.newHalves += 1;
         ticket.half += 1;
-        if (ticket.newHalves == MAX_NEW_HALVES) emit EventsLib.NewHalfLimitReached(ticketId);
     }
 
     /// @dev Writes the first send of the latest half: its valid until is now plus its chain's waiting time.
@@ -796,19 +789,6 @@ library SecondHalfLib {
         uint64 sends = ticket.secondHalfSends;
         uint64 waitingTimesAfterValidUntil = sends * (sends + 1) / 2;
         return ticket.secondHalfValidUntil + waitingTimesAfterValidUntil * waitingTime;
-    }
-
-    /// @dev Whether the half is still pinned to the chain's current receipt route and peer.
-    function _pinnedToTheCurrentPair(bytes32 ticketId, uint8 half, bytes32 chainKey, address token)
-        private
-        view
-        returns (bool)
-    {
-        ITREXMessaging messaging = ITREXMessaging(token);
-        (address pinnedBridge, bytes32 pinnedPeerKey) = messaging.pinOf(MessageTypesLib.halfKeyOf(ticketId, half));
-        bool sameBridge = pinnedBridge == messaging.receiptRouteFor(chainKey);
-        bool samePeer = pinnedPeerKey == keccak256(messaging.peerFor(chainKey));
-        return sameBridge && samePeer;
     }
 
     /// @dev The registry of the token the compliance is bound to.

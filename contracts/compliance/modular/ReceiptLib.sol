@@ -144,17 +144,14 @@ library ReceiptLib {
             return;
         }
 
-        // 4. A first-half receipt that no ticket home sent answers is put on hold under its sender, see {HoldLib}.
+        // 4. A bad receipt is refused and blocks the chain that sent it.
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
-        if (_answersNoTicketHomeSent(ticket, recorded, receipt)) {
-            _receiveWithoutTicket(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt, token);
-            return;
-        }
+        bool withoutTicket = _answersNoTicketHomeSent(ticket, recorded, receipt);
+        if (_refusedAsBad(store, ticket, withoutTicket, halfKey, originChainKey, receipt)) return;
 
-        // 5. A bad receipt is refused and blocks the chain that sent it.
-        if (_isBadReceipt(store, ticket, halfKey, originChainKey, receipt)) {
-            emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
-            TicketLib.blockAwayChain(originChainKey);
+        // 5. A first-half receipt that no ticket home sent answers is put on hold under its sender, see {HoldLib}.
+        if (withoutTicket) {
+            _receiveWithoutTicket(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt, token);
             return;
         }
 
@@ -169,9 +166,9 @@ library ReceiptLib {
         _apply(ticket, originChainKey, receipt, token);
     }
 
-    /// @dev See {ITickets-applyWaitingReceipt}. The receipt was checked when it arrived and is applied as it would
-    ///  have been then, once its route still admits it. A revert anywhere below leaves the receipt waiting; the next
-    ///  call tries again.
+    /// @dev See {ITickets-applyWaitingReceipt}. The receipt is applied once its route still admits it, and is judged
+    ///  again first: a ticket written since it arrived changes what it must match. A bad one is refused and blocks its
+    ///  chain, as at delivery. A revert anywhere below leaves the receipt waiting; the next call tries again.
     /// @param token the token the compliance is bound to
     function applyWaitingReceipt(bytes32 halfKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
         external
@@ -190,6 +187,7 @@ library ReceiptLib {
             .checkReceiptOrigin(waiting.chainKey, waiting.deliveredBy, waiting.peerKey, halfKey, waiting.arrivedAt);
 
         delete store.waitingReceipts[halfKey];
+        if (_refusedAsBad(store, ticket, withoutTicket, halfKey, waiting.chainKey, receipt)) return;
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, waiting.chainKey);
         if (withoutTicket) {
@@ -214,7 +212,8 @@ library ReceiptLib {
     }
 
     /// @dev The receipt that waits under the half came again. When it can now be applied, the repeat applies it: the
-    ///  repeat itself passed the route check at delivery. Otherwise it is a duplicate and the receipt keeps waiting.
+    ///  repeat itself passed the route check at delivery. It is judged again first, as {applyWaitingReceipt} judges
+    ///  it. Otherwise it is a duplicate and the receipt keeps waiting.
     function _receiveTheWaitingReceiptAgain(
         bytes32 halfKey,
         bytes32 receiptHash,
@@ -234,6 +233,7 @@ library ReceiptLib {
         }
 
         delete store.waitingReceipts[halfKey];
+        if (_refusedAsBad(store, ticket, withoutTicket, halfKey, originChainKey, receipt)) return;
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, originChainKey);
         if (withoutTicket) {
@@ -257,10 +257,8 @@ library ReceiptLib {
         return receipt.half == 0 && aMove && neverSent;
     }
 
-    /// @dev A first-half receipt that no ticket home sent answers. It is a bad receipt, refused and blocking the
-    ///  chain that sent it, when another body came for the id, when its sender is not on that chain, when an expired
-    ///  answer still moved something, or, for a ticket home wrote, when it names other wallets. A good one waits
-    ///  until it can be booked; its hash is written before it is booked, so the same receipt again changes nothing.
+    /// @dev A good first-half receipt that no ticket home sent answers waits until it can be booked; its hash is
+    ///  written before it is booked, so the same receipt again changes nothing.
     function _receiveWithoutTicket(
         bytes32 halfKey,
         bytes32 receiptHash,
@@ -270,22 +268,40 @@ library ReceiptLib {
         MessageTypesLib.ReceiptMessage calldata receipt,
         address token
     ) private {
-        TicketLib.ValidationStorage storage store = TicketLib.layout();
-        if (_isBadReceiptWithoutTicket(store, halfKey, originChainKey, receipt)) {
-            emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
-            TicketLib.blockAwayChain(originChainKey);
-            return;
-        }
         if (!HoldLib.canBeBookedNow(originChainKey, receipt, token)) {
             _keepWaiting(halfKey, receiptHash, originChainKey, bridge, senderPeerKey, receipt);
             return;
         }
-        store.receiptHashes[halfKey] = receiptHash;
+        TicketLib.layout().receiptHashes[halfKey] = receiptHash;
         HoldLib.bookWithoutTicket(originChainKey, receipt, token);
     }
 
-    /// @dev See {_receiveWithoutTicket}. With no ticket to compare it to, a receipt is held to the chain that holds its
-    ///  sender: no other away chain can move that sender's tokens.
+    /// @dev Refuses a bad receipt: nothing is written for its half, so the honest receipt for it still lands, and the
+    ///  away chain that sent it is blocked. Judged at delivery and again when a waiting receipt is applied, since a
+    ///  ticket written meanwhile changes what the receipt must match.
+    /// @param withoutTicket whether the receipt answers no ticket home sent, see {_answersNoTicketHomeSent}
+    /// @return refused whether the receipt was bad
+    function _refusedAsBad(
+        TicketLib.ValidationStorage storage store,
+        ITickets.Ticket storage ticket,
+        bool withoutTicket,
+        bytes32 halfKey,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private returns (bool refused) {
+        if (withoutTicket) {
+            refused = _isBadReceiptWithoutTicket(store, halfKey, originChainKey, receipt);
+        }
+        if (!withoutTicket) refused = _isBadReceipt(store, ticket, halfKey, originChainKey, receipt);
+        if (!refused) return false;
+        emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+        TicketLib.blockAwayChain(originChainKey);
+    }
+
+    /// @dev A first-half receipt that no ticket home sent answers is bad when another body came for the id, when its
+    ///  sender is not on the chain it came from, when an expired answer still moved something, or, for a ticket home
+    ///  wrote, when it names other wallets. With no ticket to compare it to, a receipt is held to the chain that holds
+    ///  its sender: no other away chain can move that sender's tokens.
     function _isBadReceiptWithoutTicket(
         TicketLib.ValidationStorage storage store,
         bytes32 halfKey,
@@ -746,7 +762,8 @@ library ReceiptLib {
 
     /// @dev See {ITickets-closeByHand}. The read stands in for the receipt the closed chain cannot deliver: a stored
     ///  receipt goes through the same handler a delivery runs, with no bridge and no peer, since the caller's role
-    ///  attests it. Without one, only the away chain's own clock in the read lets home decide.
+    ///  attests it, and must be applied there: a read home would refuse or keep waiting reverts instead, so a mistake
+    ///  in the read never blocks the chain. Without one, only the away chain's own clock in the read lets home decide.
     /// @param token the token the compliance is bound to
     function closeByHand(
         bytes32 ticketId,
@@ -758,15 +775,31 @@ library ReceiptLib {
 
         // 1. What the away token stored is applied as if it had arrived; nothing is returned.
         if (reading.storedReceipt.amount != 0) {
-            require(reading.storedReceipt.ticketId == ticketId, ErrorsLib.ValidationBodyMismatch(ticketId));
-            _receive(chainKey, address(0), bytes32(0), reading.storedReceipt, token);
-            emit EventsLib.ClosedByHand(ticketId, 0);
+            _applyTheStoredReceipt(ticketId, chainKey, reading.storedReceipt, token);
+            emit EventsLib.ClosedByHand(ticketId, 0, reading.blockNumber, reading.awayClockTime);
             return;
         }
 
         // 2. Nothing stored: decided on the away chain's own clock.
         uint256 returnedAmount = _closeOnTheAwayClock(ticketId, receiver, reading, chainKey, token);
-        emit EventsLib.ClosedByHand(ticketId, returnedAmount);
+        emit EventsLib.ClosedByHand(ticketId, returnedAmount, reading.blockNumber, reading.awayClockTime);
+    }
+
+    /// @dev Applies the receipt a read of the closed chain found, through {_receive}. Once it ran, the half must hold
+    ///  that very receipt: one judged bad, or kept waiting, reverts the close by hand with nothing written.
+    function _applyTheStoredReceipt(
+        bytes32 ticketId,
+        bytes32 chainKey,
+        MessageTypesLib.ReceiptMessage calldata storedReceipt,
+        address token
+    ) private {
+        require(storedReceipt.ticketId == ticketId, ErrorsLib.ValidationBodyMismatch(ticketId));
+        _receive(chainKey, address(0), bytes32(0), storedReceipt, token);
+
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, storedReceipt.half);
+        bytes32 storedReceiptHash = keccak256(abi.encode(chainKey, storedReceipt));
+        bool appliedAsRead = TicketLib.layout().receiptHashes[halfKey] == storedReceiptHash;
+        require(appliedAsRead, ErrorsLib.ValidationBodyMismatch(ticketId));
     }
 
     /// @dev The away chain a close by hand reads, once it is known: the chain of the ticket's latest half, or the

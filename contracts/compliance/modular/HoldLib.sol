@@ -201,7 +201,8 @@ library HoldLib {
     /* ----- The ask mined again ----- */
 
     /// @dev See {ITickets-askToMove}: the ask mined again takes the money on hold under its id. The held receipt must
-    ///  keep the terms of the ask and the away chain's per-ticket cap, as a receipt on older terms must. A move inside
+    ///  name the ask's wallets, and keep the terms of the ask and the away chain's per-ticket cap, as a receipt on
+    ///  older terms must. A move inside
     ///  one away chain is applied when the receiver may take it now and its hold is cancelled otherwise; a move out of
     ///  the away chain is decided as a first-half receipt is, see {SecondHalfLib-takeTheHold}.
     /// @param token the token the compliance is bound to
@@ -218,6 +219,7 @@ library HoldLib {
         ITickets.Ticket storage ticket = TicketLib.layout().validations[ticketId];
 
         // Checks
+        _requireTheHeldReceiptNamesTheAsksWallets(ticket, ticketId, from, to);
         _requireTheHoldCanBeTaken(ticket, ticketId, requestedMin, requestedMax, token);
         IModule.TransferContext memory move = _theMoveAsAsked(ticket, from, to, spender, token);
         if (_insideOneAwayChain(ticket) && !_receiverMayTakeItNow(move, to, token)) {
@@ -448,6 +450,20 @@ library HoldLib {
         require(ticket.moved <= seenMax, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
         require(seenMax <= requestedMax, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
         require(seenMax <= perTicketCap, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
+    }
+
+    /// @dev The held receipt must name the wallets of the ask: the id names them, but a hostile away token chooses
+    ///  the wallets its receipt names, and could book another holder's money under the asker's id.
+    function _requireTheHeldReceiptNamesTheAsksWallets(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata from,
+        bytes calldata to
+    ) private view {
+        bool heldFromTheAsksSender = WalletKeyLib.canonicalKey(from) == ticket.fromKey;
+        bool heldForTheAsksReceiver = WalletKeyLib.canonicalKey(to) == ticket.toKey;
+        require(heldFromTheAsksSender, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
+        require(heldForTheAsksReceiver, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
     }
 
     /// @dev The move the ask names, for the money on hold, as the rules and the trackers are told it.

@@ -14,9 +14,9 @@ All notable changes to this project will be documented in this file.
     home burns an away wallet's tokens to bring them home. Every message carries version 2; any other version is
     refused on both sides. Away tokens never talk to each other: a move between two away chains is a ticket to the
     sender's chain, the money on hold at home, then a `MOVE_OUT` to the receiver, or back to the sender when the
-    rules refuse the receiver. A ticket id is built from the whole request, so the same ask mined again after a home
-    reorg keeps its id; the ask block hash names which copy the away token executed. `docs/satellite-lite.md` is the
-    away token's contract.
+    rules refuse the receiver. A ticket id is built from the whole request, with a spender key of zero when the move
+    names no spender, so the same ask mined again after a home reorg keeps its id; the ask block hash names which
+    copy the away token executed. `docs/satellite-lite.md` is the away token's contract.
   - *New functions.* On the compliance: `askToMove`, `sendTicket` (an ask for the receipt, three at most),
     `cancelTickets`, `sendSecondHalf`, `bringHome`, `cancelHold`, `closeByHand`, `applyWaitingReceipt`,
     `refuseWaitingReceipt`, `blockAwayChain`, `unblockAwayChain`, `setValidityWindows`, `setWaitingTime`,
@@ -54,6 +54,24 @@ All notable changes to this project will be documented in this file.
     half reverts unless 550,000 gas is left for that send (449,545 gas at most measured with the test bridge), so a
     receipt route needs a delivery gas limit of at least about 1,250,000 gas; measure it again with the production
     bridge.
+  - *Storage: fresh deployments only.* No proxy of the develop version can be upgraded to this one, testnets
+    included. Three ERC-7201 namespaces keep their strings and change their layout:
+    `erc3643.storage.TransferValidation` (the compliance) is rewritten from its first slot: `defaultValidityWindow`,
+    `reconciliationWindows`, `issuancePaused`, `awaitedTerms`, `parkedLegs` and `reportedLegs` are gone,
+    `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
+    `waitingReceipts`, `receiptHashes`, `ticketLimits`, `latestValidUntilSent`, `blockedAwayChains`,
+    `measuredTimes`, `validityWindowFloors`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
+    `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
+    `erc3643.storage.TREXMessaging` (the token) keeps its first five slots (`routes` read as `receiptRoutes`);
+    `pinnedRoutes`, `pinnedPeers`, `inboundPaused` and `fastRoutes` are replaced from slot 5 by `pins` (one pin per
+    half), `ticketRoutes`, `awayReceiptBridges`, `formerReceiptRoutes` and `hostileChangeEndsAt`.
+    `erc3643.storage.TREXToken` (the token) keeps its first six slots under new names (`bridgedBalance` as
+    `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
+    `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
+    `lastRecallId`, `openRecall`, `settledProofs`, `lastDelegationId` and `delegations` from slot 6. The new
+    `erc3643.storage.AwayChainVolumeModule` belongs to a new module. `ComplianceLedger`, `TREXCompliance`,
+    `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are
+    unchanged.
 
 ### Added
 

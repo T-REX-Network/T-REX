@@ -358,7 +358,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptOnOlderTerms(ticketId, polygon, 2);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         receiptBridge.relay(index);
 
         assertEq(token.awayBalanceOf(bobSat), 2, "applied as it happened");

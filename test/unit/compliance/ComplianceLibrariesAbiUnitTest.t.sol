@@ -65,8 +65,7 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.ReceiptWaiting.selector, EventsLib.ReceiptWaiting.selector);
         assertEq(ITickets.WaitingReceiptApplied.selector, EventsLib.WaitingReceiptApplied.selector);
         assertEq(ITickets.WaitingReceiptRefused.selector, EventsLib.WaitingReceiptRefused.selector);
-        assertEq(ITickets.AwayChainBlockStarted.selector, EventsLib.AwayChainBlockStarted.selector);
-        assertEq(ITickets.AwayChainUnblocked.selector, EventsLib.AwayChainUnblocked.selector);
+        assertEq(ITickets.AwayChainBlockSet.selector, EventsLib.AwayChainBlockSet.selector);
         assertEq(ITickets.ReceiptRefused.selector, EventsLib.ReceiptRefused.selector);
         assertEq(ITickets.ReceiptOnOlderTerms.selector, EventsLib.ReceiptOnOlderTerms.selector);
         assertEq(ITickets.MoveBreachedRule.selector, EventsLib.MoveBreachedRule.selector);
@@ -81,7 +80,6 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.TicketStillOpen.selector, EventsLib.TicketStillOpen.selector);
         assertEq(ITickets.SecondHalfSent.selector, EventsLib.SecondHalfSent.selector);
         assertEq(ITickets.SecondHalfNotSent.selector, EventsLib.SecondHalfNotSent.selector);
-        assertEq(ITickets.NewHalfLimitReached.selector, EventsLib.NewHalfLimitReached.selector);
         assertEq(ITickets.ReceiptWithoutTicket.selector, EventsLib.ReceiptWithoutTicket.selector);
         assertEq(ITickets.ReceiptUnknown.selector, EventsLib.ReceiptUnknown.selector);
         assertEq(ITickets.HoldTaken.selector, EventsLib.HoldTaken.selector);

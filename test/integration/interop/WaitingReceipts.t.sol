@@ -398,7 +398,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     /// @notice The pauser blocks and unblocks an away chain on the compliance; the token's route stays open.
     function test_blockAwayChain_blocksOnlyTheReceiptsOfThatChain() public {
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.AwayChainBlockStarted(polygon);
+        emit EventsLib.AwayChainBlockSet(polygon, true);
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
 
