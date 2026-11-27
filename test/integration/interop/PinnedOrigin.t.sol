@@ -42,6 +42,7 @@ pragma solidity 0.8.30;
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -51,8 +52,8 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///      from the current one, so a peer change does not strand it, and closing the receipt route stops it like every
 ///      other message from that chain.
 ///      The tickets are sent by the token alone, never written by the compliance, so a receipt that passes the
-///      transport reaches `receiveReceipt`, which refuses an id it has no record of: that refusal is what these
-///      tests read.
+///      transport reaches `receiveReceipt`, which announces it whatever becomes of it: that announcement is what
+///      these tests read.
 contract PinnedOriginTest is InteropSuiteTest {
 
     ERC7786GatewayMock gateway;
@@ -89,9 +90,11 @@ contract PinnedOriginTest is InteropSuiteTest {
         token.setPeer(satellite, InteroperableAddress.formatEvmV1(POLYGON, newLite));
     }
 
-    /// @dev The receipt got through the transport and reached the compliance, which has no record of the id.
+    /// @dev The receipt got through the transport and reached the compliance, which announces it.
     function _expectHandled(bytes32 ticketId) private {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, ticketId));
+        MessageTypesLib.ReceiptMessage memory receipt = _sameChainSettlement(ticketId, POLYGON, amount);
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptReceived(satellite, ticketId, receipt.from, receipt.to, receipt.amount);
     }
 
     function _expectNotPeer(address author) private {
@@ -130,18 +133,22 @@ contract PinnedOriginTest is InteropSuiteTest {
         gateway.relay(index);
     }
 
-    function testRedispatchAfterAPeerChangeIsRefused() public {
+    /// @dev Inside the change window an ask goes to the peer the ticket was pinned to, the former one: the away token
+    ///      that holds it is the one that answers.
+    function testRedispatchAfterAPeerChangeGoesToThePinnedFormerPeer() public {
         _changePeer();
 
         vm.prank(compliance);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, inFlight, satellite, address(gateway))
-        );
         token.sendOnTicketRoute(satellite, inFlight, abi.encode("validation"));
+
+        uint256 last = gateway.queueLength() - 1;
+        assertEq(gateway.queuedMessage(last).recipient, InteroperableAddress.formatEvmV1(POLYGON, address(token)));
     }
 
+    /// @dev Once the change window is over, a half never sent follows the current peer only.
     function testAnUnpinnedSettlementFollowsTheCurrentPeer() public {
         _changePeer();
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
         uint256 fromPrevious = _settlementFrom(address(token), neverDispatched);
         uint256 fromCurrent = _settlementFrom(newLite, neverDispatched);
 

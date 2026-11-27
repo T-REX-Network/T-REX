@@ -46,10 +46,10 @@ import { ModularCompliance } from "contracts/compliance/modular/ModularComplianc
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
-import { Token } from "contracts/token/Token.sol";
 import { TicketsHarness } from "test/integration/helpers/TicketsHarness.sol";
 import { RecordingModule, RuleOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ModularComplianceBaseUnitTest } from "test/unit/compliance/helpers/ModularComplianceBaseUnitTest.t.sol";
+import { TokenReservationStub } from "test/unit/compliance/helpers/TokenReservationStub.sol";
 import { BeaconProxyDeployer } from "test/unit/helpers/BeaconProxyDeployer.sol";
 
 /// @dev The three properties of an issued range, over random requests, balances and rule answers: it sits
@@ -93,14 +93,23 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         reversed.addModule(address(a));
 
         bytes32 polygon = _evmChainKey(POLYGON);
-        mc.setDefaultValidityWindow(1 hours);
-        mc.setWaitingTime(polygon, 30 minutes);
-        reversed.setDefaultValidityWindow(1 hours);
-        reversed.setWaitingTime(polygon, 30 minutes);
+        ITickets.AskLimits memory limits = ITickets.AskLimits({
+            openTicketsPerIdentity: type(uint32).max,
+            asksPerIdentityPerWindow: type(uint32).max,
+            askWindow: 1 days,
+            smallestAmount: 1
+        });
+        mc.setValidityWindows(15 minutes, 25 minutes);
+        mc.setWaitingTime(polygon, 95 minutes);
+        mc.setAskLimits(limits);
+        reversed.setValidityWindows(15 minutes, 25 minutes);
+        reversed.setWaitingTime(polygon, 95 minutes);
+        reversed.setAskLimits(limits);
 
+        // The wallet's room, the receipt route the tickets go out on and the token's pause are the stub's, with
+        // real state; the registry is the token's.
+        vm.etch(token, address(new TokenReservationStub()).code);
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
-        vm.mockCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), abi.encode(bytes32(0)));
-        vm.mockCall(token, abi.encodeWithSignature("paused()"), abi.encode(false));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", from), abi.encode(aliceIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", to), abi.encode(bobIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("isWalletVerified(bytes)", to), abi.encode(true));
@@ -116,14 +125,30 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         if (requestedMin > requestedMax) {
             (requestedMin, requestedMax) = (requestedMax, requestedMin);
         }
-        // The wallet's room is the token's now: what it can still send is its balance less any reservation.
-        vm.mockCall(token, abi.encodeWithSignature("availableOf(bytes)", from), abi.encode(uint256(balance)));
-        vm.mockCall(token, abi.encodeWithSignature("reserveForTicket(bytes,uint256)"), "");
+        // Each compliance reserves against the same stub, so the wallet holds enough for both requests.
+        TokenReservationStub(token).setBridgedBalance(from, 2 * uint256(balance));
         a.setAllowedAmount(allowedByA);
         b.setAllowedAmount(allowedByB);
 
+        if (requestedMax == 0) {
+            vm.prank(aliceIdentity);
+            vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowSmallestAmount.selector, 0, 1));
+            mc.askToMove(from, to, requestedMin, requestedMax, "", _salt());
+            return;
+        }
+        // The asked maximum is part of the id, so a request above the free balance is refused, never narrowed.
+        if (requestedMax > uint256(balance)) {
+            TokenReservationStub(token).setBridgedBalance(from, balance);
+            vm.prank(aliceIdentity);
+            vm.expectRevert(
+                abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, from, uint256(balance), requestedMax)
+            );
+            mc.askToMove(from, to, requestedMin, requestedMax, "", _salt());
+            return;
+        }
+
         uint256 expectedMin = requestedMin;
-        uint256 expectedMax = _min(_min(requestedMax, balance), _min(allowedByA, allowedByB));
+        uint256 expectedMax = _min(requestedMax, _min(allowedByA, allowedByB));
 
         if (expectedMin > expectedMax || expectedMax == 0) {
             bytes4 expected =

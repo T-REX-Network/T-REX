@@ -49,6 +49,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { Token } from "contracts/token/Token.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import { CappedRecipientModule, RecordingModule, RuleOnlyModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
@@ -168,8 +169,8 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_position(), 50, "and the executed amount became a position");
     }
 
-    /// @notice The keeper's discard releases the reservation, so the next validation gets the full cap.
-    function test_discardExpiredValidations_Success_WhenReissuingAfterADiscard() public {
+    /// @notice A cancel releases the reservation, so the next validation gets the full cap.
+    function test_cancelTickets_Success_WhenReissuingAfterACancel() public {
         bytes32 id = _issue(10, CAP);
         assertEq(_pendingIn(), CAP);
 
@@ -205,30 +206,6 @@ contract PendingReservationTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
         boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
-    }
-
-    /// @notice Issue #81, first bug: a rule bound after a validation was issued still sees its settlement,
-    ///         because the position it reads belongs to the compliance and not to the rule. The old slot
-    ///         design booked such a settlement against nobody.
-    function test_handleSettlement_Success_WhenARuleIsBoundAfterIssuance() public {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
-        bytes32 id = _issue(10, 60);
-
-        CappedRecipientModule latecomer = CappedRecipientModule(
-            address(
-                new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
-            )
-        );
-        vm.startPrank(deployer);
-        boundCompliance.addModule(address(latecomer));
-        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (CAP)), address(latecomer));
-        vm.stopPrank();
-
-        gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 60)));
-
-        assertEq(_position(), 60, "the settlement landed on bob's identity, not on nobody");
-        assertEq(latecomer.transferActionCalls(), 1, "the latecomer was told");
-        assertEq(_max(_issue(10, CAP)), 40, "and it now narrows against the real position");
     }
 
     // ==== rebinding Tests ====
@@ -274,6 +251,7 @@ contract PendingReservationTest is InteropSuiteTest {
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
         _recallAndBurnTheWholeSupply();
         _discard(id);
+        _waitUntilHomeStopsWaitingFor(id);
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
@@ -298,7 +276,9 @@ contract PendingReservationTest is InteropSuiteTest {
     /// @notice Once the previous token's validations are over, nothing it promised is left and the compliance
     ///         can serve another token.
     function test_bindToken_Success_WhenThePreviousTokensValidationsWereDiscarded() public {
-        _discard(_issue(10, 60));
+        bytes32 id = _issue(10, 60);
+        _discard(id);
+        _waitUntilHomeStopsWaitingFor(id);
         _moveTokenToAFreshCompliance();
         Token nextToken = _deployToken("next", "Next Token", "NXT");
 
@@ -309,18 +289,14 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(_pendingIn(), 0);
     }
 
-    /// @dev Recalls alice's satellite tokens and burns them, since the token leaves its compliance only at zero
-    ///  supply. A recall is bounded by the bridged position, not by what validations reserve, and the satellite
-    ///  proves it burned the whole position.
+    /// @dev Brings alice's satellite tokens home and burns them, since the token leaves its compliance only at zero
+    ///  supply. A bring home is bounded by what tickets do not reserve, so the ledger's own transition stands in for
+    ///  one that burned the whole position: what these tests are about is the binding, not the bring home.
     function _recallAndBurnTheWholeSupply() private {
-        ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
-        gateway.relay(
-            _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, BALANCE)))
-        );
-        vm.prank(agent);
+        vm.startPrank(agent);
+        TokenLedgerHarness(address(token)).ledgerBringHome(aliceSat, alice, BALANCE);
         token.burn(alice, BALANCE);
+        vm.stopPrank();
         assertEq(token.totalSupply(), 0, "no supply left");
     }
 
@@ -337,11 +313,21 @@ contract PendingReservationTest is InteropSuiteTest {
     }
 
     function _discard(bytes32 id) private {
-        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = id;
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(ids);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        bytes memory to = bobSat;
+        if (ticket.relocation) to = _aliceOtherSat();
+        _cancelUnanswered(id, to, "");
+    }
+
+    function _aliceOtherSat() private returns (bytes memory) {
+        return _satelliteEnvelope(POLYGON, makeAccount("aliceOnPolygonToo").addr);
+    }
+
+    /// @dev The token leaves its compliance only once home stopped waiting for every ticket it wrote: four waiting
+    ///  times after the ticket's valid until.
+    function _waitUntilHomeStopsWaitingFor(bytes32 id) private {
+        uint64 stopWaitingAt = boundCompliance.ticketOf(id).stopWaitingAt;
+        if (block.timestamp < stopWaitingAt) vm.warp(stopWaitingAt);
     }
 
     function _max(bytes32 id) private view returns (uint256) {

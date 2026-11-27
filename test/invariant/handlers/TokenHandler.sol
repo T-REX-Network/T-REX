@@ -205,7 +205,7 @@ contract TokenHandler is Test {
         bytes memory to = _satellite(actor, walletSeed);
         amount = bound(amount, 0, token.freeBalanceOf(holder));
         vm.prank(agent);
-        try token.ledgerDelegateOut(holder, to, amount) {
+        try token.ledgerMoveOut(holder, to, amount) {
             ghostBridgedTotal += amount;
         } catch { }
     }
@@ -217,13 +217,14 @@ contract TokenHandler is Test {
         bytes memory from = _satellite(actor, walletSeed);
         amount = bound(amount, 0, token.awayBalanceOf(from));
         vm.prank(agent);
-        try token.ledgerRecall(from, holder, amount) {
+        try token.ledgerBringHome(from, holder, amount) {
             ghostBridgedTotal -= amount;
         } catch { }
     }
 
     /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains. A fuzzed id can land on
-    ///  a live hold: the token then settles that hold instead of debiting `from`, so the model follows it.
+    ///  a live hold: the token then takes the amount from that hold, in part or whole, instead of debiting `from`, so
+    ///  the model follows it.
     function bridgedTransfer(
         uint256 fromActorSeed,
         uint256 fromWalletSeed,
@@ -239,7 +240,7 @@ contract TokenHandler is Test {
         uint256 held = token.onHoldOf(ticketId);
         vm.prank(agent);
         try token.bridgedTransfer(from, to, amount, ticketId) {
-            if (held != 0) _settledHold(ticketId, held);
+            if (held != 0) _settledHold(ticketId, amount);
         } catch { }
     }
 
@@ -250,9 +251,13 @@ contract TokenHandler is Test {
         bytes memory from = _satellite(_actor(walletActorSeed), walletSeed);
         address to = actors[_actor(nativeSeed)];
         amount = bound(amount, 0, token.awayBalanceOf(from));
+        bytes32 ticketId = bytes32(nativeSeed);
+        uint256 held = token.onHoldOf(ticketId);
         vm.prank(agent);
-        try token.settleToNative(from, to, amount, bytes32(nativeSeed)) {
+        try token.settleToNative(from, to, amount, ticketId) {
             ghostBridgedTotal -= amount;
+            // A fuzzed id can land on a live hold: the amount then leaves that hold, not `from`.
+            if (held != 0) _settledHold(ticketId, amount);
         } catch { }
     }
 
@@ -263,7 +268,7 @@ contract TokenHandler is Test {
         amount = bound(amount, 0, token.awayBalanceOf(from));
         bytes32 ticketId = bytes32(nextValidationId++);
         vm.prank(compliance);
-        try token.putOnHold(from, amount, ticketId, 0) {
+        try token.putOnHold(from, amount, ticketId) {
             holds.push(Hold({ ticketId: ticketId, from: from, amount: amount }));
             ghostInTransit += amount;
         } catch { }
@@ -283,11 +288,13 @@ contract TokenHandler is Test {
         } catch { }
     }
 
-    /// @dev A hold left the token: the model lets go of it too.
+    /// @dev `amount` left a hold: the model takes it off too, and lets go of a hold left empty.
     function _settledHold(bytes32 ticketId, uint256 amount) internal {
         ghostInTransit -= amount;
         for (uint256 i = 0; i < holds.length; i++) {
             if (holds[i].ticketId != ticketId) continue;
+            holds[i].amount -= amount;
+            if (holds[i].amount != 0) return;
             holds[i] = holds[holds.length - 1];
             holds.pop();
             return;

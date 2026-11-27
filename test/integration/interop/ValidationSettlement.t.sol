@@ -39,6 +39,8 @@
 
 pragma solidity 0.8.30;
 
+import { IIdentityFactory } from "@onchain-id/solidity/contracts/factory/IIdentityFactory.sol";
+
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -148,9 +150,21 @@ contract ValidationSettlementTest is InteropSuiteTest {
     ///         names when the leg lands, not to the one recorded at issuance.
     function test_handleSettlement_Success_CreditsTheCurrentOwner_WhenTheNativeRecipientWasRelinked() public {
         bytes32 id = _issue(aliceSat, nativeBob, 10, 100);
-        // Registry writes never relink a wallet, so the relink is simulated as the owner swapping the storage.
+        // Registry writes never relink a wallet, so the relink is simulated as the owner swapping the storage, and the
+        // factory no longer knowing the wallet.
         IComplianceLedger ledger = IComplianceLedger(address(boundCompliance));
         address storageAddress = address(token.identityRegistry().identityStorage());
+        bytes memory bobEnvelope = InteroperableAddress.formatEvmV1(block.chainid, bob);
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(idFactory.getIdentity.selector, bobEnvelope),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(idFactory),
+            abi.encodeWithSelector(idFactory.getIdentityIncludingRevoked.selector, bobEnvelope),
+            abi.encode(address(0), IIdentityFactory.AccountStatus.None)
+        );
         vm.mockCall(
             storageAddress,
             abi.encodeCall(token.identityRegistry().identityStorage().storedIdentity, (bob)),
@@ -344,20 +358,23 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     /// @notice A receipt for an id home has no record of applies nothing and blocks nobody: it reverts and stays
     ///         deliverable at the bridge, and the token keeps running.
-    function test_handleSettlement_RevertWhen_TheIdWasNeverIssued_AndBlocksNobody() public {
+    /// @notice A receipt for an id home has no record of is put on hold under its sender with no destination, and
+    ///         blocks nobody.
+    function test_receiveReceipt_booksOnHold_andBlocksNobody_whenTheIdWasNeverIssued() public {
         bytes32 unknown = bytes32(uint256(999));
         uint256 index =
             _liteSettles(polygonGateway, token, _settlementUnder(unknown, aliceSat, bobSat, 95, keccak256("body")));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWithoutTicket(unknown, polygon, aliceSat, bobSat, 95);
         polygonGateway.relay(index);
 
-        _assertNothingApplied(polygonGateway, index);
         assertFalse(token.paused());
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "no chain is blocked over an unknown id");
-        assertEq(token.awayBalanceOf(aliceSat), BALANCE);
-        assertEq(token.awayBalanceOf(bobSat), 0);
-        assertEq(boundCompliance.waitingReceiptOf(unknown).bodyHash, bytes32(0), "nothing waits");
+        assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "the sender's tokens left its wallet");
+        assertEq(token.onHoldOf(unknown), 95, "and are on hold");
+        assertEq(token.awayBalanceOf(bobSat), 0, "not counted for the receiver yet");
+        assertEq(boundCompliance.uncountedCreditOf(bobSat), 95);
     }
 
     /// @notice While the token is stopped a good receipt is consumed and waits; once the token runs again, anyone

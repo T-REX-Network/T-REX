@@ -223,11 +223,6 @@ abstract contract AccessManagerHelper is Test {
         platformManager.grantRole(_interopManagerRole(), account, NO_EXECUTION_DELAY);
     }
 
-    /// @notice Grants VALIDATION_KEEPER, which gates the discard of expired validations on ModularCompliance.
-    function _grantValidationKeeperRole(address account) internal {
-        suiteManager.grantRole(_role(RolesLib.Role.VALIDATION_KEEPER), account, NO_EXECUTION_DELAY);
-    }
-
     /// @notice Grants COMPLIANCE_MANAGER, which gates the validation policy setters on ModularCompliance.
     function _grantComplianceManagerRole(address account) internal {
         suiteManager.grantRole(_role(RolesLib.Role.COMPLIANCE_MANAGER), account, NO_EXECUTION_DELAY);

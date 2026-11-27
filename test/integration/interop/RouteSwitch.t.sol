@@ -43,6 +43,7 @@ import { ERC7786Recipient } from "@openzeppelin/contracts/crosschain/ERC7786Reci
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -52,8 +53,9 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 ///      receipt bridge sends new tickets through the new one; a receipt for a half already in flight is taken from
 ///      its pinned pair or from the current one, so the change never strands it.
 ///      The tickets here are sent by the token alone, never written by the compliance, so every receipt that passes
-///      the transport reaches the compliance, which refuses an id it has no record of: the delivery reverts with
-///      `UnknownTicket` and stays deliverable, nothing is blocked. The transport verdict is what these tests read.
+///      the transport reaches the compliance, which announces it and keeps it for an id it has no record of: the
+///      delivery is consumed, nothing is blocked. The transport verdict is what these tests read. Home keeps the old
+///      route as the former one for four waiting times after the change and takes every receipt from it meanwhile.
 contract RouteSwitchTest is InteropSuiteTest {
 
     ERC7786GatewayMock oldGateway;
@@ -99,16 +101,23 @@ contract RouteSwitchTest is InteropSuiteTest {
             );
     }
 
-    /// @dev The receipt got through the transport and reached the compliance, which has no record of the id.
+    /// @dev The receipt got through the transport and reached the compliance, which announces it.
     function _expectHandled(bytes32 ticketId) private {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, ticketId));
+        MessageTypesLib.ReceiptMessage memory receipt = _sameChainSettlement(ticketId, POLYGON, amount);
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptReceived(satellite, ticketId, receipt.from, receipt.to, receipt.amount);
     }
 
-    /// @dev A receipt the compliance refused for an unknown id: left deliverable, nothing blocked, the token open.
+    /// @dev A receipt the compliance kept for an unknown id: consumed, nothing blocked, the token open.
     function _assertLeftDeliverable(ERC7786GatewayMock gateway, uint256 index) private view {
-        assertFalse(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "still deliverable");
+        assertTrue(token.messageReceived(address(gateway), gateway.receiveIdFor(index)), "consumed");
         assertFalse(boundCompliance.isAwayChainBlocked(satellite), "an unknown id blocks nobody");
         assertFalse(token.paused(), "the token itself stays open");
+    }
+
+    /// @dev Past the four waiting times home keeps the old route as the former one.
+    function _endTheChangeWindow() private {
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
     }
 
     function _expectNotOnRoute(ERC7786GatewayMock gateway) private {
@@ -165,6 +174,7 @@ contract RouteSwitchTest is InteropSuiteTest {
 
     function testNewValidationSettlesThroughTheNewRouteOnly() public {
         _dispatch(issuedAfterSwitch);
+        _endTheChangeWindow();
 
         uint256 viaOld = _settlementFrom(oldGateway, issuedAfterSwitch);
         uint256 viaNew = _settlementFrom(newGateway, issuedAfterSwitch);
@@ -182,6 +192,7 @@ contract RouteSwitchTest is InteropSuiteTest {
     /// @dev An id this token never sent is not refused by transport: the compliance must see it. It follows the
     ///      current route, like any unpinned message.
     function testUnpinnedSettlementFollowsTheCurrentRoute() public {
+        _endTheChangeWindow();
         uint256 viaOld = _settlementFrom(oldGateway, neverDispatched);
         uint256 viaNew = _settlementFrom(newGateway, neverDispatched);
 
@@ -193,10 +204,22 @@ contract RouteSwitchTest is InteropSuiteTest {
         _assertLeftDeliverable(newGateway, viaNew);
     }
 
-    /// @dev A recall carries no validation, so it checks against the current route: old gateway refused.
-    function testBurnProofFollowsTheCurrentRoute() public {
-        bytes memory payload =
-            MessageTypesLib.encodeBurnProof(_burnProof(1, _satelliteEnvelope(POLYGON, makeAddr("Burned")), amount));
+    /// @dev A second half this token never sent has no pin, so it checks against the current route once the change
+    ///      window is over: the old gateway is refused, the new one reaches the compliance, which announces it.
+    function testAnUnsentSecondHalfFollowsTheCurrentRoute() public {
+        _endTheChangeWindow();
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.ReceiptMessage({
+            ticketId: neverDispatched,
+            from: _satelliteEnvelope(POLYGON, makeAddr("Burned")),
+            to: "",
+            amount: amount,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 1,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
+        bytes memory payload = MessageTypesLib.encodeSettlement(receipt);
 
         uint256 viaOld = _liteSends(oldGateway, token, payload);
         uint256 viaNew = _liteSends(newGateway, token, payload);
@@ -204,7 +227,8 @@ contract RouteSwitchTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(oldGateway), satellite));
         oldGateway.relay(viaOld);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallNotPending.selector, 1));
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptUnknown(MessageTypesLib.halfKeyOf(neverDispatched, 1), satellite);
         newGateway.relay(viaNew);
     }
 

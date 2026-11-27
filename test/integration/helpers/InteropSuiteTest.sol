@@ -48,7 +48,6 @@ import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { Token } from "contracts/token/Token.sol";
-import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
 
 import { TREXSuiteTest } from "test/integration/helpers/TREXSuiteTest.sol";
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
@@ -67,25 +66,54 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     /// @dev CCIP's finality value that admits fully finalized messages only.
     bytes4 constant FULL_FINALITY = bytes4(0);
 
-    uint64 constant VALIDITY_WINDOW = 1 hours;
-    uint64 constant POLYGON_WINDOW = 30 minutes;
-    uint64 constant OPTIMISM_WINDOW = 45 minutes;
+    /// @dev The validity window of a ticket on the ticket route, sent before home's finality.
+    uint64 constant TICKET_ROUTE_WINDOW = 15 minutes;
+    /// @dev The validity window of a ticket on the receipt route, at full finality: every ticket of a chain with no
+    ///  trusted ticket bridge, so the window most tests see.
+    uint64 constant VALIDITY_WINDOW = 25 minutes;
+    /// @dev The waiting times of the two away chains, above every floor their measured times give.
+    uint64 constant POLYGON_WINDOW = 95 minutes;
+    uint64 constant OPTIMISM_WINDOW = 100 minutes;
 
-    /// @dev The suite token's compliance, with the validation windows an issuance needs already set.
+    /// @dev The most one ticket toward an away chain, and the ticket route in one window, may carry: above every
+    ///  amount the tests move, so the route is chosen by the bridges a test trusts.
+    uint256 constant TICKET_CAP = 1e30;
+
+    /// @dev The suite token's compliance, with the windows, waiting times and limits an ask needs already set.
     ModularCompliance boundCompliance;
-
-    /// @dev Holds VALIDATION_KEEPER and nothing else.
-    address public keeper = makeAddr("keeper");
 
     function setUp() public virtual override {
         super.setUp();
         boundCompliance = ModularCompliance(address(token.compliance()));
-        _grantValidationKeeperRole(keeper);
         vm.startPrank(deployer);
-        boundCompliance.setDefaultValidityWindow(VALIDITY_WINDOW);
+        boundCompliance.setMeasuredTimes(polygon, _measuredTimes());
+        boundCompliance.setMeasuredTimes(optimism, _measuredTimes());
+        boundCompliance.setValidityWindows(TICKET_ROUTE_WINDOW, VALIDITY_WINDOW);
         boundCompliance.setWaitingTime(polygon, POLYGON_WINDOW);
         boundCompliance.setWaitingTime(optimism, OPTIMISM_WINDOW);
+        boundCompliance.setAskLimits(_askLimits());
+        boundCompliance.setTicketLimits(polygon, TICKET_CAP, TICKET_CAP);
+        boundCompliance.setTicketLimits(optimism, TICKET_CAP, TICKET_CAP);
         vm.stopPrank();
+    }
+
+    /// @dev Times measured for an away chain, in seconds: the validity windows and waiting times above clear them.
+    function _measuredTimes() internal pure returns (ITickets.MeasuredTimes memory) {
+        return ITickets.MeasuredTimes({
+            shortestValidityWindow: 10 minutes,
+            shortestWaitingTime: 80 minutes,
+            clockLead: 30 seconds,
+            clockLag: 30 seconds,
+            fullFinalityDelivery: 20 minutes,
+            reorgSlotShift: 1 minutes
+        });
+    }
+
+    /// @dev Ask limits no test reaches unless it means to.
+    function _askLimits() internal pure returns (ITickets.AskLimits memory) {
+        return ITickets.AskLimits({
+            openTicketsPerIdentity: 100, asksPerIdentityPerWindow: 1000, askWindow: 1 days, smallestAmount: 1
+        });
     }
 
     /// @dev The token is the ledger harness, so a test can fund a satellite wallet before any flow does.
@@ -105,7 +133,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         envelope = _linkSatelliteWallet(identity, chainId, signer);
         vm.startPrank(agent);
         token.mint(holder, amount);
-        TokenLedgerHarness(address(token)).ledgerDelegateOut(holder, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerMoveOut(holder, envelope, amount);
         vm.stopPrank();
     }
 
@@ -154,9 +182,23 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         (bridge,) = token.pinOf(MessageTypesLib.halfKeyOf(ticketId, 0));
     }
 
-    /// @dev The recall `recallId` as the token stores it, read through the ledger harness.
-    function _pendingRecall(uint256 recallId) internal view returns (TokenLedgerLib.PendingRecall memory) {
-        return TokenLedgerHarness(address(token)).pendingRecall(recallId);
+    /// @dev Asks for the receipt of the open ticket `ticketId` at its first due time, one waiting time after its valid
+    ///  until, then lets one more waiting time pass with no answer: from then on anyone may cancel it.
+    function _askAndLetTheAskGoUnanswered(bytes32 ticketId, bytes memory to, bytes memory spender) internal {
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
+        if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
+        boundCompliance.sendTicket(ticketId, ticket.fromChainKey, to, spender);
+        vm.warp(block.timestamp + ticket.waitingTime + 1);
+    }
+
+    /// @dev Cancels the open ticket `ticketId` the only way a sent ticket is cancelled: an ask for its receipt that
+    ///  went unanswered for one waiting time, then a cancel by anyone.
+    function _cancelUnanswered(bytes32 ticketId, bytes memory to, bytes memory spender) internal {
+        _askAndLetTheAskGoUnanswered(ticketId, to, spender);
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = ticketId;
+        boundCompliance.cancelTickets(ids);
     }
 
     /// @dev The request sent with the last salt was refused: nothing was recorded under its id.
@@ -298,14 +340,6 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         returns (uint256)
     {
         return _liteSends(gateway, _token, MessageTypesLib.encodeSettlement(notification));
-    }
-
-    function _burnProof(uint256 recallId, bytes memory burnedWallet, uint256 amount)
-        internal
-        pure
-        returns (MessageTypesLib.BurnProof memory)
-    {
-        return MessageTypesLib.BurnProof({ recallId: recallId, burnedWallet: burnedWallet, amount: amount });
     }
 
 }

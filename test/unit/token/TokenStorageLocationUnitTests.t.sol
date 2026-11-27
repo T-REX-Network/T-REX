@@ -41,9 +41,6 @@ pragma solidity 0.8.30;
 
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
-import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
-import { TokenLedgerLib } from "contracts/token/TokenLedgerLib.sol";
-
 import { TokenBaseUnitTest } from "./TokenBaseUnitTest.t.sol";
 
 import { Utils } from "../helpers/Utils.sol";
@@ -119,36 +116,19 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(token.totalSupply(), 55, "totalSupply does not count the bridged total");
     }
 
-    /// @dev The delegation and recall fields were appended after `reservedForTickets` (5): `recalls` at 6,
-    ///      `lastRecallId` 7, `openRecall` 8, `settledProofs` 9, `lastDelegationId` 10, `delegations` 11. Inside a
-    ///      `PendingRecall`, `amount` is the fourth slot and `gateway` and `peerKey` the fifth and sixth.
-    ///      The token has no view of a recall, so the namespace is written here, in this contract's own storage.
-    function testTREXTokenStoragePendingRecall() public {
-        TokenLedgerLib.PendingRecall storage recall = TokenLedgerLib.layout().recalls[1];
-        recall.amount = 9;
-        recall.gateway = address(0xBEEF);
-        recall.peerKey = bytes32(uint256(0xCAFE));
+    /// @dev The ledger ends with `inTransit` (3), `totalOnHold` (4) and `reservedForTickets` (5); the delegation and
+    ///      recall fields that followed are gone.
+    function testTREXTokenStorageHoldsAndReservations() public {
+        bytes32 ticketId = bytes32(uint256(7));
+        vm.store(address(token), keccak256(abi.encode(ticketId, _treXSlot(3))), bytes32(uint256(11)));
+        assertEq(token.onHoldOf(ticketId), 11, "inTransit is not at offset 3");
 
-        bytes32 entry = keccak256(abi.encode(uint256(1), _treXSlot(6)));
-        uint256 storedAmount = uint256(vm.load(address(this), bytes32(uint256(entry) + 3)));
-        uint256 storedGateway = uint256(vm.load(address(this), bytes32(uint256(entry) + 4)));
-        bytes32 storedPeerKey = vm.load(address(this), bytes32(uint256(entry) + 5));
-        assertEq(storedAmount, 9, "recalls is not at offset 6, or amount not at +3");
-        assertEq(storedGateway, uint256(uint160(address(0xBEEF))), "gateway is not at +4");
-        assertEq(storedPeerKey, bytes32(uint256(0xCAFE)), "peerKey is not at +5");
-    }
+        vm.store(address(token), _treXSlot(4), bytes32(uint256(12)));
+        assertEq(token.totalOnHold(), 12, "totalOnHold is not at offset 4");
 
-    /// @dev An id planted in `openRecall` (8) makes the next instruction for that wallet refuse with it.
-    function testTREXTokenStorageOpenRecall() public {
         bytes memory wallet = InteroperableAddress.formatEvmV1(8453, user1);
-        vm.store(address(token), keccak256(abi.encode(keccak256(wallet), _treXSlot(8))), bytes32(uint256(5)));
-        address identity = makeAddr("Identity");
-        vm.mockCall(identityRegistry, abi.encodeWithSignature("identity(address)", user1), abi.encode(identity));
-        vm.mockCall(identityRegistry, abi.encodeWithSignature("resolveIdentity(bytes)", wallet), abi.encode(identity));
-
-        vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallPending.selector, keccak256(wallet), 5));
-        token.instructRecall(wallet, 1, user1);
+        vm.store(address(token), keccak256(abi.encode(keccak256(wallet), _treXSlot(5))), bytes32(uint256(13)));
+        assertEq(token.reservedOf(wallet), 13, "reservedForTickets is not at offset 5");
     }
 
     function _treXSlot(uint256 offset) private pure returns (bytes32) {

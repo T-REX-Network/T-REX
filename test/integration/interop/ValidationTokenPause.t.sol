@@ -41,8 +41,11 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 100);
     }
 
+    /// @dev Asks for the receipt of `id`, at its first due time when that is still ahead.
     function _resend(bytes32 id) private {
-        vm.prank(address(aliceIdentity));
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
+        if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
         boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
@@ -95,11 +98,12 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
     /// @dev The pause outlasts the validation's windows while the satellite's report waits at the gateway. The
     ///      validation is not discarded under the pause, so its reservation is not released for another request
     ///      to take, and the report settles it once the token runs again.
-    function test_discardExpiredValidations_RevertWhen_TheTokenIsPaused_ThenTheHeldLegSettles() public {
+    function test_cancelTickets_reverts_when_theTokenIsPaused_thenTheHeldLegSettles() public {
         bytes32 id = _request();
         uint256 leg = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 100));
+        _resend(id);
         _pause();
-        vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+        vm.warp(block.timestamp + POLYGON_WINDOW + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
 
@@ -114,11 +118,12 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 100);
     }
 
-    /// @dev Once the token runs again, a validation nobody executed is discarded as before.
-    function test_discardExpiredValidations_Success_OnceTheTokenIsUnpaused() public {
+    /// @dev Once the token runs again, a ticket whose ask for the receipt went unanswered is cancelled as before.
+    function test_cancelTickets_succeeds_onceTheTokenIsUnpaused() public {
         bytes32 id = _request();
+        _resend(id);
         _pause();
-        vm.warp(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+        vm.warp(block.timestamp + POLYGON_WINDOW + 1);
         _unpause();
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;

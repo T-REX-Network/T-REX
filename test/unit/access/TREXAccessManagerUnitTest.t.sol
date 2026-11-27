@@ -483,9 +483,7 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, ITREXMessaging.closeReceiptRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setTicketRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setPeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
-        _assertRow(target, token, IToken.delegateOut.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(target, token, IToken.instructRecall.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(target, token, IToken.resend.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, token, ITREXMessaging.replaceHostilePeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.mint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.batchMint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.burn.selector, domainId, RolesLib.Role.AGENT_BURNER);
@@ -584,17 +582,19 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, compliance, IModularCompliance.resyncModuleTypes.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IERC3643Compliance.bindToken.selector, domainId, RolesLib.Role.OWNER);
         _assertRow(target, compliance, IERC3643Compliance.unbindToken.selector, domainId, RolesLib.Role.OWNER);
-        _assertRow(
-            target, compliance, ITickets.setDefaultValidityWindow.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER
-        );
+        _assertRow(target, compliance, ITickets.setValidityWindows.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.setWaitingTime.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setMeasuredTimes.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.setTicketLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAsksPaused.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAskLimits.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
+        _assertRow(target, compliance, ITickets.setAskLimitOf.selector, domainId, RolesLib.Role.COMPLIANCE_MANAGER);
         _assertRow(target, compliance, ITickets.askToMove.selector, domainId, RolesLib.Role.AGENT);
-        _assertRow(target, compliance, ITickets.sendTicket.selector, domainId, RolesLib.Role.AGENT);
+        _assertRow(target, compliance, ITickets.bringHome.selector, domainId, RolesLib.Role.AGENT);
         _assertRow(target, compliance, ITickets.blockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, compliance, ITickets.unblockAwayChain.selector, domainId, RolesLib.Role.AGENT_PAUSER);
         _assertRow(target, compliance, ITickets.refuseWaitingReceipt.selector, domainId, RolesLib.Role.AGENT_PAUSER);
-        _assertRow(target, compliance, ITickets.cancelTickets.selector, domainId, RolesLib.Role.VALIDATION_KEEPER);
+        _assertRow(target, compliance, ITickets.closeByHand.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         // Who hands out which role
         _assertAdmin(target, domainId, RolesLib.Role.AGENT, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_MINTER, RolesLib.Role.AGENT_ADMIN);
@@ -605,7 +605,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_FORCED_TRANSFER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.AGENT_PAUSER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.IRS_BINDER, RolesLib.Role.AGENT_ADMIN);
-        _assertAdmin(target, domainId, RolesLib.Role.VALIDATION_KEEPER, RolesLib.Role.AGENT_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.TOKEN_MANAGER, RolesLib.Role.SUITE_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.IDENTITY_MANAGER, RolesLib.Role.SUITE_ADMIN);
         _assertAdmin(target, domainId, RolesLib.Role.COMPLIANCE_MANAGER, RolesLib.Role.SUITE_ADMIN);

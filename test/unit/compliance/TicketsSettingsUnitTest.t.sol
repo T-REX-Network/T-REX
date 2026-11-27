@@ -54,49 +54,52 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
     bytes32 internal constant POLYGON = keccak256(abi.encodePacked(bytes2(0x0000), hex"89"));
     bytes32 internal constant OPTIMISM = keccak256(abi.encodePacked(bytes2(0x0000), hex"0a"));
 
-    // ==== .setDefaultValidityWindow Tests ====
+    // ==== .setValidityWindows Tests ====
 
-    function test_setDefaultValidityWindow_Success_WhenCalledByManager() public {
-        assertEq(mc.defaultValidityWindow(), 0);
+    function test_setValidityWindows_Success_WhenCalledByManager() public {
+        assertEq(mc.validityWindows().onTicketRoute, 0);
 
         vm.expectEmit(false, false, false, true, address(mc));
-        emit EventsLib.DefaultValidityWindowSet(1 hours);
-        mc.setDefaultValidityWindow(1 hours);
+        emit EventsLib.ValidityWindowsSet(15 minutes, 25 minutes);
+        mc.setValidityWindows(15 minutes, 25 minutes);
 
-        assertEq(mc.defaultValidityWindow(), 1 hours);
+        assertEq(mc.validityWindows().onTicketRoute, 15 minutes);
+        assertEq(mc.validityWindows().onReceiptRoute, 25 minutes);
     }
 
-    function test_setDefaultValidityWindow_RevertWhen_DurationIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroDuration.selector);
-        mc.setDefaultValidityWindow(0);
+    /// @notice A window of zero is not above the floor, which is zero while nothing was measured.
+    function test_setValidityWindows_reverts_when_aWindowIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidityWindowOutOfRange.selector, 0, 0, 1 days));
+        mc.setValidityWindows(0, 25 minutes);
     }
 
-    function test_setDefaultValidityWindow_RevertWhen_CallerIsNotManager() public {
+    function test_setValidityWindows_reverts_when_theCallerIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setDefaultValidityWindow(1 hours);
+        mc.setValidityWindows(15 minutes, 25 minutes);
     }
 
     // ==== .setWaitingTime Tests ====
 
-    function test_setReconciliationWindow_Success_WhenCalledByManager() public {
+    function test_setWaitingTime_Success_WhenCalledByManager() public {
         vm.expectEmit(true, false, false, true, address(mc));
-        emit EventsLib.WaitingTimeSet(POLYGON, 30 minutes);
-        mc.setWaitingTime(POLYGON, 30 minutes);
+        emit EventsLib.WaitingTimeSet(POLYGON, 95 minutes);
+        mc.setWaitingTime(POLYGON, 95 minutes);
 
-        assertEq(mc.waitingTimeOf(POLYGON), 30 minutes);
+        assertEq(mc.waitingTimeOf(POLYGON), 95 minutes);
         assertEq(mc.waitingTimeOf(OPTIMISM), 0);
     }
 
-    function test_setReconciliationWindow_RevertWhen_DurationIsZero() public {
-        vm.expectRevert(ErrorsLib.ZeroDuration.selector);
+    /// @notice A waiting time is at least one hour, so zero is below the floor.
+    function test_setWaitingTime_reverts_when_theDurationIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WaitingTimeTooShort.selector, POLYGON, 0, 1 hours - 1));
         mc.setWaitingTime(POLYGON, 0);
     }
 
-    function test_setReconciliationWindow_RevertWhen_CallerIsNotManager() public {
+    function test_setWaitingTime_reverts_when_theCallerIsNotManager() public {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
-        mc.setWaitingTime(POLYGON, 30 minutes);
+        mc.setWaitingTime(POLYGON, 95 minutes);
     }
 
     // ==== .blockAwayChain and .unblockAwayChain Tests ====
@@ -145,12 +148,13 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         mc.blockAwayChain(POLYGON);
     }
 
-    /// @notice The bound token blocks the chain of a burn proof for a recall already settled, with no role.
-    function test_blockAwayChain_succeeds_whenTheBoundTokenCalls() public {
+    /// @notice The bound token has no door to the block any more: only the pauser blocks by hand.
+    function test_blockAwayChain_reverts_when_theBoundTokenCalls() public {
         vm.prank(token);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, token));
         mc.blockAwayChain(POLYGON);
 
-        assertTrue(mc.isAwayChainBlocked(POLYGON));
+        assertFalse(mc.isAwayChainBlocked(POLYGON));
     }
 
     /// @notice Only the pauser lifts a block, whoever set it: a bad receipt blocks from inside `receiveReceipt`, and
@@ -174,13 +178,13 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
     }
 
     /// @notice OWNER alone does not reach the manager surface: the roles are distinct.
-    function test_setDefaultValidityWindow_RevertWhen_CallerIsOnlyOwner() public {
+    function test_setValidityWindows_reverts_when_theCallerIsOnlyOwner() public {
         address owner = makeAddr("OnlyOwner");
         _grantOwnerRole(owner);
 
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, owner));
-        mc.setDefaultValidityWindow(1 hours);
+        mc.setValidityWindows(15 minutes, 25 minutes);
     }
 
     // ==== .supportsInterface and storage Tests ====
@@ -201,16 +205,16 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         bytes32 slot = keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1))
             & ~bytes32(uint256(0xff));
 
-        mc.setDefaultValidityWindow(1 hours);
+        mc.setValidityWindows(15 minutes, 25 minutes);
 
-        assertEq(uint256(vm.load(address(mc), slot)), 1 hours);
+        assertEq(uint256(vm.load(address(mc), slot)), 15 minutes | (25 minutes << 64));
     }
 
     function test_views_Success_WhenNothingWasIssued() public view {
         ITickets.Ticket memory record = mc.ticketOf(bytes32(uint256(1)));
         assertEq(record.askBlockHash, bytes32(0));
         assertEq(record.validUntil, 0);
-        assertEq(record.waitingEndsAt, 0);
+        assertEq(record.waitingTime, 0);
     }
 
 }

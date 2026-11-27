@@ -79,11 +79,11 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         second = RuleOnlyModule(_deployRule(address(new RuleOnlyModule())));
     }
 
-    /// @notice One rule caps the balance-capped request.
+    /// @notice One rule narrows the request.
     function test_requestTransferValidation_Success_WhenOneRuleNarrows() public {
         _bindAllowing(first, 80);
 
-        (uint256 min, uint256 max) = _issue(10, 200);
+        (uint256 min, uint256 max) = _issue(10, BALANCE);
 
         assertEq(min, 10, "the caller's minimum is never raised");
         assertEq(max, 80);
@@ -94,7 +94,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         _bindAllowing(first, 90);
         _bindAllowing(second, 80);
 
-        (uint256 min, uint256 max) = _issue(10, 200);
+        (uint256 min, uint256 max) = _issue(10, BALANCE);
 
         assertEq(min, 10);
         assertEq(max, 80, "the smallest answer wins");
@@ -105,7 +105,10 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenTheBindOrderChanges() public {
         _bindAllowing(first, 90);
         _bindAllowing(second, 80);
-        (, uint256 looserFirst) = _issue(10, 200);
+        bytes32 looserFirstId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, BALANCE);
+        uint256 looserFirst = boundCompliance.ticketOf(looserFirstId).amountMax;
+        // Modules change only while nothing is reserved: the first ticket ends before they are bound again.
+        _cancelUnanswered(looserFirstId, bobSat, "");
 
         vm.prank(deployer);
         boundCompliance.removeModule(address(first));
@@ -117,7 +120,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
             _fundSatelliteWallet(charlieIdentity, charlie, POLYGON, makeAccount("carolOnPolygon"), BALANCE);
         _bindAllowing(second, 80);
         _bindAllowing(first, 90);
-        bytes32 id = _requestValidation(address(charlieIdentity), carolSat, bobSat, 10, 200);
+        bytes32 id = _requestValidation(address(charlieIdentity), carolSat, bobSat, 10, BALANCE);
         uint256 tighterFirst = boundCompliance.ticketOf(id).amountMax;
 
         assertEq(looserFirst, 80, "the smallest answer wins");
@@ -130,7 +133,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 10, 0));
-        boundCompliance.askToMove(aliceSat, bobSat, 10, 200, "", _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 10, BALANCE, "", _salt());
     }
 
     /// @notice Rules that between them allow less than the caller's minimum empty the range.
@@ -140,14 +143,14 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 50, 40));
-        boundCompliance.askToMove(aliceSat, bobSat, 50, 200, "", _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 50, BALANCE, "", _salt());
     }
 
-    /// @notice A rule answering more than the wallet holds changes nothing: the balance already capped it.
+    /// @notice A rule answering more than the wallet holds changes nothing: the request already fits the balance.
     function test_requestTransferValidation_Success_WhenARuleAnswersWiderThanTheBalance() public {
         _bindAllowing(first, type(uint256).max);
 
-        (uint256 min, uint256 max) = _issue(10, 200);
+        (uint256 min, uint256 max) = _issue(10, BALANCE);
 
         assertEq(min, 10);
         assertEq(max, BALANCE, "capped at what the wallet holds");
@@ -162,7 +165,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
         vm.expectCall(tracker, abi.encodeWithSelector(IModule.checkTransfer.selector), 0);
-        (uint256 min, uint256 max) = _issue(10, 200);
+        (uint256 min, uint256 max) = _issue(10, BALANCE);
 
         assertEq(min, 10);
         assertEq(max, 80);
@@ -179,9 +182,9 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, spender));
-        boundCompliance.askToMove(aliceSat, bobSat, 10, 200, spender, _salt());
+        boundCompliance.askToMove(aliceSat, bobSat, 10, BALANCE, spender, _salt());
 
-        _assertNothingRecorded(aliceSat, bobSat, spender, 10, 200);
+        _assertNothingRecorded(aliceSat, bobSat, spender, 10, BALANCE);
     }
 
     /// @notice The same policy lets the issuance through once it accepts the named spender.
@@ -192,7 +195,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         bytes memory spender = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("spenderOnPolygon"));
 
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, 200, spender, _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, BALANCE, spender, _salt());
 
         assertEq(boundCompliance.ticketOf(id).amountMax, BALANCE);
     }
@@ -207,7 +210,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
         vm.expectCall(address(policy), abi.encodeWithSelector(IModule.checkSpender.selector), 0);
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, 200, "", _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, bobSat, 10, BALANCE, "", _salt());
 
         assertEq(boundCompliance.ticketOf(id).amountMax, BALANCE);
     }
@@ -221,7 +224,7 @@ contract AllowedAmountIssuanceTest is InteropSuiteTest {
         // Never called at all, whatever the arguments would have been: a selector-wide expectation.
         vm.expectCall(address(first), abi.encodeWithSelector(IModule.checkTransfer.selector), 0);
         vm.prank(address(aliceIdentity));
-        bytes32 id = boundCompliance.askToMove(aliceSat, aliceOther, 10, 200, "", _salt());
+        bytes32 id = boundCompliance.askToMove(aliceSat, aliceOther, 10, BALANCE, "", _salt());
 
         ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
         assertEq(validation.amountMin, 10);

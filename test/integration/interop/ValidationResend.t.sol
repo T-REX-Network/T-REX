@@ -49,8 +49,9 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev A lost validation leg sent again through the real messaging layer: who may, what goes out, that it is the
-///      issued leg byte for byte, that it still settles, and every refusal.
+/// @dev An ask for the receipt of a ticket, sent through the real messaging layer: anyone may, at fixed times after
+///      the ticket's valid until, three times at most; what goes out is the copy home sent, byte for byte, through
+///      the pair the ticket was pinned to; and every refusal.
 contract ValidationResendTest is InteropSuiteTest {
 
     uint256 internal constant BALANCE = 100;
@@ -61,6 +62,7 @@ contract ValidationResendTest is InteropSuiteTest {
     bytes internal bobSat;
     address internal stranger = makeAddr("stranger");
     bytes32 internal id;
+    uint64 internal firstAskDueAt;
 
     function setUp() public override {
         super.setUp();
@@ -77,17 +79,19 @@ contract ValidationResendTest is InteropSuiteTest {
 
         id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
         polygonGateway.drop(0);
+        firstAskDueAt = boundCompliance.ticketOf(id).validUntil + POLYGON_WINDOW;
     }
 
     /* ----- Success ----- */
 
-    /// @notice The identity resends the lost leg: a second queue entry with the first one's payload, announced,
-    ///         and the route pinned at issuance is not pinned again.
-    function test_resendValidation_Success_WhenTheIdentityResendsTheLostLeg() public {
+    /// @notice One waiting time after valid until anyone asks for the receipt: a second queue entry with the first
+    ///         one's payload, announced, and the pair pinned at the first send is not pinned again.
+    function test_sendTicket_asksForTheReceipt_withTheCopyHomeSent() public {
+        vm.warp(firstAskDueAt);
         vm.recordLogs();
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.TicketSent(id, polygon);
-        vm.prank(address(aliceIdentity));
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptAsked(id, 1);
+        vm.prank(stranger);
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
@@ -95,19 +99,13 @@ contract ValidationResendTest is InteropSuiteTest {
         assertEq(_pinnedBridgeOf(id), address(polygonGateway));
         _assertNotPinnedAgain();
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        assertEq(boundCompliance.ticketOf(id).asksForReceipt, 1);
+        assertEq(boundCompliance.ticketOf(id).lastSentAt, firstAskDueAt);
     }
 
-    function test_resendValidation_Success_WhenAnAgentResendsForTheWallet() public {
-        vm.prank(agent);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
-
-        assertEq(polygonGateway.queueLength(), 2);
-        assertEq(_decodeQueuedValidation(polygonGateway, 1).ticketId, id);
-    }
-
-    /// @notice The resent leg is the one the Lite executes against: relayed, it settles like the original would.
-    function test_resendValidation_Success_WhenTheResentLegSettles() public {
-        vm.prank(address(aliceIdentity));
+    /// @notice The receipt that answers the ask settles the ticket like the original would.
+    function test_sendTicket_succeeds_andTheReceiptSettles() public {
+        vm.warp(firstAskDueAt);
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 50));
@@ -118,142 +116,128 @@ contract ValidationResendTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 50);
     }
 
-    /// @notice The receiver on the same away chain is left waiting too, so their identity may resend the ticket.
-    function test_resendValidation_Success_WhenTheRecipientResendsTheLegTowardTheirChain() public {
-        vm.prank(address(bobIdentity));
+    /// @notice The asks come at fixed times, one waiting time apart, three at most.
+    function test_sendTicket_reverts_afterThreeAsks() public {
+        vm.warp(firstAskDueAt);
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        vm.warp(firstAskDueAt + POLYGON_WINDOW - 1);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt + POLYGON_WINDOW));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
-        assertEq(polygonGateway.queueLength(), 2);
-        assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
+        vm.warp(firstAskDueAt + POLYGON_WINDOW);
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        vm.warp(firstAskDueAt + 2 * POLYGON_WINDOW);
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
+
+        vm.warp(firstAskDueAt + 3 * POLYGON_WINDOW);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoAsksLeft.selector, id));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
     /// @notice A spender travels with the object, so it is part of what must be supplied again.
-    function test_resendValidation_Success_WhenTheSpenderIsSuppliedAgain() public {
+    function test_sendTicket_succeeds_whenTheSpenderIsSuppliedAgain() public {
         bytes memory spender = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
         vm.prank(address(aliceIdentity));
         bytes32 withSpender = boundCompliance.askToMove(aliceSat, bobSat, 1, 5, spender, _salt());
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, withSpender));
         boundCompliance.sendTicket(withSpender, polygon, bobSat, "");
 
-        vm.prank(address(aliceIdentity));
         boundCompliance.sendTicket(withSpender, polygon, bobSat, spender);
         assertEq(_decodeQueuedValidation(polygonGateway, 2).spender, spender);
     }
 
     /* ----- Refusals ----- */
 
-    function test_resendValidation_RevertWhen_IdWasNeverIssued() public {
-        vm.prank(agent);
+    function test_sendTicket_reverts_when_theIdWasNeverIssued() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, bytes32(uint256(999))));
         boundCompliance.sendTicket(bytes32(uint256(999)), polygon, bobSat, "");
     }
 
-    function test_resendValidation_RevertWhen_TheRecipientDiffersFromTheIssued() public {
+    function test_sendTicket_reverts_when_theReceiverDiffersFromTheAskedOne() public {
         bytes memory other = _linkSatelliteWallet(charlieIdentity, POLYGON, makeAccount("charlieOnPolygon"));
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, id));
         boundCompliance.sendTicket(id, polygon, other, "");
     }
 
-    function test_resendValidation_RevertWhen_TheChainIsNotPartOfTheValidation() public {
-        vm.prank(address(aliceIdentity));
+    function test_sendTicket_reverts_when_theChainIsNotPartOfTheTicket() public {
+        vm.warp(firstAskDueAt);
+
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotPartOfValidation.selector, id, optimism));
         boundCompliance.sendTicket(id, optimism, bobSat, "");
     }
 
-    function test_resendValidation_RevertWhen_AStrangerAsks() public {
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, stranger, aliceSat));
+    /// @notice Before valid until plus one waiting time an ask could cross the receipt: it is not due.
+    function test_sendTicket_reverts_beforeOneWaitingTimeAfterValidUntil() public {
+        vm.warp(firstAskDueAt - 1);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
-    /// @notice A home receiver's identity waits on no away chain: it may not resend the sender's ticket.
-    function test_resendValidation_RevertWhen_TheRecipientAsksForTheSendersLeg() public {
-        bytes memory nativeBob = InteroperableAddress.formatEvmV1(block.chainid, bob);
-        bytes32 toHome = _requestValidation(address(aliceIdentity), aliceSat, nativeBob, 1, 5);
-
-        vm.prank(address(bobIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.NotAuthorizedForWallet.selector, address(bobIdentity), aliceSat)
-        );
-        boundCompliance.sendTicket(toHome, polygon, nativeBob, "");
-    }
-
-    function test_resendValidation_RevertWhen_PastTheSatelliteDeadline() public {
-        uint64 validUntil = boundCompliance.ticketOf(id).validUntil;
-        vm.warp(validUntil);
-
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, id, validUntil));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
-    }
-
-    function test_resendValidation_RevertWhen_AlreadySettled() public {
+    function test_sendTicket_reverts_when_alreadySettled() public {
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 50));
         polygonGateway.relay(index);
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
         boundCompliance.sendTicket(id, polygon, bobSat, "");
     }
 
-    /// @notice A blocked away chain's receipts wait unapplied; a ticket sent now could only add to what cannot be
+    /// @notice A blocked away chain's receipts wait unapplied; an ask sent now could only add to what cannot be
     ///         applied.
-    function test_resendValidation_RevertWhen_TheChainsInboundIsPaused() public {
+    function test_sendTicket_reverts_when_theAwayChainIsBlocked() public {
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(polygonGateway.queueLength(), 1);
     }
 
-    /// @notice The leg's settlement is matched against the peer it was sent to, so it is never resent to another:
-    ///         the leg already out keeps settling from the previous peer.
-    function test_resendValidation_RevertWhen_ThePeerChanged() public {
+    /// @notice After a planned peer change the ask goes to the peer the ticket was pinned to, inside the change
+    ///         window: the away token that holds the ticket is the one that answers.
+    function test_sendTicket_asksThePinnedFormerPeer_afterAPlannedPeerChange() public {
+        bytes memory formerPeer = token.peerFor(polygon);
         bytes memory newPeer = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonLite"));
         vm.prank(deployer);
         token.setPeer(polygon, newPeer);
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, id, polygon, address(polygonGateway))
-        );
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
-        assertEq(polygonGateway.queueLength(), 1);
+        assertEq(polygonGateway.queueLength(), 2);
+        assertEq(polygonGateway.queuedMessage(1).recipient, formerPeer, "the pinned peer, not the new one");
     }
 
-    /// @notice A paused token sends nothing out: its report could not land until the unpause anyway. The leg goes
-    ///         again once the pause is lifted, see `ValidationTokenPause.t.sol`.
-    function test_resendValidation_RevertWhen_TheTokenIsPaused() public {
+    /// @notice A paused token sends nothing out: its report could not land until the unpause anyway.
+    function test_sendTicket_reverts_when_theTokenIsPaused() public {
         vm.prank(agent);
         token.pause();
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
-        assertEq(polygonGateway.queueLength(), 1, "only the issuance went out");
+        assertEq(polygonGateway.queueLength(), 1, "only the first send went out");
     }
 
-    /// @notice The leg's settlement is matched against the pinned gateway, so it is never resent through another.
-    function test_resendValidation_RevertWhen_TheRouteWasSwitched() public {
+    /// @notice After a planned route change the ask goes through the bridge the ticket was pinned to, inside the
+    ///         change window.
+    function test_sendTicket_asksThroughThePinnedFormerBridge_afterARouteChange() public {
         ERC7786GatewayMock replacement = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(replacement));
+        vm.warp(firstAskDueAt);
 
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, id, polygon, address(polygonGateway))
-        );
         boundCompliance.sendTicket(id, polygon, bobSat, "");
 
+        assertEq(polygonGateway.queueLength(), 2);
         assertEq(replacement.queueLength(), 0);
     }
 

@@ -58,9 +58,15 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
     uint256 internal constant OPTIMISM = 10;
-    uint64 internal constant VALIDITY_WINDOW = 1 hours;
-    uint64 internal constant POLYGON_WINDOW = 30 minutes;
-    uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
+    uint64 internal constant TICKET_ROUTE_WINDOW = 15 minutes;
+    /// @dev Every ticket here travels the receipt route: the mocked token has no ticket bridge.
+    uint64 internal constant VALIDITY_WINDOW = 25 minutes;
+    uint64 internal constant POLYGON_WINDOW = 95 minutes;
+    uint64 internal constant OPTIMISM_WINDOW = 100 minutes;
+    /// @dev The ticket's valid until, issued at `ISSUED_AT`.
+    uint64 internal constant VALID_UNTIL = uint64(ISSUED_AT) + VALIDITY_WINDOW;
+    /// @dev The first ask for the receipt is due one waiting time after valid until.
+    uint64 internal constant FIRST_ASK_DUE_AT = VALID_UNTIL + POLYGON_WINDOW;
     uint256 internal constant ISSUED_AT = 1_700_000_000;
     uint256 internal constant BRIDGED_BALANCE = 100;
 
@@ -80,7 +86,12 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         aliceId = aliceIdentity;
         bobId = bobIdentity;
 
-        mc.setDefaultValidityWindow(VALIDITY_WINDOW);
+        mc.setValidityWindows(TICKET_ROUTE_WINDOW, VALIDITY_WINDOW);
+        mc.setAskLimits(
+            ITickets.AskLimits({
+                openTicketsPerIdentity: 100, asksPerIdentityPerWindow: 1000, askWindow: 1 days, smallestAmount: 1
+            })
+        );
         mc.setWaitingTime(polygon, POLYGON_WINDOW);
         mc.setWaitingTime(optimism, OPTIMISM_WINDOW);
 
@@ -89,7 +100,6 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         // arithmetic for those few selectors; `vm.mockCall` still wins for everything mocked explicitly.
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
-        vm.mockCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), abi.encode(bytes32(0)));
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
@@ -148,17 +158,17 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     /* ----- Discard ----- */
 
-    function test_discardExpiredValidations_Success_WhenExpired() public {
+    function test_cancelTickets_Success_WhenExpired() public {
         _track();
         address recorder = _bindAfterTransferModule();
         bytes32 id = _issue();
         assertEq(mc.pendingInOf(bobId), 90);
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        _askAndLetTheAskGoUnanswered(id);
 
         vm.expectCall(token, abi.encodeCall(IToken.releaseFromTicket, (fromSat, 90)), 1);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.TicketCancelled(id);
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         mc.cancelTickets(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
@@ -169,12 +179,12 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(RecordingModule(recorder).transferActionCalls(), 0, "a discard involves no module");
     }
 
-    function test_discardExpiredValidations_Success_WhenTheReleaseFreesTheRoomForTheNext() public {
+    function test_cancelTickets_Success_WhenTheReleaseFreesTheRoomForTheNext() public {
         _track();
         bytes32 id = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        _askAndLetTheAskGoUnanswered(id);
 
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         mc.cancelTickets(_ids(id));
 
         vm.expectCall(token, abi.encodeCall(IToken.reserveForTicket, (fromSat, 90)), 1);
@@ -185,27 +195,31 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice A relocation between one identity's wallets reserves nothing against the identity, so its
     ///         discard has nothing to give back there. The wallet's share is still released.
-    function test_discardExpiredValidations_Success_WhenNothingWasReservedAgainstTheIdentities() public {
+    function test_cancelTickets_Success_WhenNothingWasReservedAgainstTheIdentities() public {
         _track();
         _bind(toSat, aliceIdentity);
         bytes32 id = _issue();
         assertTrue(mc.ticketOf(id).relocation, "nothing was reserved against the identities");
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        _askAndLetTheAskGoUnanswered(id);
 
         vm.expectCall(token, abi.encodeCall(IToken.releaseFromTicket, (fromSat, 90)), 1);
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         mc.cancelTickets(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(mc.pendingInOf(bobId), 0);
     }
 
-    function test_discardExpiredValidations_Success_WhenBatchingSeveralIds() public {
+    function test_cancelTickets_Success_WhenBatchingSeveralIds() public {
         _track();
         bytes32 first = _issue();
-        bytes32 second = _issue();
-        assertEq(mc.pendingInOf(bobId), 100, "both reserved, the second capped by the wallet");
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
+        vm.prank(aliceIdentity);
+        bytes32 second = mc.askToMove(fromSat, toSat, 5, 10, "", _salt());
+        assertEq(mc.pendingInOf(bobId), 100, "both reserved");
+        vm.warp(FIRST_ASK_DUE_AT);
+        mc.sendTicket(first, polygon, toSat, "");
+        mc.sendTicket(second, polygon, toSat, "");
+        vm.warp(FIRST_ASK_DUE_AT + POLYGON_WINDOW + 1);
 
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = first;
@@ -214,7 +228,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         emit EventsLib.TicketCancelled(first);
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.TicketCancelled(second);
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         mc.cancelTickets(ids);
 
         assertEq(uint8(mc.statusOf(first)), uint8(ITickets.TicketStatus.Cancelled));
@@ -223,28 +237,27 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingOutOf(aliceId), 0);
     }
 
-    function test_discardExpiredValidations_RevertWhen_NonKeeperBeforeTheSecondWindow() public {
+    /// @notice Nobody cancels on silence alone: without an ask for the receipt that went unanswered, the cancel
+    ///         is not due, whoever calls and however late.
+    function test_cancelTickets_reverts_when_noAskForTheReceiptWentUnanswered() public {
         bytes32 id = _issue();
-        uint64 publicAt = uint64(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
-        vm.warp(publicAt);
+        uint64 earliestCancel = FIRST_ASK_DUE_AT + POLYGON_WINDOW;
+        vm.warp(earliestCancel + 1);
 
         vm.prank(agentAccount);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, earliestCancel));
         mc.cancelTickets(_ids(id));
 
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
-        mc.cancelTickets(_ids(id));
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationNotPubliclyDiscardable.selector, id, publicAt));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, earliestCancel));
         mc.cancelTickets(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
-    function test_discardExpiredValidations_Success_WhenAnyoneAfterTheSecondWindow() public {
+    function test_cancelTickets_succeeds_forAnyone_afterAnUnansweredAsk() public {
         bytes32 id = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
+        _askAndLetTheAskGoUnanswered(id);
 
         vm.expectEmit(true, false, false, true, address(mc));
         emit EventsLib.TicketCancelled(id);
@@ -256,31 +269,34 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingOutOf(aliceId), 0);
     }
 
-    function test_discardExpiredValidations_RevertWhen_IdWasNeverIssued() public {
-        vm.prank(keeperAccount);
+    function test_cancelTickets_RevertWhen_IdWasNeverIssued() public {
+        vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, 7));
         mc.cancelTickets(_ids(bytes32(uint256(7))));
     }
 
-    function test_discardExpiredValidations_RevertWhen_NotYetReleasable() public {
+    /// @notice The answer to the ask may land in the last second of its waiting time, so the cancel comes after.
+    function test_cancelTickets_reverts_when_theAskIsStillInsideItsWaitingTime() public {
         bytes32 id = _issue();
-        uint64 waitingEndsAt = uint64(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW);
+        vm.warp(FIRST_ASK_DUE_AT);
+        mc.sendTicket(id, polygon, toSat, "");
+        uint64 dueAt = FIRST_ASK_DUE_AT + POLYGON_WINDOW;
 
-        vm.warp(waitingEndsAt);
-        vm.prank(keeperAccount);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, waitingEndsAt));
+        vm.warp(dueAt);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, dueAt));
         mc.cancelTickets(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
-    function test_discardExpiredValidations_RevertWhen_AlreadyDiscarded() public {
+    function test_cancelTickets_RevertWhen_AlreadyDiscarded() public {
         bytes32 id = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        vm.prank(keeperAccount);
+        _askAndLetTheAskGoUnanswered(id);
+        vm.prank(stranger);
         mc.cancelTickets(_ids(id));
 
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.Cancelled))
         );
@@ -289,12 +305,12 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     /// @notice A ticket its receipt ended is done: no clock makes it cancellable, and its reservation is released
     ///         once, by the receipt.
-    function test_discardExpiredValidations_RevertWhen_TheReceiptEndedTheTicket() public {
+    function test_cancelTickets_RevertWhen_TheReceiptEndedTheTicket() public {
         _track();
         bytes32 id = _issueAndReceive();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
@@ -303,22 +319,30 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingInOf(bobId), 0, "released once, by the receipt");
     }
 
-    function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsRefused() public {
+    function test_cancelTickets_RevertWhen_OneIdOfTheBatchIsRefused() public {
         _track();
         bytes32 expired = _issue();
-        vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        bytes32 pending = _issue();
-        uint64 pendingReleaseAt = uint64(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW);
+        _askAndLetTheAskGoUnanswered(expired);
+        vm.prank(aliceIdentity);
+        bytes32 pending = mc.askToMove(fromSat, toSat, 5, 10, "", _salt());
+        uint64 pendingReleaseAt = uint64(block.timestamp + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
 
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = expired;
         ids[1] = pending;
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, pending, pendingReleaseAt));
         mc.cancelTickets(ids);
 
         assertEq(uint8(mc.statusOf(expired)), uint8(ITickets.TicketStatus.Open));
         assertEq(mc.pendingInOf(bobId), 100, "the whole batch is rolled back");
+    }
+
+    /// @dev Asks for the receipt of `id` at its first due time, then lets one waiting time pass with no answer.
+    function _askAndLetTheAskGoUnanswered(bytes32 id) private {
+        vm.warp(FIRST_ASK_DUE_AT);
+        mc.sendTicket(id, polygon, toSat, "");
+        vm.warp(FIRST_ASK_DUE_AT + POLYGON_WINDOW + 1);
     }
 
     function _issue() private returns (bytes32 id) {

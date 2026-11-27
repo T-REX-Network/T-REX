@@ -57,8 +57,29 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 100);
     }
 
-    function _proof(ERC7786GatewayMock bridge, uint256 recallId, uint256 amount) private returns (uint256) {
-        return _liteSends(bridge, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, amount)));
+    function _bringHome(uint256 amount) private returns (bytes32) {
+        vm.prank(agent);
+        return boundCompliance.bringHome(aliceSat, amount, alice, _salt());
+    }
+
+    /// @dev Queues the away token's receipt for a bring home's first half on `bridge`, burning `amount`.
+    function _proof(ERC7786GatewayMock bridge, bytes32 bringHomeId, uint256 amount) private returns (uint256) {
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.ReceiptMessage({
+            ticketId: bringHomeId,
+            from: aliceSat,
+            to: "",
+            amount: amount,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 1,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
+        return _liteSettles(bridge, token, receipt);
+    }
+
+    function _aliceHome() private view returns (bytes memory) {
+        return InteroperableAddress.formatEvmV1(block.chainid, alice);
     }
 
     /// @dev What the receiving side reverts with when a bridge that is not a receipt bridge delivers.
@@ -194,8 +215,11 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(ticketBridge.queueLength(), 0);
     }
 
+    /// @dev An ask for the receipt goes out on the route chosen at the ask, the same copy byte for byte.
     function test_sendTicket_sendsOnTheTicketRouteAgain() public {
         bytes32 id = _issue();
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        vm.warp(ticket.validUntil + ticket.waitingTime);
 
         vm.prank(address(aliceIdentity));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
@@ -207,9 +231,9 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
 
     /* ----- Money messages ----- */
 
-    function test_delegateOut_sendsTheMoveOutOnTheReceiptRouteOnly() public {
+    function test_askToMove_sendsAHomeWalletsMoveOutOnTheReceiptRouteOnly() public {
         vm.prank(alice);
-        token.delegateOut(alice, aliceSat, 100);
+        boundCompliance.askToMove(_aliceHome(), aliceSat, 100, 100, "", _salt());
 
         assertEq(receiptBridge.queueLength(), 1);
         assertEq(ticketBridge.queueLength(), 0, "never on the ticket route");
@@ -217,17 +241,16 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MOVE_OUT));
     }
 
-    function test_delegateOut_RevertWhen_TheReceiptRouteIsClosed() public {
+    function test_askToMove_reverts_when_theMoveOutsReceiptRouteIsClosed() public {
         _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         vm.prank(alice);
-        token.delegateOut(alice, aliceSat, 100);
+        boundCompliance.askToMove(_aliceHome(), aliceSat, 100, 100, "", _salt());
     }
 
-    function test_instructRecall_sendsTheBringHomeOnTheReceiptRouteOnly() public {
-        vm.prank(agent);
-        token.instructRecall(aliceSat, 100, alice);
+    function test_bringHome_sendsItsHalfOnTheReceiptRouteOnly() public {
+        _bringHome(100);
 
         assertEq(receiptBridge.queueLength(), 1);
         assertEq(ticketBridge.queueLength(), 0, "never on the ticket route");
@@ -235,12 +258,12 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.BRING_HOME));
     }
 
-    function test_instructRecall_RevertWhen_TheReceiptRouteIsClosed() public {
+    function test_bringHome_reverts_when_theReceiptRouteIsClosed() public {
         _closeEvmChain(token, POLYGON);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         vm.prank(agent);
-        token.instructRecall(aliceSat, 100, alice);
+        boundCompliance.bringHome(aliceSat, 100, alice, _salt());
     }
 
     /* ----- Receipt ----- */
@@ -299,22 +322,20 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
 
-    /* ----- Burn proof ----- */
+    /* ----- A bring home's receipt ----- */
 
-    function test_receiveBurnProof_landsFromTheReceiptRoute() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 100, alice);
+    function test_receiveReceipt_landsABringHomeFromTheReceiptRoute() public {
+        bytes32 bringHomeId = _bringHome(100);
 
-        receiptBridge.relay(_proof(receiptBridge, recallId, 100));
+        receiptBridge.relay(_proof(receiptBridge, bringHomeId, 100));
 
         assertEq(token.awayBalanceOf(aliceSat), 900);
-        assertEq(_pendingRecall(recallId).amount, 0, "settled");
+        assertEq(uint8(boundCompliance.statusOf(bringHomeId)), uint8(ITickets.TicketStatus.Done), "ended");
     }
 
-    function test_receiveBurnProof_RevertWhen_ItArrivesThroughTheTicketRoute() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 100, alice);
-        uint256 index = _proof(ticketBridge, recallId, 100);
+    function test_receiveReceipt_reverts_when_aBringHomeReceiptArrivesThroughTheTicketRoute() public {
+        bytes32 bringHomeId = _bringHome(100);
+        uint256 index = _proof(ticketBridge, bringHomeId, 100);
 
         _expectNotAReceiptBridgeDelivery(ticketBridge);
         ticketBridge.relay(index);
@@ -322,11 +343,10 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), 1000);
     }
 
-    function test_receiveBurnProof_RevertWhen_TheBridgePolicyNoLongerAsksFullFinality() public {
+    function test_receiveReceipt_reverts_when_theBridgePolicyNoLongerAsksFullFinality_forABringHome() public {
         bytes4 depthThree = 0x00000003;
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 100, alice);
-        uint256 index = _proof(receiptBridge, recallId, 100);
+        bytes32 bringHomeId = _bringHome(100);
+        uint256 index = _proof(receiptBridge, bringHomeId, 100);
         receiptBridge.setReceivingPolicy(_awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON), depthThree);
 
         vm.expectRevert(
@@ -334,7 +354,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         );
         receiptBridge.relay(index);
 
-        assertEq(_pendingRecall(recallId).amount, 100, "still open");
+        assertEq(uint8(boundCompliance.statusOf(bringHomeId)), uint8(ITickets.TicketStatus.Open), "still open");
     }
 
 }

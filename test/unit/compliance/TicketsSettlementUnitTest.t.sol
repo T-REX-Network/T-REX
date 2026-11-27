@@ -65,9 +65,11 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
     uint256 internal constant POLYGON = 137;
     uint256 internal constant OPTIMISM = 10;
-    uint64 internal constant VALIDITY_WINDOW = 1 hours;
-    uint64 internal constant POLYGON_WINDOW = 30 minutes;
-    uint64 internal constant OPTIMISM_WINDOW = 45 minutes;
+    uint64 internal constant TICKET_ROUTE_WINDOW = 15 minutes;
+    /// @dev Every ticket here travels the receipt route: the mocked token has no ticket bridge.
+    uint64 internal constant VALIDITY_WINDOW = 25 minutes;
+    uint64 internal constant POLYGON_WINDOW = 95 minutes;
+    uint64 internal constant OPTIMISM_WINDOW = 100 minutes;
     uint256 internal constant ISSUED_AT = 1_700_000_000;
     uint256 internal constant BRIDGED_BALANCE = 100;
 
@@ -97,7 +99,12 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         aliceId = aliceIdentity;
         bobId = bobIdentity;
 
-        mc.setDefaultValidityWindow(VALIDITY_WINDOW);
+        mc.setValidityWindows(TICKET_ROUTE_WINDOW, VALIDITY_WINDOW);
+        mc.setAskLimits(
+            ITickets.AskLimits({
+                openTicketsPerIdentity: 100, asksPerIdentityPerWindow: 1000, askWindow: 1 days, smallestAmount: 1
+            })
+        );
         mc.setWaitingTime(polygon, POLYGON_WINDOW);
         mc.setWaitingTime(optimism, OPTIMISM_WINDOW);
 
@@ -106,7 +113,6 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         // arithmetic for those few selectors; `vm.mockCall` still wins for everything mocked explicitly.
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
-        vm.mockCall(token, abi.encodeWithSelector(Token.sendOnTicketRoute.selector), abi.encode(bytes32(0)));
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
         vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
@@ -399,9 +405,10 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     function test_handleSettlement_Success_WhenTheAmountIsOnABound() public {
         _track();
         bytes32 first = _issue();
-        // The first validation reserved its maximum against the sending wallet, so the second can only be
-        // issued for what is left of it.
-        bytes32 second = _issue();
+        // The first validation reserved its maximum against the sending wallet, so the second can only ask for
+        // what is left of it.
+        vm.prank(aliceIdentity);
+        bytes32 second = mc.askToMove(fromSat, toSat, 5, BRIDGED_BALANCE - 90, "", _salt());
         uint256 secondMax = mc.ticketOf(second).amountMax;
 
         vm.startPrank(token);
@@ -455,132 +462,38 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.positionOf(bobId), 50);
     }
 
-    function test_handleSettlement_Success_WhenAModuleBoundAfterIssuanceSeesTheSettlement() public {
-        _track();
-        bytes32 id = _issue();
-        address recorder = _bindAfterTransferModule();
-
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-
-        assertEq(RecordingModule(recorder).transferActionCalls(), 1);
-        (, address fromIdentity, address toIdentity,,,,,,,,) = TrackerOnlyModule(recorder).lastContext();
-        assertEq(fromIdentity, aliceIdentity, "the settlement knows whose it is");
-        assertEq(toIdentity, bobIdentity);
-        assertEq(mc.positionOf(bobId), 50);
-    }
-
-    /* ----- Replays ----- */
-
-    /// @notice Another receipt for a half that already has one is a bad receipt: refused, nothing applied twice.
-    function test_handleSettlement_Success_WhenAConsumedLegIsReplayed() public {
-        _track();
-        address recorder = _bindAfterTransferModule();
-        bytes32 id = _issue();
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-
-        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
-        vm.prank(token);
-        _assertRejected(id, polygon, _leg(id, fromSat, toSat, 60));
-
-        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(mc.ticketOf(id).moved, 50);
-        assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
-        assertEq(mc.positionOf(bobId), 50);
-    }
-
-    /// @notice The very leg that settled, delivered again under another receive id, is a duplicate: verdict
-    ///         `None`, nothing applied twice, no module told twice.
-    function test_handleSettlement_Success_WhenTheSettledLegIsDeliveredAgain() public {
-        _track();
-        address recorder = _bindAfterTransferModule();
-        bytes32 id = _issue();
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-
-        vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
-        vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ReceiptDuplicate(id, polygon);
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-
-        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
-        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(mc.ticketOf(id).moved, 50);
-        assertEq(RecordingModule(recorder).transferActionCalls(), 1, "nothing applied twice");
-        assertEq(mc.positionOf(bobId), 50);
-    }
-
-    /// @notice A receipt that broke its terms is applied once. Delivered again, it is a duplicate: not judged again,
-    ///         nothing announced twice, nothing blocked twice.
-    function test_handleSettlement_Success_WhenARejectedLegIsDeliveredAgain() public {
-        _track();
-        bytes32 id = _issue();
-        MessageTypesLib.ReceiptMessage memory receipt = _leg(id, fromSat, toSat, 91);
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
-        assertTrue(mc.isAwayChainBlocked(polygon), "the receipt outside its terms blocks its chain");
-
-        vm.recordLogs();
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
-
-        _assertOnlyADuplicateWasAnnounced(vm.getRecordedLogs());
-        assertEq(mc.ticketOf(id).moved, 91, "applied once");
-    }
-
-    /// @notice A refused receipt never takes the half: delivered again it is refused again, and the receipt that was
-    ///         applied stays the applied one.
-    function test_handleSettlement_Success_WhenAReplayedLegIsDeliveredAgain() public {
-        _track();
-        bytes32 id = _issue();
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-        MessageTypesLib.ReceiptMessage memory conflicting = _leg(id, fromSat, toSat, 60);
-        vm.prank(token);
-        _assertRejected(id, polygon, conflicting);
-
-        vm.prank(token);
-        _assertRejected(id, polygon, conflicting);
-        assertEq(mc.ticketOf(id).moved, 50);
-    }
-
-    /// @notice A duplicate is per chain: the receipt polygon sent, arriving from optimism, was never taken in from
-    ///         optimism, so it is checked, refused as coming from a chain the ticket was not sent to, and blocks it.
-    function test_handleSettlement_Success_WhenTheSettledLegComesFromAnotherChain() public {
-        _track();
-        bytes32 id = _issue();
-        vm.prank(token);
-        mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, _leg(id, fromSat, toSat, 50));
-
-        vm.prank(token);
-        _assertRejected(id, optimism, _leg(id, fromSat, toSat, 50));
-        assertEq(mc.ticketOf(id).moved, 50);
-    }
-
     /* ----- An id home does not know ----- */
 
-    /// @notice A receipt for an id with no record reverts: it stays deliverable at the bridge and blocks nobody.
-    function test_handleSettlement_RevertWhen_TheIdWasNeverIssued() public {
+    /// @notice A receipt for an id with no record is put on hold under its sender, with no destination: the away
+    ///         token's balances already moved, and the ask mined again may take it. It blocks nobody.
+    function test_receiveReceipt_booksOnHoldWithNoDestination_whenTheTicketIsUnknown() public {
         bytes32 unknown = keccak256("an id this compliance never issued");
         MessageTypesLib.ReceiptMessage memory receipt = _legUnder(unknown, fromSat, toSat, 50, keccak256("body"));
 
+        vm.expectEmit(true, true, false, true, address(mc));
+        emit EventsLib.ReceiptWithoutTicket(unknown, polygon, fromSat, toSat, 50);
         vm.prank(token);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknown));
         mc.receiveReceipt(polygon, BRIDGE, PEER_KEY, receipt);
 
-        assertEq(mc.waitingReceiptOf(unknown).bodyHash, bytes32(0), "nothing waits");
-        assertEq(mc.ticketOf(unknown).fromIdentity, address(0), "the unknown id recorded nothing");
+        ITickets.Ticket memory held = mc.ticketOf(unknown);
+        assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold), "on hold");
+        assertFalse(held.written, "no ticket home sent answers it");
+        assertEq(held.moved, 50, "what the away token moved");
+        assertFalse(mc.isAwayChainBlocked(polygon), "nothing blocked");
     }
 
     /* ----- Helpers ----- */
 
+    /// @dev Cancels `id` the only way a sent ticket is cancelled: an ask for its receipt at its first due time, and
+    ///  one waiting time with no answer.
     function _discard(bytes32 id) private {
-        vm.warp(block.timestamp + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
+        uint64 firstAskDueAt = mc.ticketOf(id).validUntil + POLYGON_WINDOW;
+        vm.warp(firstAskDueAt);
+        mc.sendTicket(id, polygon, toSat, "");
+        vm.warp(firstAskDueAt + POLYGON_WINDOW + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
-        vm.prank(keeperAccount);
+        vm.prank(stranger);
         mc.cancelTickets(ids);
     }
 

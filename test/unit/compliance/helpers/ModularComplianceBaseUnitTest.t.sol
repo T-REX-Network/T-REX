@@ -76,11 +76,9 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
         _grantComplianceManagerRole(address(this));
         _grantPauserRole(address(this));
         _grantAgentRole(agentAccount);
-        _grantValidationKeeperRole(keeperAccount);
     }
 
     address public agentAccount = makeAddr("Agent");
-    address public keeperAccount = makeAddr("Keeper");
 
     uint256 private _saltNonce;
     /// @dev The salt the last `_salt()` returned, so a test can name the id a refused request would have taken.

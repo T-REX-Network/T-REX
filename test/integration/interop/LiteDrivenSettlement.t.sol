@@ -73,17 +73,16 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         super.setUp();
         polygonGateway = _newReceiptBridge(POLYGON);
         optimismGateway = _newReceiptBridge(OPTIMISM);
-        _openEvmChain(token, POLYGON, address(polygonGateway));
-        _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
+        // Each away token is the token's peer before its route opens: a peer set on an open route is a change.
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
-        polygonLite.setPeer(optimismLite, optimismGateway);
-        optimismLite.setPeer(polygonLite, polygonGateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
         token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)));
         vm.stopPrank();
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");
         aliceSat = _linkSatelliteWallet(aliceIdentity, POLYGON, aliceOnPolygon);
@@ -95,10 +94,10 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         token.unpause();
         vm.stopPrank();
 
-        vm.prank(alice);
-        token.delegateOut(alice, aliceSat, DELEGATED);
+        _moveOut(DELEGATED);
         _relayAll(polygonGateway);
-        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "the Lite minted what the token delegated");
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "the Lite minted what the token moved out");
+        assertEq(token.awayBalanceOf(aliceSat), DELEGATED, "and its receipt landed");
     }
 
     /// @dev Delivers every queued entry of `gateway` not yet delivered or dropped, in order, including the ones a
@@ -118,6 +117,18 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         id = _requestValidation(address(aliceIdentity), aliceSat, to, min, max);
         _relayAll(polygonGateway);
         _relayAll(optimismGateway);
+    }
+
+    /// @dev Alice's home wallet moves `amount` out to her away wallet; returns the ticket.
+    function _moveOut(uint256 amount) private returns (bytes32) {
+        bytes memory aliceHome = InteroperableAddress.formatEvmV1(block.chainid, alice);
+        vm.prank(alice);
+        return boundCompliance.askToMove(aliceHome, aliceSat, amount, amount, "", _salt());
+    }
+
+    function _bringHome(uint256 amount) private returns (bytes32) {
+        vm.prank(agent);
+        return boundCompliance.bringHome(aliceSat, amount, alice, _salt());
     }
 
     function _execute(bytes32 id, uint256 amount) private {
@@ -186,28 +197,47 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(polygonLite.balanceOf(bobSat), 50);
     }
 
-    /// @notice The reference chain still sees `Open` while the settlement travels, so a resend can go out after
-    ///         the Lite executed; the Lite holds the id already and ignores the copy, so nothing executes twice and
-    ///         the settlement lands as it would have.
-    function test_oneLeg_Success_WhenTheLegIsResentAfterTheLiteConsumedIt() public {
+    /// @notice The receipt is slow: home asks for it one waiting time after valid until, and the Lite answers the
+    ///         ask with its stored receipt. Nothing executes twice, and the receipt that was in flight is a duplicate.
+    function test_sendTicket_landsTheStoredReceipt_whenTheAwayTokenAlreadyExecuted() public {
         bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         _execute(id, 50);
         uint256 settlement = _last(polygonGateway);
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
-        vm.prank(address(aliceIdentity));
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.prank(makeAddr("anyone"));
         boundCompliance.sendTicket(id, polygon, bobSat, "");
         polygonGateway.relay(_last(polygonGateway));
-
-        assertTrue(polygonLite.consumed(id), "the copy did not reopen the validation");
         assertEq(polygonLite.balanceOf(bobSat), 50, "nothing executed twice");
-        vm.prank(aliceOnPolygon.addr);
-        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.ValidationConsumed.selector, id));
-        polygonLite.execute(id, 50);
+        polygonGateway.relay(_last(polygonGateway));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done), "the stored receipt answered the ask");
 
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         polygonGateway.relay(settlement);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(token.paused());
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+    }
+
+    /// @notice Asked once its valid until passed, a ticket the Lite never executed is answered with a stored zero
+    ///         receipt: it never will be, and home ends it with nothing moved.
+    function test_sendTicket_isAnsweredExpired_whenTheAwayTokenNeverExecuted() public {
+        bytes32 id = _issueAndDeliver(bobSat, 10, 50);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
+        vm.warp(ticket.validUntil + ticket.waitingTime);
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
+
+        polygonGateway.relay(_last(polygonGateway));
+
+        (, bytes memory body) = MessageTypesLib.decode(polygonGateway.queuedMessage(_last(polygonGateway)).payload);
+        MessageTypesLib.ReceiptMessage memory answer = MessageTypesLib.decodeSettlement(body);
+        assertEq(uint8(answer.answer), uint8(MessageTypesLib.ReceiptAnswer.Expired), "past valid until: expired");
+        assertEq(answer.amount, 0);
+        polygonGateway.relay(_last(polygonGateway));
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done), "a zero receipt ends the ticket");
+        assertEq(token.reservedOf(aliceSat), 0, "and gives its reservation back");
     }
 
     /* ----- The Lite's own rules ----- */
@@ -291,104 +321,109 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonLite.receiveMessage(bytes32(0), "", "");
     }
 
-    /* ----- Delegation retries ----- */
+    /* ----- Move out retries ----- */
 
-    /// @notice The mint instruction is lost; the agent resends it; then the original arrives too. The Lite mints
-    ///         once, and the token debited once.
-    function test_resend_Success_WhenTheMintInstructionWasLost() public {
-        vm.prank(alice);
-        token.delegateOut(alice, aliceSat, 100);
+    /// @notice The move out is slow; anyone sends it again at its due time, past its valid until, so the Lite answers
+    ///         it expired; home sends a new half, which mints. The first copy, arriving last, is answered with the
+    ///         stored zero receipt, which changes nothing. The Lite minted once, home burned once.
+    function test_sendSecondHalf_mintsOnce_whenTheMoveOutWasSlow() public {
+        bytes32 id = _moveOut(100);
         uint256 original = _last(polygonGateway);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
 
-        bytes memory fields = abi.encode(aliceSat, uint256(100), alice, token.peerFor(polygon));
-        vm.prank(agent);
-        token.resend(0, 2, fields);
+        vm.warp(ticket.secondHalfValidUntil + POLYGON_WINDOW);
+        boundCompliance.sendSecondHalf(id, aliceSat);
+        polygonGateway.relay(_last(polygonGateway));
+        polygonGateway.relay(_last(polygonGateway));
+        assertTrue(boundCompliance.ticketOf(id).secondHalfOwed, "the expired half makes a new one owed");
+
+        boundCompliance.sendSecondHalf(id, aliceSat);
+        uint256 newHalf = _last(polygonGateway);
+        polygonGateway.relay(newHalf);
         polygonGateway.relay(_last(polygonGateway));
         polygonGateway.relay(original);
+        polygonGateway.relay(_last(polygonGateway));
 
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(polygonLite.balanceOf(aliceSat), DELEGATED + 100, "minted once");
         assertEq(polygonLite.mints(), DELEGATED + 100);
-        assertEq(token.balanceOf(alice), MINTED - DELEGATED - 100, "debited once");
+        assertEq(token.balanceOf(alice), MINTED - DELEGATED - 100, "burned once at home");
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED + 100);
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
-    /* ----- Recall ----- */
+    /* ----- Bring home ----- */
 
-    function test_recall_Success_WhenTheLiteAnswersTheInstruction() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 200, alice);
+    function test_bringHome_Success_WhenTheLiteAnswersTheHalf() public {
+        bytes32 id = _bringHome(200);
         polygonGateway.relay(_last(polygonGateway));
-        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED - 200, "the Lite burned what was instructed");
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED - 200, "the Lite burned what was asked");
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.RecallSettled(recallId, polygon, 200);
         polygonGateway.relay(_last(polygonGateway));
 
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200);
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 200);
         assertEq(token.totalSupply(), MINTED);
     }
 
-    /// @notice A validation issued before the recall executed while the instruction was in flight: the Lite burns
-    ///         what it has left and proves that. Issued after the recall, it could not have drawn on the recalled
-    ///         amount, see `RecallReservation.t.sol`.
-    function test_recall_Success_WhenTheLiteHadLessToBurn() public {
+    /// @notice A ticket and a bring home on one wallet never count on the same tokens: the bring home is bounded by
+    ///         what the ticket leaves free, so the Lite has what both ask for and both settle.
+    function test_bringHome_andATicket_bothSettle_whenTheLiteExecutesBoth() public {
         bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 400, 400);
         uint256 validation = _last(polygonGateway);
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 200, alice);
-        uint256 instruction = _last(polygonGateway);
+        bytes32 bringHomeId = _bringHome(DELEGATED - 400);
+        uint256 bringHomeHalf = _last(polygonGateway);
         polygonGateway.relay(validation);
         _execute(id, 400);
         polygonGateway.relay(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
 
-        polygonGateway.relay(instruction);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.RecallSettled(recallId, polygon, DELEGATED - 400);
+        polygonGateway.relay(bringHomeHalf);
         polygonGateway.relay(_last(polygonGateway));
 
+        assertEq(uint8(_status(bringHomeId)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.balanceOf(alice), MINTED - 400);
         assertEq(token.awayBalanceOf(aliceSat), 0);
         assertEq(polygonLite.balanceOf(aliceSat), 0);
     }
 
-    /// @notice The recall instruction is lost; the agent resends it; the original arrives later and is answered
-    ///         with the stored proof, which the token recognises as a duplicate.
-    function test_resend_Success_WhenTheRecallInstructionWasLost() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 200, alice);
+    /// @notice The bring home's half is slow; anyone sends it again at its due time, past its valid until, so the
+    ///         Lite answers it expired and burns nothing: the bring home ends with nothing moved. The first copy,
+    ///         arriving last, is answered with the stored zero receipt, a duplicate.
+    function test_sendSecondHalf_endsTheBringHomeWithNothingMoved_whenItsHalfArrivesExpired() public {
+        bytes32 id = _bringHome(200);
         uint256 original = _last(polygonGateway);
 
-        vm.prank(agent);
-        token.resend(1, recallId, abi.encode(aliceSat));
+        vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + POLYGON_WINDOW);
+        boundCompliance.sendSecondHalf(id, aliceSat);
         polygonGateway.relay(_last(polygonGateway));
         polygonGateway.relay(_last(polygonGateway));
-        assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
 
         polygonGateway.relay(original);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.BurnProofDuplicate(recallId, polygon);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptDuplicate(id, polygon);
         polygonGateway.relay(_last(polygonGateway));
 
-        assertEq(polygonLite.burns(), 200, "burned once");
-        assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200, "credited once");
+        assertEq(polygonLite.burns(), 0, "burned nothing");
+        assertEq(token.awayBalanceOf(aliceSat), DELEGATED, "nothing came home");
+        assertEq(token.reservedOf(aliceSat), 0);
         assertFalse(token.paused());
     }
 
-    /// @notice The proof is lost; the Lite's operator resends the stored proof; it settles once.
-    function test_resendProof_Success_WhenTheProofWasLost() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 200, alice);
+    /// @notice The bring home's receipt is lost; the Lite sends its stored receipt again; it lands once.
+    function test_resendReceipt_Success_WhenTheBringHomeReceiptWasLost() public {
+        bytes32 id = _bringHome(200);
         polygonGateway.relay(_last(polygonGateway));
         polygonGateway.drop(_last(polygonGateway));
-        assertEq(_pendingRecall(recallId).amount, 200, "still waiting");
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
-        polygonLite.resendProof(recallId);
+        polygonLite.resendReceipt(id, 1);
         polygonGateway.relay(_last(polygonGateway));
 
         assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200);
-        assertEq(_pendingRecall(recallId).amount, 0);
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
     }
 
     /* ----- Settlement resend ----- */
@@ -400,7 +435,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.drop(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
-        polygonLite.resendSettlement(id);
+        polygonLite.resendReceipt(id, 0);
         polygonGateway.relay(_last(polygonGateway));
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
@@ -415,7 +450,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         _execute(id, 50);
         _relayAll(polygonGateway);
 
-        polygonLite.resendSettlement(id);
+        polygonLite.resendReceipt(id, 0);
         uint256 resent = _last(polygonGateway);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(id, polygon);

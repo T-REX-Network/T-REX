@@ -48,73 +48,56 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
 
 /**
  * @title SatelliteLiteMock
- * @notice A satellite Lite that follows every rule in `docs/satellite-lite.md`, so the reference chain can be run
- *  against the counterpart it assumes.
+ * @notice An away token that follows every rule in `docs/satellite-lite.md`, so home can be run against the
+ *  counterpart it assumes.
  *
- * One instance stands in for the Lite of one satellite chain. It receives the token's outbound messages through
- * that chain's `ERC7786GatewayMock`, which the test registers as the token's peer for the chain, and answers through
- * the same gateway. Two Lites talk to each other through the receiving Lite's gateway, under a type code no protocol
- * message uses.
+ * One instance stands in for the away token of one away chain. It receives home's messages through that chain's
+ * `ERC7786GatewayMock`, which the test registers as the token's peer for the chain, and answers through the same
+ * gateway. It never talks to another away token: a move to another chain only burns here, and home sends the second
+ * half.
  *
- * What it enforces: only its own gateway delivers (`msg.sender`); the author is the reference token, or the peer
- * Lite for a burn message, at the envelope the loopback gateway presents (it attributes every message to its own
- * chain, so the expected envelopes are built with that chain id); the first copy of a ticket is kept and a later
- * copy under the same id is ignored; a validation executes once, before its expiry, inside its range, for its wallets,
- * by its sender or its named spender; a mint leg is minted only on the sending Lite's burn message; a mint instruction
- * mints once per `delegationId`, and the same id with other contents is refused; a recall burns once per `recallId`,
- * stores its proof, and answers any repetition with the stored proof; every settlement it reports echoes the copy it
- * executed, and is stored and can be resent unchanged.
+ * What it enforces: only its own gateway delivers (`msg.sender`), and only the home token is an author; the first copy
+ * of a ticket is kept, and a copy whose valid until is further ahead of this chain's clock than `validUntilBound` is
+ * ignored; a ticket is executed at most once, strictly before its valid until, inside its range, for its wallets, by
+ * its sender or by its named spender within the allowance the sender gave; a later copy of a ticket is an ask for the
+ * receipt, answered with the stored receipt, a stored zero receipt (`Expired`) once valid until passed, or a still
+ * open answer before; a first copy that arrives at or after its valid until is answered with a stored zero receipt;
+ * a move out mints and a bring home burns `min(amount, balance)` once per half, strictly before the half's valid
+ * until, and a half that arrives later is answered with a stored zero receipt; a repeated half is answered with its
+ * stored receipt. Every receipt is kept per half and can be sent again byte for byte.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
     error NotTheGateway(address caller);
     error NotTheReferenceToken(bytes sender);
-    error NotThePeerLite(bytes sender);
     error AlreadyDelivered(bytes32 receiveId);
     error UnknownTicket(bytes32 ticketId);
     error ValidationConsumed(bytes32 ticketId);
     error ValidationExpired(bytes32 ticketId);
     error AmountOutOfRange(bytes32 ticketId, uint256 amount);
     error NotTheExecutor(bytes32 ticketId, address caller);
+    error AllowanceTooLow(bytes32 ticketId, uint256 allowance, uint256 amount);
     error InsufficientBalance(bytes wallet, uint256 balance, uint256 amount);
-    error BurnNotReceived(bytes32 ticketId);
-    error AlreadyMinted(bytes32 ticketId);
-    error RecipientMismatch(bytes32 ticketId);
-    error DelegationConflict(uint256 delegationId);
-    error RecallConflict(uint256 recallId);
-    error NoStoredProof(uint256 recallId);
-    error NoStoredSettlement(bytes32 ticketId);
+    error NoStoredReceipt(bytes32 ticketId, uint8 half);
     error UnexpectedMessage(uint8 messageType);
-
-    /// @dev A burn message between two Lites. Travels under `LITE_BURN`, outside the protocol's type range.
-    struct BurnMessage {
-        bytes32 ticketId;
-        bytes to;
-        uint256 amount;
-    }
-
-    uint8 internal constant LITE_BURN = 0xFF;
 
     uint256 public immutable chainId;
     address public immutable referenceToken;
     ERC7786GatewayMock public immutable gateway;
 
-    SatelliteLiteMock public peer;
-    ERC7786GatewayMock public peerGateway;
+    /// @notice How far ahead of this chain's clock a ticket's valid until may be and still be held, in seconds: the
+    ///  validity window plus the lag budget. A copy further ahead is ignored, so a forged far valid until is never held.
+    uint64 public validUntilBound;
 
-    mapping(bytes32 receiveId => bool) public delivered;
-    mapping(bytes32 ticketId => MessageTypesLib.TicketMessage) internal _validations;
-    mapping(bytes32 ticketId => bool) public known;
-    mapping(bytes32 ticketId => bool) public consumed;
-    mapping(bytes32 ticketId => uint256) public burnReceived;
-    mapping(bytes32 ticketId => bool) public minted;
-    mapping(uint256 delegationId => bytes32) public delegationSeen;
-    mapping(uint256 recallId => bytes32) public recallSeen;
-    mapping(uint256 recallId => bytes) internal _proofs;
-    /// @dev The settlement this Lite reported for each validation, kept so it can be sent again unchanged.
-    mapping(bytes32 ticketId => bytes) internal _settlements;
-    mapping(uint256 recallId => uint256) public burnedFor;
-    mapping(bytes32 walletKey => uint256) internal _balances;
+    mapping(bytes32 receiveId => bool isDelivered) public delivered;
+    /// @dev The first copy of each ticket, the only one ever executed.
+    mapping(bytes32 ticketId => MessageTypesLib.TicketMessage firstCopy) internal _tickets;
+    mapping(bytes32 ticketId => bool isHeld) public known;
+    /// @dev A half is answered once: its receipt is kept under its half key, and its bytes are what a repeat gets.
+    mapping(bytes32 halfKey => MessageTypesLib.ReceiptMessage receipt) internal _receipts;
+    mapping(bytes32 halfKey => bool isAnswered) public answered;
+    mapping(bytes32 walletKey => uint256 balance) internal _balances;
+    mapping(bytes32 walletKey => mapping(address spender => uint256 allowance)) public allowances;
 
     uint256 public mints;
     uint256 public burns;
@@ -123,20 +106,42 @@ contract SatelliteLiteMock is IERC7786Recipient {
         chainId = chainId_;
         referenceToken = referenceToken_;
         gateway = gateway_;
+        validUntilBound = type(uint64).max;
     }
 
-    /// @notice The Lite this one exchanges burn messages with, and the gateway that carries them to it.
-    function setPeer(SatelliteLiteMock peer_, ERC7786GatewayMock peerGateway_) external {
-        peer = peer_;
-        peerGateway = peerGateway_;
+    /// @notice Sets how far ahead of this chain's clock a held ticket's valid until may be.
+    function setValidUntilBound(uint64 bound) external {
+        validUntilBound = bound;
+    }
+
+    /// @notice The caller, a wallet on this chain, lets `spender` execute its tickets up to `amount`.
+    function approve(address spender, uint256 amount) external {
+        allowances[_walletKeyOf(msg.sender)][spender] = amount;
     }
 
     function balanceOf(bytes memory wallet) external view returns (uint256) {
         return _balances[keccak256(wallet)];
     }
 
+    /// @notice The copy of the ticket this away token holds: the first one it received.
     function ticketOf(bytes32 ticketId) external view returns (MessageTypesLib.TicketMessage memory) {
-        return _validations[ticketId];
+        return _tickets[ticketId];
+    }
+
+    /// @notice The valid until of the ticket copy held, zero when none is held: what a reader of a closed chain sees.
+    function storedTicketValidUntil(bytes32 ticketId) external view returns (uint64) {
+        return _tickets[ticketId].validUntil;
+    }
+
+    /// @notice The receipt stored for one half, all zero when the half was never answered.
+    function storedReceipt(bytes32 ticketId, uint8 half) external view returns (MessageTypesLib.ReceiptMessage memory) {
+        return _receipts[MessageTypesLib.halfKeyOf(ticketId, half)];
+    }
+
+    /// @notice Whether the ticket was executed.
+    function consumed(bytes32 ticketId) external view returns (bool) {
+        MessageTypesLib.ReceiptMessage storage receipt = _receipts[ticketId];
+        return answered[ticketId] && receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
     }
 
     /// @inheritdoc IERC7786Recipient
@@ -150,190 +155,209 @@ contract SatelliteLiteMock is IERC7786Recipient {
             require(!delivered[receiveId], AlreadyDelivered(receiveId));
             delivered[receiveId] = true;
         }
+        bytes memory homeToken = InteroperableAddress.formatEvmV1(gateway.originChainId(), referenceToken);
+        require(keccak256(sender) == keccak256(homeToken), NotTheReferenceToken(sender));
 
         (uint8 messageType,, bytes memory body) = abi.decode(payload, (uint8, uint8, bytes));
-        uint256 seenFrom = gateway.originChainId();
-
-        if (messageType == LITE_BURN) {
-            require(_isAuthor(sender, seenFrom, address(peer)), NotThePeerLite(sender));
-            _receiveBurn(abi.decode(body, (BurnMessage)));
-            return IERC7786Recipient.receiveMessage.selector;
-        }
-
-        require(_isAuthor(sender, seenFrom, referenceToken), NotTheReferenceToken(sender));
-
         if (messageType == uint8(MessageTypesLib.Message.TICKET)) {
-            _hold(MessageTypesLib.decodeValidation(body));
+            _receiveTicket(MessageTypesLib.decodeValidation(body));
         } else if (messageType == uint8(MessageTypesLib.Message.MOVE_OUT)) {
-            _mint(MessageTypesLib.decodeMintInstruction(body), keccak256(body));
+            _moveOut(MessageTypesLib.decodeMintInstruction(body));
         } else if (messageType == uint8(MessageTypesLib.Message.BRING_HOME)) {
-            _recall(MessageTypesLib.decodeRecallInstruction(body), keccak256(body));
+            _bringHome(MessageTypesLib.decodeBringHome(body));
         } else {
             revert UnexpectedMessage(messageType);
         }
-
         return IERC7786Recipient.receiveMessage.selector;
     }
 
-    /// @notice The satellite user executes `ticketId` for `amount`: the sender, or the named spender.
+    /// @notice The holder executes `ticketId` for `amount`: the sender, or the named spender within its allowance.
     function execute(bytes32 ticketId, uint256 amount) external {
         require(known[ticketId], UnknownTicket(ticketId));
-        require(!consumed[ticketId], ValidationConsumed(ticketId));
-        MessageTypesLib.TicketMessage storage validation = _validations[ticketId];
-        require(block.timestamp < validation.validUntil, ValidationExpired(ticketId));
-        require(validation.amountMin <= amount && amount <= validation.amountMax, AmountOutOfRange(ticketId, amount));
-        require(_isExecutor(validation), NotTheExecutor(ticketId, msg.sender));
-        consumed[ticketId] = true;
+        MessageTypesLib.TicketMessage storage ticket = _tickets[ticketId];
+        require(block.timestamp < ticket.validUntil, ValidationExpired(ticketId));
+        require(!answered[ticketId], ValidationConsumed(ticketId));
+        require(ticket.amountMin <= amount && amount <= ticket.amountMax, AmountOutOfRange(ticketId, amount));
+        _spendAsExecutor(ticket, ticketId, amount);
 
-        _debit(validation.from, amount);
+        _debit(ticket.from, amount);
+        bool receiverOnThisChain = _isOnThisChain(ticket.to);
+        if (receiverOnThisChain) _balances[keccak256(ticket.to)] += amount;
+        if (!receiverOnThisChain) burns += amount;
 
-        (bool toIsEvm, uint256 toChainId,) = InteroperableAddress.tryParseEvmV1(validation.to);
-        bool twoLegs = toIsEvm && toChainId != chainId && toChainId != block.chainid;
-        if (!twoLegs) {
-            if (toChainId == chainId) _balances[keccak256(validation.to)] += amount;
-            _report(ticketId, validation.from, validation.to, amount);
-            return;
-        }
-
-        _report(ticketId, validation.from, "", amount);
-        peerGateway.sendMessage(
-            InteroperableAddress.formatEvmV1(block.chainid, address(peer)),
-            abi.encode(LITE_BURN, MessageTypesLib.VERSION, abi.encode(BurnMessage(ticketId, validation.to, amount))),
-            new bytes[](0)
-        );
+        _answer(ticketId, 0, _ticketReceipt(ticket, amount, MessageTypesLib.ReceiptAnswer.Executed));
     }
 
-    /// @notice What a Lite that ignored the two-leg rule would do: mint from the validation alone. Refused.
-    function mintWithoutBurn(bytes32 ticketId) external view {
-        require(known[ticketId], UnknownTicket(ticketId));
-        require(burnReceived[ticketId] != 0, BurnNotReceived(ticketId));
-        revert AlreadyMinted(ticketId);
-    }
-
-    /// @notice The operator's retry of a proof the reference chain never received: the stored proof, unchanged.
-    function resendProof(uint256 recallId) external {
-        bytes memory proof = _proofs[recallId];
-        require(proof.length != 0, NoStoredProof(recallId));
-        _send(proof);
-    }
-
-    /// @notice A retry of a settlement the reference chain may not have received: the stored report, byte for byte,
-    ///  as T-REX-Lite's `resendSettlement` sends it. The reference chain applies the leg once and recognises the
-    ///  repeat (`ReceiptDuplicate`).
-    function resendSettlement(bytes32 ticketId) external {
-        bytes memory settlement = _settlements[ticketId];
-        require(settlement.length != 0, NoStoredSettlement(ticketId));
-        _send(settlement);
+    /// @notice Sends the stored receipt of one half again, byte for byte.
+    function resendReceipt(bytes32 ticketId, uint8 half) external {
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
+        require(answered[halfKey], NoStoredReceipt(ticketId, half));
+        _send(_receipts[halfKey]);
     }
 
     /* ----- Private ----- */
 
-    /// @dev Rule 3 of `docs/satellite-lite.md`. An unknown id is stored. A known id is never replaced: a resend
-    ///  repeats the copy held, and a later copy of the same ask, mined again in another block after a reorg, is
-    ///  ignored. The receipt echoes the copy held, and home tells which one it was.
-    function _hold(MessageTypesLib.TicketMessage memory validation) private {
-        bytes32 ticketId = validation.ticketId;
-        if (known[ticketId]) return;
-        _validations[ticketId] = validation;
-        known[ticketId] = true;
-    }
+    /// @dev Rule 3. A copy too far ahead is ignored. The first copy is held and never answered before its valid
+    ///  until; one that arrives at or after it is answered with a stored zero receipt. A later copy is an ask for the
+    ///  receipt: the stored receipt, a stored zero receipt once valid until passed, or a still open answer before.
+    function _receiveTicket(MessageTypesLib.TicketMessage memory copy) private {
+        bytes32 ticketId = copy.ticketId;
+        bool tooFarAhead = copy.validUntil > block.timestamp && copy.validUntil - block.timestamp > validUntilBound;
+        if (tooFarAhead) return;
 
-    /// @dev Once per delegation id; the same id again with the same body is a no-op, with another body a conflict.
-    function _mint(MessageTypesLib.MoveOutMessage memory instruction, bytes32 bodyHash) private {
-        bytes32 seen = delegationSeen[instruction.delegationId];
-        if (seen == bodyHash) return;
-        require(seen == 0, DelegationConflict(instruction.delegationId));
-        delegationSeen[instruction.delegationId] = bodyHash;
-        _balances[keccak256(instruction.toWallet)] += instruction.amount;
-        mints += instruction.amount;
-    }
-
-    /// @dev Burn what is there, up to the instruction, once per recall id; store the proof and send it. A repeated
-    ///  instruction is answered with the stored proof; another body under the same id is a conflict.
-    function _recall(MessageTypesLib.BringHomeMessage memory instruction, bytes32 bodyHash) private {
-        bytes32 seen = recallSeen[instruction.recallId];
-        if (seen == bodyHash) {
-            _send(_proofs[instruction.recallId]);
+        if (!known[ticketId]) {
+            _tickets[ticketId] = copy;
+            known[ticketId] = true;
+            if (block.timestamp >= copy.validUntil) _answerExpired(ticketId);
             return;
         }
-        require(seen == 0, RecallConflict(instruction.recallId));
-        recallSeen[instruction.recallId] = bodyHash;
 
-        bytes32 key = keccak256(instruction.wallet);
-        uint256 burned = _balances[key] < instruction.amount ? _balances[key] : instruction.amount;
-        _balances[key] -= burned;
-        burns += burned;
-        burnedFor[instruction.recallId] = burned;
-
-        bytes memory proof = MessageTypesLib.encodeBurnProof(
-            MessageTypesLib.BurnProof({
-                recallId: instruction.recallId, burnedWallet: instruction.wallet, amount: burned
-            })
-        );
-        _proofs[instruction.recallId] = proof;
-        _send(proof);
+        if (answered[ticketId]) {
+            _send(_receipts[ticketId]);
+            return;
+        }
+        MessageTypesLib.TicketMessage storage firstCopy = _tickets[ticketId];
+        if (block.timestamp >= firstCopy.validUntil) {
+            _answerExpired(ticketId);
+            return;
+        }
+        _send(_ticketReceipt(firstCopy, 0, MessageTypesLib.ReceiptAnswer.StillOpen));
     }
 
-    /// @dev The receiving half of the two-leg rule: the burn message carries the amount, the mint repeats it, and
-    ///      the validation this Lite holds is what the message is checked against. Without it the message is refused
-    ///      and redelivered once the leg arrives.
-    function _receiveBurn(BurnMessage memory message) private {
-        bytes32 ticketId = message.ticketId;
-        require(known[ticketId], UnknownTicket(ticketId));
-        MessageTypesLib.TicketMessage storage validation = _validations[ticketId];
-        require(keccak256(message.to) == keccak256(validation.to), RecipientMismatch(ticketId));
-        require(
-            validation.amountMin <= message.amount && message.amount <= validation.amountMax,
-            AmountOutOfRange(ticketId, message.amount)
+    /// @dev Rule 9: mints once per half, strictly before the half's valid until.
+    function _moveOut(MessageTypesLib.MoveOutMessage memory moveOut) private {
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(moveOut.ticketId, moveOut.half);
+        if (answered[halfKey]) {
+            _send(_receipts[halfKey]);
+            return;
+        }
+        uint256 minted;
+        MessageTypesLib.ReceiptAnswer answer = MessageTypesLib.ReceiptAnswer.Expired;
+        if (block.timestamp < moveOut.validUntil) {
+            minted = moveOut.amount;
+            answer = MessageTypesLib.ReceiptAnswer.Executed;
+            _balances[keccak256(moveOut.toWallet)] += minted;
+            mints += minted;
+        }
+        _answer(
+            moveOut.ticketId,
+            moveOut.half,
+            _halfReceipt(moveOut.ticketId, moveOut.half, "", moveOut.toWallet, minted, answer)
         );
-        require(!minted[ticketId], AlreadyMinted(ticketId));
-        burnReceived[message.ticketId] = message.amount;
-        minted[message.ticketId] = true;
-        _balances[keccak256(message.to)] += message.amount;
-        _report(message.ticketId, "", message.to, message.amount);
     }
 
-    /// @dev Rule 7: every report echoes the copy it was executed under (its ask block hash, maximum and valid
-    ///  until), says it executed, and is kept for a resend.
-    function _report(bytes32 ticketId, bytes memory from, bytes memory to, uint256 amount) private {
-        MessageTypesLib.TicketMessage storage executedCopy = _validations[ticketId];
-        bytes memory settlement = MessageTypesLib.encodeSettlement(
-            MessageTypesLib.ReceiptMessage({
-                ticketId: ticketId,
-                from: from,
-                to: to,
-                amount: amount,
-                askBlockHash: executedCopy.askBlockHash,
-                seenMax: executedCopy.amountMax,
-                seenValidUntil: executedCopy.validUntil,
-                half: 0,
-                answer: MessageTypesLib.ReceiptAnswer.Executed
-            })
+    /// @dev Rule 10: burns `min(amount, balance)` once per half, strictly before the half's valid until.
+    function _bringHome(MessageTypesLib.BringHomeMessage memory bringHome) private {
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(bringHome.ticketId, bringHome.half);
+        if (answered[halfKey]) {
+            _send(_receipts[halfKey]);
+            return;
+        }
+        uint256 burned;
+        MessageTypesLib.ReceiptAnswer answer = MessageTypesLib.ReceiptAnswer.Expired;
+        if (block.timestamp < bringHome.validUntil) {
+            answer = MessageTypesLib.ReceiptAnswer.Executed;
+            bytes32 walletKey = keccak256(bringHome.wallet);
+            burned = bringHome.amount;
+            if (_balances[walletKey] < burned) burned = _balances[walletKey];
+            _balances[walletKey] -= burned;
+            burns += burned;
+        }
+        _answer(
+            bringHome.ticketId,
+            bringHome.half,
+            _halfReceipt(bringHome.ticketId, bringHome.half, bringHome.wallet, "", burned, answer)
         );
-        _settlements[ticketId] = settlement;
-        _send(settlement);
     }
 
-    function _send(bytes memory payload) private {
-        gateway.sendMessage(InteroperableAddress.formatEvmV1(block.chainid, referenceToken), payload, new bytes[](0));
+    function _answerExpired(bytes32 ticketId) private {
+        _answer(ticketId, 0, _ticketReceipt(_tickets[ticketId], 0, MessageTypesLib.ReceiptAnswer.Expired));
+    }
+
+    /// @dev Rule 7: stores the receipt under its half and sends it.
+    function _answer(bytes32 ticketId, uint8 half, MessageTypesLib.ReceiptMessage memory receipt) private {
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
+        _receipts[halfKey] = receipt;
+        answered[halfKey] = true;
+        _send(receipt);
+    }
+
+    /// @dev A first-half receipt names both wallets and echoes the copy held.
+    function _ticketReceipt(
+        MessageTypesLib.TicketMessage storage heldCopy,
+        uint256 amount,
+        MessageTypesLib.ReceiptAnswer answer
+    ) private view returns (MessageTypesLib.ReceiptMessage memory) {
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: heldCopy.ticketId,
+            from: heldCopy.from,
+            to: heldCopy.to,
+            amount: amount,
+            askBlockHash: heldCopy.askBlockHash,
+            seenMax: heldCopy.amountMax,
+            seenValidUntil: heldCopy.validUntil,
+            half: 0,
+            answer: answer
+        });
+    }
+
+    /// @dev A second-half receipt carries no ticket fields: a move out names only the minted wallet, a bring home
+    ///  only the burned one.
+    function _halfReceipt(
+        bytes32 ticketId,
+        uint8 half,
+        bytes memory from,
+        bytes memory to,
+        uint256 amount,
+        MessageTypesLib.ReceiptAnswer answer
+    ) private pure returns (MessageTypesLib.ReceiptMessage memory) {
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: ticketId,
+            from: from,
+            to: to,
+            amount: amount,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: half,
+            answer: answer
+        });
+    }
+
+    function _send(MessageTypesLib.ReceiptMessage memory receipt) private {
+        gateway.sendMessage(
+            InteroperableAddress.formatEvmV1(block.chainid, referenceToken),
+            MessageTypesLib.encodeSettlement(receipt),
+            new bytes[](0)
+        );
     }
 
     function _debit(bytes memory wallet, uint256 amount) private {
-        bytes32 key = keccak256(wallet);
-        require(amount <= _balances[key], InsufficientBalance(wallet, _balances[key], amount));
-        _balances[key] -= amount;
+        bytes32 walletKey = keccak256(wallet);
+        require(amount <= _balances[walletKey], InsufficientBalance(wallet, _balances[walletKey], amount));
+        _balances[walletKey] -= amount;
     }
 
-    function _isAuthor(bytes calldata sender, uint256 seenFrom, address expected) private pure returns (bool) {
-        return keccak256(sender) == keccak256(InteroperableAddress.formatEvmV1(seenFrom, expected));
+    /// @dev Rule 6: the sender itself, or the named spender, which spends the sender's allowance.
+    function _spendAsExecutor(MessageTypesLib.TicketMessage storage ticket, bytes32 ticketId, uint256 amount) private {
+        (,, bytes memory fromAddress) = InteroperableAddress.parseV1(ticket.from);
+        if (address(bytes20(fromAddress)) == msg.sender) return;
+        require(ticket.spender.length != 0, NotTheExecutor(ticketId, msg.sender));
+        (,, bytes memory spenderAddress) = InteroperableAddress.parseV1(ticket.spender);
+        require(address(bytes20(spenderAddress)) == msg.sender, NotTheExecutor(ticketId, msg.sender));
+        bytes32 fromKey = keccak256(ticket.from);
+        uint256 allowance = allowances[fromKey][msg.sender];
+        require(amount <= allowance, AllowanceTooLow(ticketId, allowance, amount));
+        allowances[fromKey][msg.sender] = allowance - amount;
     }
 
-    function _isExecutor(MessageTypesLib.TicketMessage storage validation) private view returns (bool) {
-        (,, bytes memory from) = InteroperableAddress.parseV1(validation.from);
-        if (address(bytes20(from)) == msg.sender) return true;
-        if (validation.spender.length == 0) return false;
-        (,, bytes memory spender) = InteroperableAddress.parseV1(validation.spender);
-        return address(bytes20(spender)) == msg.sender;
+    function _isOnThisChain(bytes memory wallet) private view returns (bool) {
+        (bool isEvm, uint256 walletChainId,) = InteroperableAddress.tryParseEvmV1(wallet);
+        return isEvm && walletChainId == chainId;
+    }
+
+    function _walletKeyOf(address wallet) private view returns (bytes32) {
+        return keccak256(InteroperableAddress.formatEvmV1(chainId, wallet));
     }
 
 }

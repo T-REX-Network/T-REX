@@ -48,43 +48,46 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { TokenLedgerBaseUnitTest } from "./TokenLedgerBaseUnitTest.t.sol";
 
-/// @notice The ledger half of a recall, driven through `TokenLedgerHarness.ledgerRecall`: the buckets and the
-///         envelope only. The burn proof checks are covered in `DelegationAndRecall.t.sol`.
-contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
+/// @notice The ledger of a bring home, its receipt landed, driven through `TokenLedgerHarness.ledgerBringHome`: the
+///         buckets and the envelope only. The ticket and its receipt are covered by the interop suites.
+contract TokenLedgerBringHomeUnitTest is TokenLedgerBaseUnitTest {
 
     function setUp() public override {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
-    function test_recall_BringsTheBridgedPositionBack() public {
+    function test_ledgerBringHome_BringsTheBridgedPositionBack() public {
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 40);
+        ledger.ledgerBringHome(satellite1, user1, 40);
 
         assertEq(token.awayBalanceOf(satellite1), 20);
         assertEq(token.balanceOf(user1), 80);
         assertEq(token.freeBalanceOf(user1), 80);
         assertEq(token.totalAwayBalance(), 20);
-        assertEq(token.totalSupply(), 100, "the supply never moves on a recall");
+        assertEq(token.totalSupply(), 100, "the supply never moves on a bring home");
         _assertPartition();
     }
 
-    function test_recall_EmitsTransferFromZeroThenRecalled() public {
+    function test_ledgerBringHome_EmitsHeldInTransitThenTransferFromZeroThenSettledToNative() public {
+        bytes32 holdId = keccak256(abi.encode("ledger bring home", satellite1, user1));
+        vm.expectEmit(true, true, true, true, address(token));
+        emit EventsLib.HeldInTransit(keccak256(satellite1), holdId, satellite1, 40);
         vm.expectEmit(true, true, true, true, address(token));
         emit IERC20.Transfer(address(0), user1, 40);
         vm.expectEmit(true, true, true, true, address(token));
-        emit EventsLib.Recalled(keccak256(satellite1), user1, satellite1, 40);
+        emit EventsLib.SettledToNative(keccak256(satellite1), user1, holdId, satellite1, 40);
 
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 40);
+        ledger.ledgerBringHome(satellite1, user1, 40);
     }
 
-    function test_recall_TheWholePosition() public {
+    function test_ledgerBringHome_TheWholePosition() public {
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 60);
+        ledger.ledgerBringHome(satellite1, user1, 60);
 
         assertEq(token.awayBalanceOf(satellite1), 0);
         assertEq(token.totalAwayBalance(), 0);
@@ -92,49 +95,47 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         _assertPartition();
     }
 
-    function test_recall_ZeroAmountSucceeds() public {
-        vm.expectEmit(true, true, true, true, address(token));
-        emit EventsLib.Recalled(keccak256(satellite1), user1, satellite1, 0);
+    function test_ledgerBringHome_ZeroAmountSucceeds() public {
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 0);
+        ledger.ledgerBringHome(satellite1, user1, 0);
 
         assertEq(token.awayBalanceOf(satellite1), 60);
     }
 
     /// @dev Which native wallet receives is the flow's decision (same identity as the burned wallet); the ledger
     ///      credits whichever it is handed.
-    function test_recall_LandsOnAnotherNativeWallet() public {
+    function test_ledgerBringHome_LandsOnAnotherNativeWallet() public {
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user2, 60);
+        ledger.ledgerBringHome(satellite1, user2, 60);
 
         assertEq(token.balanceOf(user2), 60);
         assertEq(token.balanceOf(user1), 40);
         _assertPartition();
     }
 
-    function test_recall_LeavesTheFrozenBucketAlone() public {
+    function test_ledgerBringHome_LeavesTheFrozenBucketAlone() public {
         vm.startPrank(agent);
         token.freezePartialTokens(user1, 40);
-        ledger.ledgerRecall(satellite1, user1, 60);
+        ledger.ledgerBringHome(satellite1, user1, 60);
         vm.stopPrank();
 
         assertEq(token.getFrozenTokens(user1), 40);
         assertEq(token.freeBalanceOf(user1), 60);
     }
 
-    function test_recall_DoesNotNotifyTheComplianceNorCheckEligibility() public {
+    function test_ledgerBringHome_DoesNotNotifyTheComplianceNorCheckEligibility() public {
         vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.created.selector), 0);
         vm.expectCall(compliance, abi.encodeWithSelector(IERC3643Compliance.canTransfer.selector), 0);
         vm.expectCall(identityRegistry, abi.encodeWithSelector(IERC3643IdentityRegistry.isVerified.selector), 0);
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 40);
+        ledger.ledgerBringHome(satellite1, user1, 40);
     }
 
-    function test_recall_RoundTripRestoresTheNativePosition() public {
+    function test_ledgerBringHome_RoundTripRestoresTheNativePosition() public {
         vm.startPrank(agent);
-        ledger.ledgerRecall(satellite1, user1, 60);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
-        ledger.ledgerRecall(satellite1, user1, 60);
+        ledger.ledgerBringHome(satellite1, user1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
+        ledger.ledgerBringHome(satellite1, user1, 60);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), 100);
@@ -143,36 +144,36 @@ contract TokenRecallUnitTest is TokenLedgerBaseUnitTest {
         assertEq(token.totalSupply(), 100);
     }
 
-    function test_recall_RevertWhen_AmountAboveTheBridgedPosition() public {
+    function test_ledgerBringHome_RevertWhen_AmountAboveTheBridgedPosition() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite1, 60, 61));
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, user1, 61);
+        ledger.ledgerBringHome(satellite1, user1, 61);
     }
 
-    function test_recall_RevertWhen_WalletHoldsNoPosition() public {
+    function test_ledgerBringHome_RevertWhen_WalletHoldsNoPosition() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, satellite2, 0, 1));
         vm.prank(agent);
-        ledger.ledgerRecall(satellite2, user1, 1);
+        ledger.ledgerBringHome(satellite2, user1, 1);
     }
 
-    function test_recall_RevertWhen_WalletIsOnTheReferenceChain() public {
+    function test_ledgerBringHome_RevertWhen_WalletIsOnTheReferenceChain() public {
         bytes memory native = satelliteEnvelope(block.chainid, user1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
         vm.prank(agent);
-        ledger.ledgerRecall(native, user1, 0);
+        ledger.ledgerBringHome(native, user1, 0);
     }
 
-    function test_recall_RevertWhen_EnvelopeIsNotCanonical() public {
+    function test_ledgerBringHome_RevertWhen_EnvelopeIsNotCanonical() public {
         bytes memory padded = abi.encodePacked(satellite1, hex"00");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NonCanonicalInteroperableAddress.selector, padded));
         vm.prank(agent);
-        ledger.ledgerRecall(padded, user1, 10);
+        ledger.ledgerBringHome(padded, user1, 10);
     }
 
-    function test_recall_RevertWhen_HolderIsZero() public {
+    function test_ledgerBringHome_RevertWhen_HolderIsZero() public {
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         vm.prank(agent);
-        ledger.ledgerRecall(satellite1, address(0), 10);
+        ledger.ledgerBringHome(satellite1, address(0), 10);
     }
 
 }

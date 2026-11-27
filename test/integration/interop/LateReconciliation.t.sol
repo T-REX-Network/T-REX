@@ -168,12 +168,9 @@ contract LateReconciliationTest is InteropSuiteTest {
         return _requestValidation(address(aliceIdentity), from, to, min, max);
     }
 
+    /// @dev Cancels a ticket to bob once an ask for its receipt went unanswered.
     function _discard(bytes32 id) private {
-        vm.warp(block.timestamp + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = id;
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(ids);
+        _cancelUnanswered(id, bobSat, "");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 

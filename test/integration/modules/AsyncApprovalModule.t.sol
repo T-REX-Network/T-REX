@@ -52,6 +52,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev An approver that answers later, from a callback of its own, as a rule computed with FHE answers from
@@ -134,8 +135,10 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Bound without approvers, a request is refused rather than left to hold its reservation.
     function test_requestTransferValidation_RevertWhen_NoApproverIsSet() public {
         vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.removeModule(address(module));
         boundCompliance.addModule(address(module));
+        boundCompliance.setAsksPaused(false);
         vm.stopPrank();
 
         vm.prank(address(aliceIdentity));
@@ -189,6 +192,9 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         vm.prank(makeAddr("anyone"));
         module.finalize(address(boundCompliance), id);
+        assertEq(gateway.queueLength(), 0, "the answer sends nothing");
+        vm.prank(makeAddr("anyone"));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
         assertEq(uint8(issued.status), uint8(ITickets.TicketStatus.Open));
@@ -199,29 +205,24 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 0, "forgotten once issued");
     }
 
-    /// @notice A request that reserved before a recall keeps its reservation through the approval: the recall is
-    ///         bounded by the position, not by reservations, so the two may together exceed it. Approved after
-    ///         the recall, the validation can still execute first; the satellite then burns what is left and
-    ///         proves that. Nothing requested after the recall gets any room.
-    function test_finalize_Success_WhenARecallWasInstructedWhileTheRequestWaited() public {
+    /// @notice A request waiting for approval reserves its maximum on the wallet, so a bring home asked meanwhile
+    ///         is bounded by what is left: no bring home ever burns the tokens the approved ticket moves.
+    function test_bringHome_reverts_when_aTicketWaitingForApprovalReservedTheTokens() public {
         bytes32 id = _request(10, 1500);
+        assertEq(token.availableOf(aliceSat), 500, "1500 reserved against 2000");
+
         vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, 800, alice);
-        assertEq(token.availableOf(aliceSat), 0, "1500 reserved and 800 recalled against 2000");
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        _request(1, 1);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceSat, 500, 800));
+        boundCompliance.bringHome(aliceSat, 800, alice, _salt());
 
         _approve(backend, id, 1500);
         _finalize(id);
         assertEq(boundCompliance.ticketOf(id).amountMax, 1500, "the earlier reservation stands");
 
         gateway.relay(_liteSettles(gateway, token, _settlement(id, aliceSat, bobSat, 1500)));
-        gateway.relay(_liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, 500))));
 
-        assertEq(token.awayBalanceOf(aliceSat), 0);
+        assertEq(token.awayBalanceOf(aliceSat), 500);
         assertEq(token.awayBalanceOf(bobSat), 1500);
-        assertEq(_pendingRecall(recallId).amount, 0, "the recall settled on what was left to burn");
-        assertEq(token.availableOf(aliceSat), 0);
         assertFalse(token.paused());
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
@@ -311,43 +312,42 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
     }
 
-    /// @notice A chain blocked while the request waited makes `finalize` revert, never an approver. The request
-    ///         stays fully approved, and `finalize` goes through once the block is lifted.
-    function test_finalize_Success_WhenRetriedAfterAPausedChainReopens() public {
+    /// @notice The answer sends nothing, so a chain blocked while the request waited does not hold it: the ticket is
+    ///         opened, and its first send waits for the block to be lifted.
+    function test_finalize_opensTheTicket_andTheFirstSendWaitsForABlockedChain() public {
         bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
         module.finalize(address(boundCompliance), id);
-        assertTrue(module.requestOf(address(boundCompliance), id).fullyApproved, "still there to retry");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open), "opened");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
 
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
-        module.finalize(address(boundCompliance), id);
-
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        assertEq(gateway.queueLength(), 1, "sent once the block is lifted");
     }
 
-    /// @notice An approval sends the legs out, so a paused token refuses it as it refuses a request; the approval
-    ///         stays recorded on the module and is finalised once the token is unpaused.
-    function test_finalize_RevertWhen_TheTokenIsPaused_ThenSucceedsOnceUnpaused() public {
+    /// @notice The answer sends nothing, so a paused token does not hold it: the ticket is opened, and its first send
+    ///         waits for the unpause.
+    function test_finalize_opensTheTicket_andTheFirstSendWaitsForTheUnpause() public {
         bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
         vm.prank(agent);
         token.pause();
 
+        module.finalize(address(boundCompliance), id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open), "opened");
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        _finalize(id);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(gateway.queueLength(), 0, "nothing sent");
 
         vm.prank(agent);
         token.unpause();
-        _finalize(id);
-
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+        boundCompliance.sendTicket(id, polygon, bobSat, "");
         assertEq(gateway.queueLength(), 1);
     }
 
@@ -428,9 +428,9 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
     // ==== Deadline ====
 
-    /// @notice Past the deadline anyone discards an unanswered request, through the keeper's own call, and its
+    /// @notice Past the deadline anyone cancels an unanswered request, and its
     ///         reservation comes back.
-    function test_discardExpiredValidations_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
+    function test_cancelTickets_Success_WhenAnUnansweredRequestPassedItsDeadline() public {
         uint256 freeBefore = token.availableOf(aliceSat);
         bytes32 id = _request(10, 150);
         vm.warp(block.timestamp + VALIDITY_WINDOW);
@@ -454,7 +454,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
     }
 
-    function test_discardExpiredValidations_RevertWhen_TheRequestIsBeforeItsDeadline() public {
+    function test_cancelTickets_RevertWhen_TheRequestIsBeforeItsDeadline() public {
         bytes32 id = _request(10, 150);
         uint64 deadline = uint64(block.timestamp + VALIDITY_WINDOW);
 
@@ -544,28 +544,29 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(_ledger().positionOf(address(bobIdentity)), 80);
     }
 
-    /// @notice Nothing was sent for a request still waiting, so a leg for it is one the satellite executed
-    ///         under a body this chain never issued: it waits under the id, no chain blocked, the request
-    ///         untouched. Issued, `applyWaitingReceipt` settles it; see `ReorgRecovery.t.sol`.
-    function test_handleSettlement_ParksTheLeg_WhenTheValidationIsStillWaiting() public {
+    /// @notice Nothing was sent for a request still waiting, so a receipt for it answers no ticket home sent: its
+    ///         amount is put on hold under the sender with no destination, no chain is blocked, and the request can
+    ///         no longer be answered.
+    function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketStillWaitsForApproval() public {
         bytes32 id = _request(10, 150);
 
         MessageTypesLib.ReceiptMessage memory receipt = _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"));
         uint256 index = _liteSettles(gateway, token, receipt);
         vm.expectEmit(address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, address(gateway), receipt);
+        emit EventsLib.ReceiptWithoutTicket(id, polygon, aliceSat, bobSat, 100);
         gateway.relay(index);
 
         assertFalse(token.paused(), "the token keeps running");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing blocks the chain by itself");
-        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
-        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
+        ITickets.Ticket memory held = boundCompliance.ticketOf(id);
+        assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold));
+        assertFalse(held.written, "no ticket home sent answers it");
+        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied to the receiver");
     }
 
-    /// @notice A refusal is final: a leg for the refused movement is parked for the operator rather than
-    ///         reconciled late, since it was never sent, and stays parked once refused.
-    function test_handleSettlement_ParksTheLeg_WhenTheValidationWasRefused() public {
+    /// @notice A refusal is final: a receipt for the refused move, which was never sent, is put on hold with no
+    ///         destination rather than applied as that move.
+    function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketWasRefused() public {
         bytes32 id = _request(10, 150);
         vm.prank(backend);
         module.refuseValidation(address(boundCompliance), id);
@@ -574,13 +575,13 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         assertFalse(token.paused());
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
-        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "left for the operator");
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
-        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.OnHold), "on hold, no destination");
+        assertEq(token.onHoldOf(id), 100);
+        assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied to the receiver");
     }
 
     /// @notice A relocation between one identity's own wallets changes no position: the module approves it inside
-    ///         the request, and the leg goes out at once.
+    ///         the request, which opens it; anyone then makes its first send.
     function test_requestTransferValidation_Success_WhenARelocationIsApprovedAtOnce() public {
         bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOtherOnPolygon"));
 
@@ -588,45 +589,59 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         bytes32 id = boundCompliance.askToMove(aliceSat, aliceOther, 10, 150, "", _salt());
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
-        assertEq(gateway.queueLength(), 1, "sent in the request's own transaction");
+        assertEq(gateway.queueLength(), 0, "opened, not sent");
+        boundCompliance.sendTicket(id, polygon, aliceOther, "");
+        assertEq(gateway.queueLength(), 1, "sent by anyone");
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 0, "nobody was asked");
     }
 
-    /// @notice A new approver list stops the requests already waiting: what was approved so far was approved
-    ///         under the old list. They are discarded at their deadline.
-    function test_approveValidation_RevertWhen_TheApproversChanged() public {
+    /// @notice The approver list does not change while a request waits: what was approved so far was approved under
+    ///         the list in place, and a module setting changes only while nothing is reserved.
+    function test_setApprovers_reverts_when_aRequestIsWaiting() public {
         _setApprovers(backend, riskDesk);
         bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
 
-        _setApprovers(riskDesk, address(0));
-
-        vm.prank(riskDesk);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApproversChanged.selector, id));
-        module.approveValidation(address(boundCompliance), id, 150);
+        address[] memory approvers = new address[](1);
+        approvers[0] = riskDesk;
+        vm.prank(deployer);
+        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        boundCompliance.callModuleFunction(
+            abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers)), address(module)
+        );
 
         vm.warp(block.timestamp + VALIDITY_WINDOW);
         boundCompliance.cancelTickets(_ids(id));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
-    /// @notice Unbinding the module turns new requests back into immediate issuances, but a request already
-    ///         waiting keeps waiting until its deadline, then is discarded.
-    function test_removeModule_Success_WhenARequestIsAlreadyWaiting() public {
+    /// @notice The module is not removed while a request waits for it: the rules a ticket was asked under stay
+    ///         bound until it ends. Once the request is cancelled past its deadline, with asks paused, it goes.
+    function test_removeModule_reverts_when_aRequestIsWaiting() public {
         bytes32 waiting = _request(10, 150);
-        vm.prank(deployer);
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
+        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.removeModule(address(module));
+        vm.stopPrank();
 
         assertEq(uint8(boundCompliance.statusOf(waiting)), uint8(ITickets.TicketStatus.WaitingForApproval));
         vm.warp(block.timestamp + VALIDITY_WINDOW);
         boundCompliance.cancelTickets(_ids(waiting));
         assertEq(uint8(boundCompliance.statusOf(waiting)), uint8(ITickets.TicketStatus.Cancelled));
+
+        vm.prank(deployer);
+        boundCompliance.removeModule(address(module));
+        assertFalse(boundCompliance.isModuleBound(address(module)));
     }
 
     /// @notice Unbound, requests are issued at once again: the module is the whole switch.
     function test_requestTransferValidation_Success_WhenTheModuleIsRemoved() public {
-        vm.prank(deployer);
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.removeModule(address(module));
+        boundCompliance.setAsksPaused(false);
+        vm.stopPrank();
 
         bytes32 id = _request(10, 150);
 
@@ -724,8 +739,10 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         address[] memory approvers = new address[](1);
         approvers[0] = backend;
-        vm.prank(deployer);
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.removeModule(address(module));
+        vm.stopPrank();
         _bind(module, approvers);
 
         vm.prank(backend);
@@ -796,15 +813,15 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         _finalize(narrowed);
         assertEq(boundCompliance.ticketOf(narrowed).amountMax, 60, "issued at the approved maximum");
 
-        // Past the reconciliation window the keeper discards the issued one, and anyone the unanswered one.
-        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(_ids(narrowed));
+        // The sent one is cancelled once an ask for its receipt went unanswered; the unanswered request by anyone.
+        _cancelUnanswered(narrowed, bobSat, "");
         vm.prank(makeAddr("anyone"));
         boundCompliance.cancelTickets(_ids(unanswered));
         assertEq(token.reservedOf(aliceSat), 0, "every reservation came back");
 
         _recallAndBurnTheWholeSupply();
+        // The token leaves its compliance only once home stopped waiting for every ticket it wrote.
+        vm.warp(boundCompliance.ticketOf(narrowed).stopWaitingAt);
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
         vm.prank(deployer);
         token.setCompliance(address(fresh));
@@ -812,16 +829,14 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(address(token.compliance()), address(fresh));
     }
 
-    /// @dev Recalls alice's satellite tokens and burns them, since the token leaves its compliance only at zero
-    ///  supply.
+    /// @dev Brings alice's satellite tokens home and burns them, since the token leaves its compliance only at zero
+    ///  supply. The ledger's own transition stands in for a bring home that burned the whole position: what these
+    ///  tests are about is the binding, and a bring home is bounded by what the waiting requests reserve.
     function _recallAndBurnTheWholeSupply() private {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
-        gateway.relay(
-            _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, BALANCE)))
-        );
-        vm.prank(agent);
+        vm.startPrank(agent);
+        TokenLedgerHarness(address(token)).ledgerBringHome(aliceSat, alice, BALANCE);
         token.burn(alice, BALANCE);
+        vm.stopPrank();
         assertEq(token.totalSupply(), 0, "no supply left");
     }
 
@@ -839,8 +854,12 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function _bind(AsyncApprovalModule approvalModule, address[] memory approvers) private {
         bytes[] memory settings = new bytes[](1);
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
-        vm.prank(deployer);
+        // An approval module is bound only while asks are paused, so no ask is taken under the rules of neither.
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.addAndSetModule(address(approvalModule), settings);
+        boundCompliance.setAsksPaused(false);
+        vm.stopPrank();
     }
 
     /// @dev Sets one or two approvers; a zero second one means one.
@@ -863,8 +882,10 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.approveValidation(address(boundCompliance), ticketId, amountMax);
     }
 
+    /// @dev The module's answer opens the ticket and sends nothing: anyone makes the first send.
     function _finalize(bytes32 ticketId) private {
         module.finalize(address(boundCompliance), ticketId);
+        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
     }
 
     function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {

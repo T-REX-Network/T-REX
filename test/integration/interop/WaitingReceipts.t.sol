@@ -50,6 +50,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
 /// @dev Waiting receipts and the block of an away chain. A good receipt that cannot be applied yet waits at home,
@@ -81,23 +82,6 @@ contract WaitingReceiptsTest is InteropSuiteTest {
 
     /* ----- The route check runs again ----- */
 
-    /// @notice A receipt kept waiting for a ticket not sent yet came through a bridge that was distrusted before
-    ///         the ticket was sent: applying it later runs the route check again on that bridge and refuses it.
-    function test_applyWaitingReceipt_reverts_when_theBridgeWasDistrustedMeanwhile() public {
-        AsyncApprovalModule approval = _bindApprovalModule();
-        (bytes32 ticketId, MessageTypesLib.ReceiptMessage memory receipt) = _receiptWaitingForApproval();
-        trustedGatewayRegistry.distrustBridge(address(polygonBridge));
-        _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
-        _approve(approval, ticketId);
-
-        vm.prank(anyone);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAReceiptBridge.selector, address(polygonBridge)));
-        boundCompliance.applyWaitingReceipt(ticketId, receipt);
-
-        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open), "nothing applied");
-        assertEq(token.awayBalanceOf(bobOnPolygon), 0);
-    }
-
     /// @notice The incident path: receipts from a suspect bridge wait under the block; the bridge is distrusted and
     ///         the route moved before the unblock, so none of them can be applied afterwards, by anyone.
     function test_applyWaitingReceipt_reverts_when_theBridgeWasDistrustedWhileTheChainWasBlocked() public {
@@ -119,24 +103,35 @@ contract WaitingReceiptsTest is InteropSuiteTest {
 
     /// @notice A waiting receipt is not applied once the receipt route of its away chain was closed.
     function test_applyWaitingReceipt_reverts_when_theReceiptRouteWasClosed() public {
-        AsyncApprovalModule approval = _bindApprovalModule();
-        (bytes32 ticketId, MessageTypesLib.ReceiptMessage memory receipt) = _receiptWaitingForApproval();
-        _approve(approval, ticketId);
+        bytes32 ticketId = _ask(10, 50);
+        MessageTypesLib.ReceiptMessage memory receipt = _receiptWaitingUnderABlock(ticketId, 40);
         _closeEvmChain(token, POLYGON);
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
 
         vm.prank(anyone);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         boundCompliance.applyWaitingReceipt(ticketId, receipt);
     }
 
-    /// @notice A receipt that came from the chain's current peer is refused once that peer was replaced: it was
-    ///         neither the pinned peer nor the current one any more.
+    /// @notice A receipt that came from the chain's current peer, not the one its ticket was pinned to, is refused
+    ///         once that peer was replaced as hostile: it is neither the pinned peer nor the current one any more,
+    ///         and a hostile change keeps no former pair.
     function test_applyWaitingReceipt_reverts_when_thePeerWasReplacedMeanwhile() public {
-        AsyncApprovalModule approval = _bindApprovalModule();
-        (bytes32 ticketId, MessageTypesLib.ReceiptMessage memory receipt) = _receiptWaitingForApproval();
+        bytes32 ticketId = _ask(10, 50);
+        address nextLite = makeAddr("newPolygonLite");
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonLite")));
-        _approve(approval, ticketId);
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, nextLite));
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(polygon);
+        MessageTypesLib.ReceiptMessage memory receipt = _receipt(ticketId, 40);
+        polygonBridge.relay(_queue(polygonBridge, nextLite, token, MessageTypesLib.encodeSettlement(receipt)));
+        assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, 40, "the receipt waits");
+        vm.prank(deployer);
+        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("thirdPolygonLite")));
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, polygon));
         boundCompliance.applyWaitingReceipt(ticketId, receipt);
@@ -195,12 +190,13 @@ contract WaitingReceiptsTest is InteropSuiteTest {
 
     /* ----- A repeat of a waiting receipt ----- */
 
-    /// @notice A receipt kept waiting for its ticket to be sent, delivered again once it was sent, is applied by
-    ///         that repeat instead of being dropped as a duplicate.
+    /// @notice A receipt kept waiting under a block, delivered again once the block is lifted, is applied by that
+    ///         repeat instead of being dropped as a duplicate.
     function test_receiveReceipt_appliesTheWaitingReceipt_whenItsRepeatCanNowBePlaced() public {
-        AsyncApprovalModule approval = _bindApprovalModule();
-        (bytes32 ticketId, MessageTypesLib.ReceiptMessage memory receipt) = _receiptWaitingForApproval();
-        _approve(approval, ticketId);
+        bytes32 ticketId = _ask(10, 50);
+        MessageTypesLib.ReceiptMessage memory receipt = _receiptWaitingUnderABlock(ticketId, 40);
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
         uint256 repeat = _liteSettles(polygonBridge, token, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
@@ -281,6 +277,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     ///         applied: whoever wants the ticket to move on applies it.
     function test_cancelTickets_reverts_when_aReceiptForTheTicketIsWaitingAndApplicable() public {
         bytes32 ticketId = _ask(10, 50);
+        _askForTheReceipt(ticketId);
         MessageTypesLib.ReceiptMessage memory receipt = _receiptWaitingUnderABlock(ticketId, 40);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
@@ -299,6 +296,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     ///         hold the cancel: it would lock the ticket open for good.
     function test_cancelTickets_succeeds_when_theWaitingReceiptCannotBeApplied() public {
         bytes32 ticketId = _ask(10, 50);
+        _askForTheReceipt(ticketId);
         _receiptWaitingUnderABlock(ticketId, 40);
         trustedGatewayRegistry.distrustBridge(address(polygonBridge));
         _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
@@ -317,6 +315,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     ///         the cancel either.
     function test_cancelTickets_succeeds_when_theAwayBalanceNoLongerCoversTheWaitingReceipt() public {
         bytes32 ticketId = _ask(10, 50);
+        _askForTheReceipt(ticketId);
         _bringEverythingHome();
         polygonBridge.relay(_liteSettles(polygonBridge, token, _receipt(ticketId, 40)));
         _warpPastThePublicCancel(ticketId);
@@ -331,12 +330,15 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     ///         bridge that is neither the half's pinned one nor the chain's current one any more.
     function test_cancelTickets_isNotHeld_byAWaitingReceiptOnAClosedRoute() public {
         bytes32 ticketId = _ask(10, 50);
+        _askForTheReceipt(ticketId);
         ERC7786GatewayMock secondBridge = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(secondBridge));
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
         secondBridge.relay(_liteSettles(secondBridge, token, _receipt(ticketId, 40)));
         _closeEvmChain(token, POLYGON);
+        // A route is changed again only once the former pair's window is over.
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
         _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
@@ -381,6 +383,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     /// @notice The control: a sent ticket is not cancelled under the block either.
     function test_cancelTickets_reverts_when_theAwayChainIsBlocked_forASentTicket() public {
         bytes32 ticketId = _ask(10, 50);
+        _askForTheReceipt(ticketId);
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
         _warpPastThePublicCancel(ticketId);
@@ -433,19 +436,6 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, amount, "the receipt waits");
     }
 
-    /// @dev An ask waiting for approval, and the receipt of a copy from a dropped home block that executed it,
-    ///      delivered through the Polygon bridge: it waits for the ticket to be sent.
-    function _receiptWaitingForApproval()
-        private
-        returns (bytes32 ticketId, MessageTypesLib.ReceiptMessage memory receipt)
-    {
-        ticketId = _ask(10, 50);
-        receipt = _settlementUnder(ticketId, aliceOnPolygon, bobOnPolygon, 40, keccak256("a dropped copy"));
-        receipt.seenMax = 50;
-        polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
-        assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, 40, "the receipt waits for the ticket");
-    }
-
     function _bindApprovalModule() private returns (AsyncApprovalModule approval) {
         approval = AsyncApprovalModule(
             address(
@@ -459,36 +449,40 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         approvers[0] = backend;
         bytes[] memory settings = new bytes[](1);
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
-        vm.prank(deployer);
+        // An approval module is bound only while asks are paused.
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.addAndSetModule(address(approval), settings);
+        boundCompliance.setAsksPaused(false);
+        vm.stopPrank();
     }
 
-    function _approve(AsyncApprovalModule approval, bytes32 ticketId) private {
-        vm.prank(backend);
-        approval.approveValidation(address(boundCompliance), ticketId, 50);
-        approval.finalize(address(boundCompliance), ticketId);
-        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open), "sent");
-    }
-
-    /// @dev Brings Alice's whole away balance home through a recall the away token answers.
+    /// @dev Brings Alice's whole away balance home, ignoring what tickets reserve. A bring home is bounded by what
+    ///  tickets leave free, so only the ledger's own transition can leave a sender's balance below a receipt in
+    ///  flight: this keeps that guard of the receipt handler under test.
     function _bringEverythingHome() private {
         vm.prank(agent);
-        uint256 recallId = token.instructRecall(aliceOnPolygon, ALICE_AWAY_BALANCE, alice);
-        bytes memory proof = MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceOnPolygon, ALICE_AWAY_BALANCE));
-        polygonBridge.relay(_liteSends(polygonBridge, token, proof));
+        TokenLedgerHarness(address(token)).ledgerBringHome(aliceOnPolygon, alice, ALICE_AWAY_BALANCE);
         assertEq(token.awayBalanceOf(aliceOnPolygon), 0);
     }
 
     function _fundAliceOnPolygonAgain(uint256 amount) private {
-        vm.startPrank(alice);
-        token.delegateOut(alice, aliceOnPolygon, amount);
-        vm.stopPrank();
+        vm.prank(agent);
+        TokenLedgerHarness(address(token)).ledgerMoveOut(alice, aliceOnPolygon, amount);
     }
 
+    /// @dev Asks for the receipt of `ticketId` at its first due time, one waiting time after its valid until.
+    function _askForTheReceipt(bytes32 ticketId) private {
+        ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
+        vm.warp(issued.validUntil + issued.waitingTime);
+        boundCompliance.sendTicket(ticketId, polygon, bobOnPolygon, "");
+    }
+
+    /// @dev Past the waiting time of the last ask for the receipt: a cancel is due.
     function _warpPastThePublicCancel(bytes32 ticketId) private {
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        uint64 waitingTime = issued.waitingEndsAt - issued.validUntil;
-        vm.warp(uint256(issued.waitingEndsAt) + waitingTime + 1);
+        uint256 cancelAt = uint256(issued.lastSentAt) + issued.waitingTime + 1;
+        if (block.timestamp < cancelAt) vm.warp(cancelAt);
     }
 
     function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {

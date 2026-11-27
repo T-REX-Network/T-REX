@@ -45,27 +45,28 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
+import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { SatelliteLiteMock } from "test/integration/mocks/SatelliteLiteMock.sol";
-import { Utils } from "test/unit/helpers/Utils.sol";
 
 /// @title DelegationRecallInvariants
-/// @notice Stateful check of delegation-out and recall through the public entry points, with a mock Lite that
-///  follows `docs/satellite-lite.md` in the loop.
+/// @notice Stateful check of a home wallet's move out and of the bring home, through the public entry points, with a
+///  mock away token that follows `docs/satellite-lite.md` in the loop.
 ///
-/// Three identities, each with a native wallet and one linked wallet on one satellite chain. The fuzzer mints,
-/// transfers natively, delegates, instructs recalls, resends either instruction, has the Lite resend a stored proof,
-/// and relays or drops queued messages in any order, so instructions, resends, proofs and duplicates interleave.
+/// Three identities, each with a home wallet and one linked wallet on one away chain. The fuzzer mints, transfers at
+/// home, moves out of a home wallet, brings home, sends a second half again, has the away token send a stored
+/// receipt again, and relays or drops queued messages in any order, so halves, receipts and duplicates interleave.
 ///
-///   DR-1  positionOf(identity) == native balance + bridged balance of its wallets
+///   DR-1  positionOf(identity) == home balance + away balance of its wallet + its money on hold
 ///   DR-2  sum of positions == totalSupply()
-///   DR-3  totalAwayBalance == Lite balances + mints instructed and not yet minted + burns done on the Lite whose
-///         proof has not settled yet (the Lite no longer holds them, the token still counts them)
-///   DR-4  the Lite minted exactly the delegations it received, once each
-///   DR-5  every settled recall debited exactly what the Lite burned for it
-///   DR-6  an honest Lite never pauses its chain or halts the token
+///   DR-3  totalAwayBalance == away token balances + move outs not minted yet + burns done on the away token whose
+///         receipt home has not applied yet (the away token no longer holds them, home still counts them)
+///   DR-4  the away token minted exactly the move outs it answered, once each
+///   DR-5  what is away is what moved out less what every finished bring home burned
+///   DR-6  an honest away token never blocks its chain or stops the token
 contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -79,24 +80,29 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     SatelliteLiteMock internal lite;
     IComplianceLedger internal ledger;
 
-    uint256[] internal delegationAmount;
-    uint256[] internal delegationActor;
-    uint256[] internal recallActor;
-    uint256 internal settledDebits;
+    /// @dev Every move out asked, with its actor and amount, and every bring home written, with its actor. Entry 0 of
+    ///  each is a placeholder written in `setUp`, so a state snapshot taken there holds every array slot and a revert
+    ///  to it restores them all; the entries start at 1.
+    bytes32[] internal moveOutIds;
+    uint256[] internal moveOutActor;
+    uint256[] internal moveOutAmount;
+    bytes32[] internal bringHomeIds;
+    uint256[] internal bringHomeActor;
 
-    uint256 public callsDelegate;
-    uint256 public callsInstruct;
-    uint256 public callsResend;
+    uint256 public callsMoveOut;
+    uint256 public callsBringHome;
+    uint256 public callsSendAgain;
     uint256 public callsRelay;
 
     function setUp() public virtual override {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
         gateway = _newReceiptBridge(POLYGON);
-        _openEvmChain(token, POLYGON, address(gateway));
         lite = new SatelliteLiteMock(POLYGON, address(token), gateway);
-        vm.prank(deployer);
+        vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(lite)));
+        vm.stopPrank();
+        _openEvmChain(token, POLYGON, address(gateway));
 
         actors = [alice, bob, charlie];
         identities = [aliceIdentity, bobIdentity, charlieIdentity];
@@ -105,9 +111,14 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
                 _linkSatelliteWallet(identities[i], POLYGON, makeAccount(string.concat("sat", vm.toString(i))))
             );
         }
-        delegationAmount.push(0);
-        delegationActor.push(0);
-        recallActor.push(0);
+
+        // The salt counter is written here too, for the same reason: a reorg replays the asks with the salts they had.
+        _salt();
+        moveOutIds.push(bytes32(0));
+        moveOutActor.push(0);
+        moveOutAmount.push(0);
+        bringHomeIds.push(bytes32(0));
+        bringHomeActor.push(0);
 
         vm.startPrank(agent);
         for (uint256 i = 0; i < ACTORS; i++) {
@@ -125,10 +136,10 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         selectors = new bytes4[](8);
         selectors[0] = this.mint.selector;
         selectors[1] = this.transfer.selector;
-        selectors[2] = this.delegate.selector;
-        selectors[3] = this.instructRecall.selector;
-        selectors[4] = this.resend.selector;
-        selectors[5] = this.liteResendsProof.selector;
+        selectors[2] = this.moveOut.selector;
+        selectors[3] = this.bringHome.selector;
+        selectors[4] = this.sendSecondHalfAgain.selector;
+        selectors[5] = this.liteResendsReceipt.selector;
         selectors[6] = this.relay.selector;
         selectors[7] = this.drop.selector;
     }
@@ -147,49 +158,58 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         try token.transfer(actors[toSeed % ACTORS], amount) { } catch { }
     }
 
-    function delegate(uint256 actorSeed, uint256 amount) public virtual {
-        callsDelegate++;
+    /// @notice A home wallet moves out to its identity's away wallet: burned onto hold at once, its move out sent.
+    function moveOut(uint256 actorSeed, uint256 amount) public virtual {
+        callsMoveOut++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
+        bytes memory homeWallet = InteroperableAddress.formatEvmV1(block.chainid, actors[actor]);
         vm.prank(actors[actor]);
-        try token.delegateOut(actors[actor], satellites[actor], amount) {
-            delegationAmount.push(amount);
-            delegationActor.push(actor);
+        try boundCompliance.askToMove(homeWallet, satellites[actor], amount, amount, "", _salt()) returns (
+            bytes32 ticketId
+        ) {
+            moveOutIds.push(ticketId);
+            moveOutActor.push(actor);
+            moveOutAmount.push(amount);
         } catch { }
     }
 
-    function instructRecall(uint256 actorSeed, uint256 amount) public virtual {
-        callsInstruct++;
+    /// @notice An agent brings an away wallet's tokens home to its identity's home wallet.
+    function bringHome(uint256 actorSeed, uint256 amount) public virtual {
+        callsBringHome++;
         uint256 actor = actorSeed % ACTORS;
         amount = bound(amount, 1, MAX_AMOUNT);
         vm.prank(agent);
-        try token.instructRecall(satellites[actor], amount, actors[actor]) {
-            recallActor.push(actor);
+        try boundCompliance.bringHome(satellites[actor], amount, actors[actor], _salt()) returns (bytes32 ticketId) {
+            bringHomeIds.push(ticketId);
+            bringHomeActor.push(actor);
         } catch { }
     }
 
-    function resend(uint256 idSeed, bool recall) public virtual {
-        callsResend++;
-        if (recall) {
-            if (recallActor.length == 1) return;
-            uint256 id = 1 + idSeed % (recallActor.length - 1);
-            bytes memory wallet = abi.encode(satellites[recallActor[id]]);
-            vm.prank(agent);
-            try token.resend(1, id, wallet) { } catch { }
+    /// @notice Anyone sends a second half again, or a new one when the last was answered expired.
+    function sendSecondHalfAgain(uint256 idSeed, bool aBringHome) public virtual {
+        callsSendAgain++;
+        uint256 actor;
+        bytes32 ticketId;
+        if (aBringHome) {
+            if (bringHomeIds.length == 1) return;
+            uint256 index = 1 + idSeed % (bringHomeIds.length - 1);
+            ticketId = bringHomeIds[index];
+            actor = bringHomeActor[index];
         } else {
-            if (delegationAmount.length == 1) return;
-            uint256 id = 1 + idSeed % (delegationAmount.length - 1);
-            uint256 actor = delegationActor[id];
-            bytes memory fields =
-                abi.encode(satellites[actor], delegationAmount[id], actors[actor], token.peerFor(polygon));
-            vm.prank(agent);
-            try token.resend(0, id, fields) { } catch { }
+            if (moveOutIds.length == 1) return;
+            uint256 index = 1 + idSeed % (moveOutIds.length - 1);
+            ticketId = moveOutIds[index];
+            actor = moveOutActor[index];
         }
+        try boundCompliance.sendSecondHalf(ticketId, satellites[actor]) { } catch { }
     }
 
-    function liteResendsProof(uint256 idSeed) external virtual {
-        if (recallActor.length == 1) return;
-        try lite.resendProof(1 + idSeed % (recallActor.length - 1)) { } catch { }
+    /// @notice The away token sends a stored receipt again, byte for byte.
+    function liteResendsReceipt(uint256 idSeed, uint8 halfSeed) external virtual {
+        (bool found, bytes32 ticketId) = _anyTicket(idSeed);
+        if (!found) return;
+        _resendReceipt(ticketId, halfSeed);
     }
 
     function relay(uint256 indexSeed) external virtual {
@@ -215,7 +235,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 i = 0; i < ACTORS; i++) {
             assertEq(
                 ledger.positionOf(address(identities[i])),
-                token.balanceOf(actors[i]) + token.awayBalanceOf(satellites[i]),
+                token.balanceOf(actors[i]) + token.awayBalanceOf(satellites[i]) + _onHoldFor(i),
                 "DR-1"
             );
         }
@@ -229,56 +249,106 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         assertEq(sum, token.totalSupply(), "DR-2");
     }
 
-    function invariant_DR3_bridgedMatchesTheLitePlusWhatIsInFlight() public view {
+    function invariant_DR3_awayMatchesTheAwayTokenPlusWhatIsInFlight() public view {
         uint256 liteBalances;
+        uint256 inFlight;
         for (uint256 i = 0; i < ACTORS; i++) {
             liteBalances += lite.balanceOf(satellites[i]);
+            inFlight += _inFlightFor(i);
         }
-        uint256 pendingMints;
-        for (uint256 id = 1; id < delegationAmount.length; id++) {
-            if (lite.delegationSeen(id) == 0) pendingMints += delegationAmount[id];
-        }
-        uint256 pendingBurns;
-        for (uint256 id = 1; id < recallActor.length; id++) {
-            if (_pendingRecall(id).amount != 0) pendingBurns += lite.burnedFor(id);
-        }
-        assertEq(token.totalAwayBalance(), liteBalances + pendingMints + pendingBurns, "DR-3");
-        assertEq(token.totalOnHold(), 0, "DR-3 transit");
+        assertEq(token.totalAwayBalance(), liteBalances + inFlight, "DR-3");
     }
 
-    function invariant_DR4_theLiteMintedEachDelegationOnce() public view {
-        uint256 received;
-        for (uint256 id = 1; id < delegationAmount.length; id++) {
-            if (lite.delegationSeen(id) != 0) received += delegationAmount[id];
+    function invariant_DR4_theAwayTokenMintedEachMoveOutOnce() public view {
+        uint256 minted;
+        for (uint256 i = 1; i < moveOutIds.length; i++) {
+            if (_mintedOnTheAwayToken(moveOutIds[i])) minted += moveOutAmount[i];
         }
-        assertEq(lite.mints(), received, "DR-4");
+        assertEq(lite.mints(), minted, "DR-4");
     }
 
-    function invariant_DR5_settledRecallsDebitedWhatWasBurned() public view {
-        uint256 settledBurns;
-        for (uint256 id = 1; id < recallActor.length; id++) {
-            if (_pendingRecall(id).amount == 0) settledBurns += lite.burnedFor(id);
+    function invariant_DR5_awayIsWhatMovedOutLessWhatCameHome() public view {
+        uint256 movedOut;
+        for (uint256 i = 1; i < moveOutIds.length; i++) {
+            movedOut += moveOutAmount[i];
         }
-        uint256 delegated;
-        for (uint256 id = 1; id < delegationAmount.length; id++) {
-            delegated += delegationAmount[id];
+        uint256 cameHome;
+        for (uint256 i = 1; i < bringHomeIds.length; i++) {
+            ITickets.Ticket memory ticket = boundCompliance.ticketOf(bringHomeIds[i]);
+            if (ticket.status == ITickets.TicketStatus.Done) cameHome += ticket.moved;
         }
-        assertEq(token.totalAwayBalance(), delegated - settledBurns, "DR-5");
+        assertEq(token.totalAwayBalance(), movedOut - cameHome, "DR-5");
     }
 
-    function invariant_DR6_anHonestLiteNeverPausesItsChainOrHaltsTheToken() public view {
+    function invariant_DR6_anHonestAwayTokenNeverBlocksItsChainOrStopsTheToken() public view {
         assertFalse(token.paused(), "DR-6");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "DR-6");
     }
 
     function invariant_callSummary() public view {
-        uint256 settled;
-        for (uint256 id = 1; id < recallActor.length; id++) {
-            if (_pendingRecall(id).amount == 0 && lite.recallSeen(id) != 0) settled++;
+        console.log("move out calls / landed:", callsMoveOut, moveOutIds.length - 1);
+        console.log("bring home calls / landed:", callsBringHome, bringHomeIds.length - 1);
+        console.log("sends again, relays:", callsSendAgain, callsRelay);
+    }
+
+    /* ----- Internal ----- */
+
+    /// @dev Sends the stored receipt of one half of `ticketId` again; a half never answered sends nothing.
+    function _resendReceipt(bytes32 ticketId, uint8 halfSeed) internal virtual {
+        uint8 latestHalf = boundCompliance.ticketOf(ticketId).half;
+        if (latestHalf == 0) return;
+        uint8 half = 1 + halfSeed % latestHalf;
+        try lite.resendReceipt(ticketId, half) { } catch { }
+    }
+
+    /// @dev A move out or a bring home picked by `idSeed`.
+    function _anyTicket(uint256 idSeed) internal view returns (bool found, bytes32 ticketId) {
+        uint256 moveOuts = moveOutIds.length - 1;
+        uint256 count = moveOuts + bringHomeIds.length - 1;
+        if (count == 0) return (false, bytes32(0));
+        uint256 index = idSeed % count;
+        if (index < moveOuts) return (true, moveOutIds[1 + index]);
+        return (true, bringHomeIds[1 + index - moveOuts]);
+    }
+
+    /// @dev Whether the away token minted one of the halves of the move out `ticketId`.
+    function _mintedOnTheAwayToken(bytes32 ticketId) internal view returns (bool) {
+        uint8 latestHalf = boundCompliance.ticketOf(ticketId).half;
+        for (uint8 half = 1; half <= latestHalf; half++) {
+            MessageTypesLib.ReceiptMessage memory receipt = lite.storedReceipt(ticketId, half);
+            bool minted = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed && receipt.amount != 0;
+            if (minted) return true;
         }
-        console.log("delegate calls / landed:", callsDelegate, delegationAmount.length - 1);
-        console.log("recall calls / landed / settled:", callsInstruct, recallActor.length - 1, settled);
-        console.log("resends, relays:", callsResend, callsRelay);
+        return false;
+    }
+
+    /// @dev What the away token burned for the bring home `ticketId`, while home has not applied its receipt yet.
+    function _burnedNotApplied(bytes32 ticketId) internal view returns (uint256 burned) {
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        if (ticket.status == ITickets.TicketStatus.Done) return 0;
+        for (uint8 half = 1; half <= ticket.half; half++) {
+            MessageTypesLib.ReceiptMessage memory receipt = lite.storedReceipt(ticketId, half);
+            if (receipt.answer == MessageTypesLib.ReceiptAnswer.Executed) burned += receipt.amount;
+        }
+    }
+
+    /// @dev What actor `actor` has in flight: move outs not minted on the away token yet, and burns done on the away
+    ///  token whose receipt home has not applied.
+    function _inFlightFor(uint256 actor) internal view returns (uint256 held) {
+        for (uint256 i = 1; i < moveOutIds.length; i++) {
+            bool notMinted = !_mintedOnTheAwayToken(moveOutIds[i]);
+            if (moveOutActor[i] == actor && notMinted) held += moveOutAmount[i];
+        }
+        for (uint256 i = 1; i < bringHomeIds.length; i++) {
+            if (bringHomeActor[i] == actor) held += _burnedNotApplied(bringHomeIds[i]);
+        }
+    }
+
+    /// @dev The money home holds between two halves for actor `actor`'s move outs.
+    function _onHoldFor(uint256 actor) internal view returns (uint256 held) {
+        for (uint256 i = 1; i < moveOutIds.length; i++) {
+            if (moveOutActor[i] == actor) held += token.onHoldOf(moveOutIds[i]);
+        }
     }
 
 }

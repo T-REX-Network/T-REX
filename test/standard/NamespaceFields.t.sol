@@ -60,6 +60,7 @@ import { ModuleSetLib } from "contracts/compliance/modular/ModuleSetLib.sol";
 import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { AbstractModuleUpgradeable } from "contracts/compliance/modular/modules/AbstractModuleUpgradeable.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
+import { AwayChainVolumeModule } from "contracts/compliance/modular/modules/AwayChainVolumeModule.sol";
 import { IModule } from "contracts/compliance/modular/modules/IModule.sol";
 import { MaxBalancePerIdentityModule } from "contracts/compliance/modular/modules/MaxBalancePerIdentityModule.sol";
 import { SpenderWhitelistModule } from "contracts/compliance/modular/modules/SpenderWhitelistModule.sol";
@@ -224,6 +225,13 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.ticketRoutes[KEY] = address(0x5);
         messagingStorage.awayReceiptBridges[KEY].chainSelector = 0x6;
         messagingStorage.awayReceiptBridges[KEY].bridge = hex"07";
+        TREXMessagingLib.FormerRoute storage formerRoute = messagingStorage.formerReceiptRoutes[KEY];
+        formerRoute.bridge = address(0x8);
+        formerRoute.acceptedUntil = 0x9;
+        formerRoute.peer = hex"0a";
+        formerRoute.awayReceiptBridge.chainSelector = 0xb;
+        formerRoute.awayReceiptBridge.bridge = hex"0c";
+        messagingStorage.hostileChangeEndsAt[KEY] = 0xd;
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
         assertEq(_word(_entry(_field(base, 1), KEY)), 0x2, "receiptRoutes");
@@ -239,6 +247,13 @@ contract NamespaceFieldsTest is Test {
         bytes32 awaySide = _entry(_field(base, 7), KEY);
         assertEq(_word(_field(awaySide, 0)), 0x6, "awayReceiptBridges.chainSelector");
         assertEq(_slot(_field(awaySide, 1)), _shortBytes(0x07), "awayReceiptBridges.bridge");
+        bytes32 former = _entry(_field(base, 8), KEY);
+        // bridge fills bytes 0 to 19, acceptedUntil bytes 20 to 27.
+        assertEq(_word(_field(former, 0)), 0x8 | (0x9 << 160), "formerReceiptRoutes.bridge and acceptedUntil");
+        assertEq(_slot(_field(former, 1)), _shortBytes(0x0a), "formerReceiptRoutes.peer");
+        assertEq(_word(_field(former, 2)), 0xb, "formerReceiptRoutes.awayReceiptBridge.chainSelector");
+        assertEq(_slot(_field(former, 3)), _shortBytes(0x0c), "formerReceiptRoutes.awayReceiptBridge.bridge");
+        assertEq(_word(_entry(_field(base, 9), KEY)), 0xd, "hostileChangeEndsAt");
     }
 
     function test_TREXAccessManager() public {
@@ -315,65 +330,124 @@ contract NamespaceFieldsTest is Test {
             validationStorage.slot := base
         }
 
-        validationStorage.defaultValidityWindow = 11;
+        validationStorage.validityWindows = ITickets.ValidityWindows({ onTicketRoute: 10, onReceiptRoute: 11 });
         validationStorage.waitingTimes[KEY] = 12;
-        ITickets.Ticket storage validation = validationStorage.validations[bytes32(NUMBER)];
-        validation.askBlockHash = bytes32(uint256(21));
-        validation.amountMin = 22;
-        validation.amountMax = 23;
-        validation.validUntil = 24;
-        validation.waitingEndsAt = 25;
-        validation.fromChainKey = bytes32(uint256(26));
-        validation.toChainKey = bytes32(uint256(27));
-        validation.fromKey = bytes32(uint256(28));
-        validation.fromWallet = hex"01";
-        validation.toKey = bytes32(uint256(29));
-        validation.fromIdentity = ALICE;
-        validation.toIdentity = BOB;
-        validation.relocation = true;
-        validation.status = ITickets.TicketStatus.OnHold;
-        validation.moved = 30;
-        validation.spender = hex"03";
-        validation.salt = bytes32(uint256(33));
-        validation.requestedMax = 34;
-        validationStorage.awaitedTerms[bytes32(NUMBER)] = TicketLib.AwaitedTerms({ to: hex"03", spender: hex"04" });
+        _writeTicket(validationStorage.validations[bytes32(NUMBER)]);
         ITickets.WaitingReceipt storage waiting = validationStorage.waitingReceipts[KEY];
         waiting.bodyHash = bytes32(uint256(31));
         waiting.chainKey = bytes32(uint256(32));
         waiting.deliveredBy = ALICE;
         waiting.peerKey = bytes32(uint256(39));
         waiting.amount = 40;
+        waiting.arrivedAt = 41;
         validationStorage.receiptHashes[KEY] = bytes32(uint256(35));
         validationStorage.ticketLimits[KEY] = ITickets.TicketLimits({ perTicketCap: 36, perWindowCap: 37 });
         validationStorage.latestValidUntilSent[KEY] = 38;
         validationStorage.blockedAwayChains[KEY] = true;
+        validationStorage.measuredTimes[KEY] = ITickets.MeasuredTimes({
+            shortestValidityWindow: 1,
+            shortestWaitingTime: 2,
+            clockLead: 3,
+            clockLag: 4,
+            fullFinalityDelivery: 5,
+            reorgSlotShift: 6
+        });
+        validationStorage.validityWindowFloors = ITickets.ValidityWindows({ onTicketRoute: 42, onReceiptRoute: 43 });
+        validationStorage.latestStopWaitingAt = 44;
+        validationStorage.asksPaused = true;
+        validationStorage.askLimits = ITickets.AskLimits({
+            openTicketsPerIdentity: 45, asksPerIdentityPerWindow: 46, askWindow: 47, smallestAmount: 48
+        });
+        validationStorage.askLimitOverrides[ALICE] = 49;
+        validationStorage.identityAsks[ALICE] =
+            TicketLib.IdentityAsks({ openTickets: 50, asksInWindow: 51, windowStartedAt: 52 });
+        validationStorage.openBringHome[KEY] = bytes32(uint256(53));
+        validationStorage.uncountedCredit[KEY] = 54;
+        validationStorage.uncountedCreditFrom[KEY] = bytes32(uint256(55));
+        validationStorage.ticketRouteVolumes[KEY] = TicketLib.TicketRouteVolume({ windowStart: 56, amount: 57 });
 
-        assertEq(_word(_field(base, 0)), 11, "defaultValidityWindow");
+        // Two uint64 fill bytes 0 to 15 of one slot.
+        assertEq(_word(_field(base, 0)), 10 | (11 << 64), "validityWindows");
         assertEq(_word(_entry(_field(base, 1), KEY)), 12, "waitingTimes");
+        _assertTicket(_entry(_field(base, 2), bytes32(NUMBER)));
 
-        bytes32 terms = _entry(_field(base, 3), bytes32(NUMBER));
-        assertEq(_slot(_field(terms, 0)), _shortBytes(0x03), "awaitedTerms.to");
-        assertEq(_slot(_field(terms, 1)), _shortBytes(0x04), "awaitedTerms.spender");
-
-        bytes32 waitingSlot = _entry(_field(base, 4), KEY);
+        bytes32 waitingSlot = _entry(_field(base, 3), KEY);
         assertEq(_word(_field(waitingSlot, 0)), 31, "waitingReceipts.bodyHash");
         assertEq(_word(_field(waitingSlot, 1)), 32, "waitingReceipts.chainKey");
         assertEq(_word(_field(waitingSlot, 2)), uint256(uint160(ALICE)), "waitingReceipts.deliveredBy");
         assertEq(_word(_field(waitingSlot, 3)), 39, "waitingReceipts.peerKey");
         assertEq(_word(_field(waitingSlot, 4)), 40, "waitingReceipts.amount");
-        assertEq(_word(_entry(_field(base, 5), KEY)), 35, "receiptHashes");
-        bytes32 limits = _entry(_field(base, 6), KEY);
+        assertEq(_word(_field(waitingSlot, 5)), 41, "waitingReceipts.arrivedAt");
+        assertEq(_word(_entry(_field(base, 4), KEY)), 35, "receiptHashes");
+        bytes32 limits = _entry(_field(base, 5), KEY);
         assertEq(_word(_field(limits, 0)), 36, "ticketLimits.perTicketCap");
         assertEq(_word(_field(limits, 1)), 37, "ticketLimits.perWindowCap");
-        assertEq(_word(_entry(_field(base, 7), KEY)), 38, "latestValidUntilSent");
-        assertEq(_word(_entry(_field(base, 8), KEY)), 1, "blockedAwayChains");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 38, "latestValidUntilSent");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 1, "blockedAwayChains");
+        bytes32 times = _entry(_field(base, 8), KEY);
+        assertEq(_word(_field(times, 0)), 1 | (2 << 64) | (3 << 128) | (4 << 192), "measuredTimes, first four");
+        assertEq(_word(_field(times, 1)), 5 | (6 << 64), "measuredTimes, last two");
+        assertEq(_word(_field(base, 9)), 42 | (43 << 64), "validityWindowFloors");
+        // latestStopWaitingAt fills bytes 0 to 7, asksPaused byte 8.
+        assertEq(_word(_field(base, 10)), 44 | (1 << 64), "latestStopWaitingAt and asksPaused");
+        assertEq(_word(_field(base, 11)), 45 | (46 << 32) | (47 << 64), "askLimits, the three counts");
+        assertEq(_word(_field(base, 12)), 48, "askLimits.smallestAmount");
+        assertEq(_word(_entry(_field(base, 13), _key(ALICE))), 49, "askLimitOverrides");
+        assertEq(_word(_entry(_field(base, 14), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
+        assertEq(_word(_entry(_field(base, 15), KEY)), 53, "openBringHome");
+        assertEq(_word(_entry(_field(base, 16), KEY)), 54, "uncountedCredit");
+        assertEq(_word(_entry(_field(base, 17), KEY)), 55, "uncountedCreditFrom");
+        bytes32 volume = _entry(_field(base, 18), KEY);
+        assertEq(_word(_field(volume, 0)), 56, "ticketRouteVolumes.windowStart");
+        assertEq(_word(_field(volume, 1)), 57, "ticketRouteVolumes.amount");
+    }
 
-        bytes32 entry = _entry(_field(base, 2), bytes32(NUMBER));
+    function _writeTicket(ITickets.Ticket storage ticket) private {
+        ticket.askBlockHash = bytes32(uint256(21));
+        ticket.amountMin = 22;
+        ticket.amountMax = 23;
+        ticket.validUntil = 24;
+        ticket.waitingTime = 25;
+        ticket.fromChainKey = bytes32(uint256(26));
+        ticket.toChainKey = bytes32(uint256(27));
+        ticket.fromKey = bytes32(uint256(28));
+        ticket.fromWallet = hex"01";
+        ticket.toKey = bytes32(uint256(29));
+        ticket.fromIdentity = ALICE;
+        ticket.toIdentity = BOB;
+        ticket.relocation = true;
+        ticket.status = ITickets.TicketStatus.OnHold;
+        ticket.moved = 30;
+        ticket.spender = hex"03";
+        ticket.salt = bytes32(uint256(33));
+        ticket.requestedMax = 34;
+        ticket.seenValidUntil = 60;
+        ticket.stopWaitingAt = 61;
+        ticket.lastSentAt = 62;
+        ticket.asksForReceipt = 63;
+        ticket.half = 64;
+        ticket.secondHalfToKey = bytes32(uint256(65));
+        ticket.secondHalfValidUntil = 66;
+        ticket.secondHalfSends = 67;
+        ticket.secondHalfOwed = true;
+        ticket.newHalves = 68;
+        ticket.kind = ITickets.TicketKind.BRING_HOME;
+        ticket.homeWallet = BOB;
+        ticket.written = true;
+        ticket.carriedFrom = bytes32(uint256(69));
+        ticket.carriedAmount = 70;
+        ticket.carriedBy = bytes32(uint256(71));
+        ticket.shortCancel = true;
+        ticket.onReceiptRoute = true;
+        ticket.waitedForApproval = true;
+    }
+
+    function _assertTicket(bytes32 entry) private view {
         assertEq(_word(_field(entry, 0)), 21, "validations.askBlockHash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");
-        // validUntil fills bytes 0 to 7, waitingEndsAt bytes 8 to 15.
-        assertEq(_word(_field(entry, 3)), 24 | (25 << 64), "validations.validUntil and waitingEndsAt");
+        // validUntil fills bytes 0 to 7, waitingTime bytes 8 to 15.
+        assertEq(_word(_field(entry, 3)), 24 | (25 << 64), "validations.validUntil and waitingTime");
         assertEq(_word(_field(entry, 4)), 26, "validations.fromChainKey");
         assertEq(_word(_field(entry, 5)), 27, "validations.toChainKey");
         assertEq(_word(_field(entry, 6)), 28, "validations.fromKey");
@@ -390,6 +464,46 @@ contract NamespaceFieldsTest is Test {
         assertEq(_slot(_field(entry, 12)), _shortBytes(0x03), "validations.spender");
         assertEq(_word(_field(entry, 13)), 33, "validations.salt");
         assertEq(_word(_field(entry, 14)), 34, "validations.requestedMax");
+        // seenValidUntil, stopWaitingAt and lastSentAt fill bytes 0 to 23, asksForReceipt byte 24, half byte 25.
+        assertEq(
+            _word(_field(entry, 15)),
+            60 | (61 << 64) | (62 << 128) | (63 << 192) | (64 << 200),
+            "validations: the clock, asksForReceipt and half"
+        );
+        assertEq(_word(_field(entry, 16)), 65, "validations.secondHalfToKey");
+        // secondHalfValidUntil bytes 0 to 7, secondHalfSends 8, secondHalfOwed 9, newHalves 10, kind 11,
+        // homeWallet bytes 12 to 31.
+        assertEq(
+            _word(_field(entry, 17)),
+            66 | (67 << 64) | (1 << 72) | (68 << 80) | (uint256(ITickets.TicketKind.BRING_HOME) << 88)
+                | (uint256(uint160(BOB)) << 96),
+            "validations: the second half, kind and homeWallet"
+        );
+        assertEq(_word(_field(entry, 18)), 1, "validations.written");
+        assertEq(_word(_field(entry, 19)), 69, "validations.carriedFrom");
+        assertEq(_word(_field(entry, 20)), 70, "validations.carriedAmount");
+        assertEq(_word(_field(entry, 21)), 71, "validations.carriedBy");
+        // shortCancel byte 0, onReceiptRoute byte 1, waitedForApproval byte 2.
+        assertEq(_word(_field(entry, 22)), 1 | (1 << 8) | (1 << 16), "validations: shortCancel and the route");
+    }
+
+    function test_AwayChainVolumeModule() public {
+        bytes32 base = Utils.erc7201("erc3643.storage.AwayChainVolumeModule");
+        AwayChainVolumeModule.AwayChainVolumeStorage storage volumeStorage;
+        assembly ("memory-safe") {
+            volumeStorage.slot := base
+        }
+
+        volumeStorage.volumeLimits[ALICE][NUMBER][KEY] =
+            AwayChainVolumeModule.VolumeLimit({ limitPerWindow: 11, window: 12 });
+        volumeStorage.volumes[ALICE][NUMBER][KEY] = AwayChainVolumeModule.Volume({ windowStart: 13, amount: 14 });
+
+        bytes32 limit = _entry(_entry(_entry(_field(base, 0), _key(ALICE)), bytes32(NUMBER)), KEY);
+        assertEq(_word(_field(limit, 0)), 11, "volumeLimits.limitPerWindow");
+        assertEq(_word(_field(limit, 1)), 12, "volumeLimits.window");
+        bytes32 volume = _entry(_entry(_entry(_field(base, 1), _key(ALICE)), bytes32(NUMBER)), KEY);
+        assertEq(_word(_field(volume, 0)), 13, "volumes.windowStart");
+        assertEq(_word(_field(volume, 1)), 14, "volumes.amount");
     }
 
     function test_AbstractModuleUpgradeable() public {

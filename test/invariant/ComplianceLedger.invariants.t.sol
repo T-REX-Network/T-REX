@@ -63,7 +63,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 /// Three identities, each with a native wallet and two wallets on one satellite chain, so every issued
 /// validation has a single leg and nothing waits in transit. The transitions are the ones the ledger is written
 /// from: mint, burn, transfer, forced transfer, validation issuance (to another identity, to the same identity,
-/// to a native wallet), settlement in time or late, the keeper's discard, and a wallet no registry names that an
+/// to a native wallet), settlement in time or late, a cancel after an unanswered ask, and a wallet no registry names that an
 /// agent tries to pay with eligibility checks disabled, links, and moves tokens out of. A cap is bound so
 /// issuance is really narrowed by the ledger.
 ///
@@ -247,22 +247,29 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         try gateway.relay(index) { } catch { }
     }
 
-    /// @dev The keeper discards a validation past its release time, or this handler, holding no role, past the
-    ///      second window; the clock moves forward to get there.
-    function discard(uint256 idSeed, bool asKeeper) external {
+    /// @dev This handler, holding no role, cancels an open ticket the only way a sent one is cancelled: an ask for
+    ///      its receipt at its due time, then one waiting time with no answer; the clock moves forward to get there.
+    function discard(uint256 idSeed) external {
         callsDiscard++;
         if (issued.length == 0) return;
         bytes32 id = issued[idSeed % issued.length];
         ITickets.Ticket memory validation = boundCompliance.ticketOf(id);
         if (validation.status != ITickets.TicketStatus.Open) return;
+        if (validation.asksForReceipt == 3) return;
+        // A receipt for the ticket that waits is applied, not raced: the cancel refuses while it can be.
+        if (boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0)) return;
+        if (boundCompliance.isAwayChainBlocked(polygon)) {
+            vm.prank(agent);
+            boundCompliance.unblockAwayChain(polygon);
+        }
 
-        uint64 openAt = asKeeper
-            ? validation.waitingEndsAt
-            : validation.waitingEndsAt + (validation.waitingEndsAt - validation.validUntil);
-        if (block.timestamp <= openAt) vm.warp(openAt + 1);
+        (, bytes memory to) = _walletsOf(validation);
+        uint64 askDueAt = validation.validUntil + (validation.asksForReceipt + 1) * validation.waitingTime;
+        if (block.timestamp < askDueAt) vm.warp(askDueAt);
+        boundCompliance.sendTicket(id, validation.fromChainKey, to, "");
+        vm.warp(block.timestamp + validation.waitingTime + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
-        if (asKeeper) vm.prank(keeper);
         boundCompliance.cancelTickets(ids);
     }
 
@@ -406,11 +413,16 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
 
     /* ----- Recounts ----- */
 
+    /// @dev What the actor's identity owns: its wallets, and its money on hold between two halves of a move.
     function _recount(uint256 actor) private view returns (uint256 sum) {
         sum = token.balanceOf(actors[actor]);
         if (strangerIdentity == address(identities[actor])) sum += token.balanceOf(stranger);
         for (uint256 j = 0; j < WALLETS_PER_ACTOR; j++) {
             sum += token.awayBalanceOf(satellites[actor][j]);
+        }
+        for (uint256 i = 0; i < issued.length; i++) {
+            ITickets.Ticket memory ticket = boundCompliance.ticketOf(issued[i]);
+            if (ticket.fromIdentity == address(identities[actor])) sum += token.onHoldOf(issued[i]);
         }
     }
 

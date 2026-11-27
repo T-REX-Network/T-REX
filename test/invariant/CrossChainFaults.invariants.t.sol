@@ -8,7 +8,7 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 import { DelegationRecallInvariants } from "test/invariant/DelegationRecall.invariants.t.sol";
 
 /// @title CrossChainFaultsInvariants
-/// @notice The delegation-and-recall harness with the transport and the reference chain misbehaving. On top of its
+/// @notice The move-out-and-bring-home harness with the transport and the reference chain misbehaving. On top of its
 ///  transitions the fuzzer reorders deliveries, drops messages, delays them, delivers identical copies under new
 ///  transport ids, and reorgs the reference chain. Every invariant of the base suite (DR-1 to DR-6) is checked under
 ///  these faults as well.
@@ -29,23 +29,27 @@ import { DelegationRecallInvariants } from "test/invariant/DelegationRecall.inva
 ///  `test_aDeliveryBeforeFinalityBreaksTheSatelliteBound` shows what happens without it.
 ///
 ///   MF-0  every reorg went back to the state that was final
-///   MF-1  positionOf(identity) == native balance + satellite balance + amounts held in flight: mints instructed and
-///         not yet minted, burns done on the satellite whose proof has not settled
-///   MF-2  no satellite wallet holds more than the reference chain counts for it
+///   MF-1  positionOf(identity) == native balance + satellite balance + amounts held in flight: move outs not minted
+///         yet, burns done on the satellite whose receipt home has not applied
+///   MF-2  no satellite wallet holds more than the reference chain counts for it: its away balance and its move outs on
+///         hold
 ///   MF-3  delivering an identical copy of a message already delivered changes no balance, position, total or pause
 contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     uint256 internal constant MAX_DELAY = 7 days;
 
     /// @dev A satellite transaction since the last final state, replayed after a reorg. `payload` and `sender` are
-    ///  those of the message the satellite consumed and `queueIndex` the queue entry it was delivered from; `id` is
-    ///  the recall whose proof the satellite resent.
+    ///  those of the message the satellite consumed and `queueIndex` the queue entry it was delivered from;
+    ///  `ticketId` and `half` name the receipt the satellite sent again; `at` is the satellite's clock when it acted,
+    ///  since what an away token does with a half depends on it.
     struct SatelliteAction {
         bool isResend;
         address sender;
         bytes payload;
         uint256 queueIndex;
-        uint256 id;
+        bytes32 ticketId;
+        uint8 half;
+        uint256 at;
     }
 
     /// @dev How many times each fault took effect. Kept across a reorg, which would otherwise roll the counts back
@@ -62,7 +66,8 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
     uint256 internal genesisSnapshot;
     uint256 internal genesisTimestamp;
     uint256 internal genesisBlock;
-    /// @dev The calldata of every transition since `setUp`, in order. Entries below `finalJournalLength` led to the
+    /// @dev Every transition since `setUp`, in order, as `abi.encode(time it ran, calldata)`: a reorg runs it again at
+    ///  that time, since what the token decides depends on its clock. Entries below `finalJournalLength` led to the
     ///  final state, whose fingerprint is `finalFingerprint`.
     bytes[] internal journal;
     uint256 internal finalJournalLength;
@@ -82,7 +87,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     /// @dev Journals the transition, see {_reorg}.
     modifier journaled() {
-        if (!replaying) journal.push(msg.data);
+        if (!replaying) journal.push(abi.encode(block.timestamp, msg.data));
         _;
     }
 
@@ -117,16 +122,16 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         super.transfer(fromSeed, toSeed, amount);
     }
 
-    function delegate(uint256 actorSeed, uint256 amount) public override journaled {
-        super.delegate(actorSeed, amount);
+    function moveOut(uint256 actorSeed, uint256 amount) public override journaled {
+        super.moveOut(actorSeed, amount);
     }
 
-    function instructRecall(uint256 actorSeed, uint256 amount) public override journaled {
-        super.instructRecall(actorSeed, amount);
+    function bringHome(uint256 actorSeed, uint256 amount) public override journaled {
+        super.bringHome(actorSeed, amount);
     }
 
-    function resend(uint256 idSeed, bool recall) public override journaled {
-        super.resend(idSeed, recall);
+    function sendSecondHalfAgain(uint256 idSeed, bool aBringHome) public override journaled {
+        super.sendSecondHalfAgain(idSeed, aBringHome);
     }
 
     function drop(uint256 indexSeed) public override journaled {
@@ -140,9 +145,10 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         _relayOnce(indexSeed % length);
     }
 
-    function liteResendsProof(uint256 idSeed) external override journaled {
-        if (recallActor.length == 1) return;
-        _resendProof(1 + idSeed % (recallActor.length - 1));
+    function liteResendsReceipt(uint256 idSeed, uint8 halfSeed) external override journaled {
+        (bool found, bytes32 ticketId) = _anyTicket(idSeed);
+        if (!found) return;
+        _resendReceipt(ticketId, halfSeed);
     }
 
     /* ----- Transitions: faults ----- */
@@ -198,17 +204,25 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     /// @notice The satellite consumed this message before the reorg and consumes it again after it: from the queue
     ///  entry it came from when a final state sent it, from a copy when the entry went with the reorged window.
-    function replayedDelivery(address sender, bytes calldata payload, uint256 queueIndex) external journaled {
-        uint256 index =
-            queueIndex < finalQueueLength ? queueIndex : _requeue(sender, abi.encodePacked(_liteEnvelope()), payload);
+    ///  The satellite's transaction is final at the time it ran, so it runs again on the satellite's clock of then.
+    function replayedDelivery(address sender, bytes calldata payload, uint256 queueIndex, uint256 at)
+        external
+        journaled
+    {
+        uint256 index = queueIndex < finalQueueLength
+            ? queueIndex
+            : _requeue(sender, abi.encodePacked(_liteEnvelope()), payload);
+        uint256 currentTime = block.timestamp;
+        vm.warp(at);
         try gateway.relay(index) {
             _logDelivery(sender, payload, index);
         } catch { }
+        vm.warp(currentTime);
     }
 
-    /// @notice The satellite resent this recall's proof before the reorg and resends it again after it.
-    function replayedProofResend(uint256 id) external journaled {
-        _resendProof(id);
+    /// @notice The satellite resent this receipt before the reorg and resends it again after it.
+    function replayedReceiptResend(bytes32 ticketId, uint8 half) external journaled {
+        _resendStoredReceipt(ticketId, half);
     }
 
     /* ----- Invariants ----- */
@@ -229,9 +243,12 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         }
     }
 
+    /// @dev The reference chain counts a move out on hold until its receipt lands, so what a satellite minted is
+    ///  covered by the wallet's away balance plus its move outs on hold.
     function invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount() public view {
         for (uint256 i = 0; i < ACTORS; i++) {
-            assertLe(lite.balanceOf(satellites[i]), token.awayBalanceOf(satellites[i]), "MF-2");
+            uint256 counted = token.awayBalanceOf(satellites[i]) + _onHoldFor(i);
+            assertLe(lite.balanceOf(satellites[i]), counted, "MF-2");
         }
     }
 
@@ -246,33 +263,33 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     /* ----- Demonstration ----- */
 
-    /// @notice The same reorg, with a relayer that does not wait for finality: the satellite mints a delegation the
+    /// @notice The same reorg, with a relayer that does not wait for finality: the satellite mints a move out the
     ///  reorg then removes from the reference chain, and holds tokens the reference chain no longer counts. MF-2 itself
     ///  catches it, which is the negative control of the invariant run.
     function test_aDeliveryBeforeFinalityBreaksTheSatelliteBound() public {
         deliverBeforeFinality = true;
-        this.delegate(0, 100);
+        this.moveOut(0, 100);
         this.relay(gateway.queueLength() - 1);
         assertEq(lite.balanceOf(satellites[0]), 100, "minted on the satellite");
 
         _reorg();
 
         assertFalse(reorgMissedTheFinalState);
-        assertEq(token.awayBalanceOf(satellites[0]), 0, "the reference chain no longer counts the delegation");
+        assertEq(token.awayBalanceOf(satellites[0]), 0, "the reference chain no longer counts the move out");
         assertEq(lite.balanceOf(satellites[0]), 100, "the satellite still holds it");
         vm.expectRevert();
         this.invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount();
     }
 
-    /// @notice With the relayer waiting for finality, the delegation lost in the reorg never reached the satellite.
+    /// @notice With the relayer waiting for finality, the move out lost in the reorg never reached the satellite.
     function test_aDeliveryAfterFinalitySurvivesTheReorg() public {
-        this.delegate(0, 100);
-        uint256 delegation = gateway.queueLength() - 1;
-        this.relay(delegation);
+        this.moveOut(0, 100);
+        uint256 moveOutEntry = gateway.queueLength() - 1;
+        this.relay(moveOutEntry);
         assertEq(lite.balanceOf(satellites[0]), 0, "not final yet: held back");
 
         this.finalize();
-        this.relay(delegation);
+        this.relay(moveOutEntry);
         uint256 bobBalance = token.balanceOf(bob);
         this.transfer(0, 1, 1);
         assertEq(token.balanceOf(bob), bobBalance + 1);
@@ -280,23 +297,26 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
         assertFalse(reorgMissedTheFinalState);
         assertEq(token.balanceOf(bob), bobBalance, "the reorg went back: what the reference chain did since is gone");
-        assertEq(token.awayBalanceOf(satellites[0]), 100);
         assertEq(lite.balanceOf(satellites[0]), 100, "replayed on the satellite after the reorg");
-        assertEq(gateway.queuedMessage(delegation).deliveries, 1, "replayed from its own entry, delivered once");
+        assertEq(gateway.queuedMessage(moveOutEntry).deliveries, 1, "replayed from its own entry, delivered once");
+        this.relay(gateway.queueLength() - 1);
+        assertEq(token.awayBalanceOf(satellites[0]), 100, "the replayed receipt lands the move out");
         invariant_MF1_eachHolderIsTheReferenceSatelliteAndHeldAmounts();
         invariant_MF2_noSatelliteHoldsWhatTheReferenceChainDoesNotCount();
     }
 
     /// @notice A reference-chain receipt in the reorged window is undone, and the message can be delivered again.
-    function test_aProofReceivedInTheReorgedWindowIsDeliveredAgain() public {
-        this.delegate(0, 100);
-        this.finalize();
-        this.relay(gateway.queueLength() - 1);
-        this.instructRecall(0, 40);
+    function test_aReceiptReceivedInTheReorgedWindowIsDeliveredAgain() public {
+        this.moveOut(0, 100);
         this.finalize();
         this.relay(gateway.queueLength() - 1);
         this.relay(gateway.queueLength() - 1);
-        assertEq(token.awayBalanceOf(satellites[0]), 60, "the proof settled");
+        assertEq(token.awayBalanceOf(satellites[0]), 100, "the move out landed");
+        this.bringHome(0, 40);
+        this.finalize();
+        this.relay(gateway.queueLength() - 1);
+        this.relay(gateway.queueLength() - 1);
+        assertEq(token.awayBalanceOf(satellites[0]), 60, "the receipt landed");
 
         _reorg();
 
@@ -304,16 +324,18 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         assertEq(token.awayBalanceOf(satellites[0]), 100, "the settlement was in the reorged window");
         assertEq(lite.balanceOf(satellites[0]), 60, "the satellite burn stands");
         this.relay(gateway.queueLength() - 1);
-        assertEq(token.awayBalanceOf(satellites[0]), 60, "settled again from the replayed proof");
+        assertEq(token.awayBalanceOf(satellites[0]), 60, "landed again from the replayed receipt");
         invariant_MF1_eachHolderIsTheReferenceSatelliteAndHeldAmounts();
     }
 
     /// @notice A second reorg goes back to the same final state as the first, and a reorg after it to the state made
     ///  final in between: what the satellite did is carried through each of them.
     function test_aReorgAfterAReorgGoesBackToTheLastFinalState() public {
-        this.delegate(0, 100);
+        this.moveOut(0, 100);
         this.finalize();
         this.relay(gateway.queueLength() - 1);
+        this.relay(gateway.queueLength() - 1);
+        this.finalize();
         _reorg();
         this.mint(1, 7);
         _reorg();
@@ -369,7 +391,9 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         replaying = true;
         for (uint256 i = 0; i < finalTransitions.length; i++) {
             journal.push(finalTransitions[i]);
-            (bool success,) = address(this).call(finalTransitions[i]);
+            (uint256 ranAt, bytes memory transition) = abi.decode(finalTransitions[i], (uint256, bytes));
+            vm.warp(ranAt);
+            (bool success,) = address(this).call(transition);
             wentBack = wentBack && success;
         }
         replaying = false;
@@ -383,8 +407,8 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         faults = counts;
 
         for (uint256 i = 0; i < actions.length; i++) {
-            if (actions[i].isResend) this.replayedProofResend(actions[i].id);
-            else this.replayedDelivery(actions[i].sender, actions[i].payload, actions[i].queueIndex);
+            if (actions[i].isResend) this.replayedReceiptResend(actions[i].ticketId, actions[i].half);
+            else this.replayedDelivery(actions[i].sender, actions[i].payload, actions[i].queueIndex, actions[i].at);
         }
     }
 
@@ -402,10 +426,25 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         } catch { }
     }
 
-    function _resendProof(uint256 id) internal {
-        try lite.resendProof(id) {
+    /// @dev Sends a stored receipt again and logs it for replay, see {_resendStoredReceipt}.
+    function _resendReceipt(bytes32 ticketId, uint8 halfSeed) internal override {
+        uint8 latestHalf = boundCompliance.ticketOf(ticketId).half;
+        if (latestHalf == 0) return;
+        _resendStoredReceipt(ticketId, 1 + halfSeed % latestHalf);
+    }
+
+    function _resendStoredReceipt(bytes32 ticketId, uint8 half) internal {
+        try lite.resendReceipt(ticketId, half) {
             satelliteLog.push(
-                SatelliteAction({ isResend: true, sender: address(0), payload: "", queueIndex: 0, id: id })
+                SatelliteAction({
+                    isResend: true,
+                    sender: address(0),
+                    payload: "",
+                    queueIndex: 0,
+                    ticketId: ticketId,
+                    half: half,
+                    at: block.timestamp
+                })
             );
         } catch { }
     }
@@ -418,7 +457,15 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
 
     function _logDelivery(address sender, bytes memory payload, uint256 queueIndex) internal {
         satelliteLog.push(
-            SatelliteAction({ isResend: false, sender: sender, payload: payload, queueIndex: queueIndex, id: 0 })
+            SatelliteAction({
+                isResend: false,
+                sender: sender,
+                payload: payload,
+                queueIndex: queueIndex,
+                ticketId: bytes32(0),
+                half: 0,
+                at: block.timestamp
+            })
         );
     }
 
@@ -431,15 +478,10 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         return InteroperableAddress.formatEvmV1(POLYGON, address(lite));
     }
 
-    /// @dev What actor `actor` holds in flight: mints instructed to its wallet and not yet minted, and burns done on
-    ///  its wallet whose proof has not settled.
-    function _heldFor(uint256 actor) internal view returns (uint256 held) {
-        for (uint256 id = 1; id < delegationAmount.length; id++) {
-            if (delegationActor[id] == actor && lite.delegationSeen(id) == 0) held += delegationAmount[id];
-        }
-        for (uint256 id = 1; id < recallActor.length; id++) {
-            if (recallActor[id] == actor && _pendingRecall(id).amount != 0) held += lite.burnedFor(id);
-        }
+    /// @dev What actor `actor` holds in flight: move outs not minted on the satellite yet, and burns done on its
+    ///  wallet whose receipt home has not applied.
+    function _heldFor(uint256 actor) internal view returns (uint256) {
+        return _inFlightFor(actor);
     }
 
     /// @dev Every balance, position, total and pause flag a delivery could move. Transport records are left out: a
@@ -467,8 +509,11 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
                 )
             );
         }
-        for (uint256 id = 1; id < recallActor.length; id++) {
-            print = keccak256(abi.encode(print, _pendingRecall(id).amount));
+        for (uint256 i = 1; i < bringHomeIds.length; i++) {
+            print = keccak256(abi.encode(print, boundCompliance.ticketOf(bringHomeIds[i]).status));
+        }
+        for (uint256 i = 1; i < moveOutIds.length; i++) {
+            print = keccak256(abi.encode(print, boundCompliance.ticketOf(moveOutIds[i]).status));
         }
     }
 

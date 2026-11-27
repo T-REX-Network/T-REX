@@ -483,7 +483,8 @@ contract ComplianceDispatchTest is InteropSuiteTest {
             kind: MovementKindLib.CROSS_CHAIN,
             isIssuance: true,
             spender: "",
-            data: ""
+            // A move between chains names the chain the money leaves.
+            data: abi.encode(polygon)
         });
         vm.expectCall(address(firstRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
         vm.expectCall(address(secondRule), abi.encodeCall(IModule.checkTransfer, (expected)), 1);
@@ -518,7 +519,7 @@ contract ComplianceDispatchTest is InteropSuiteTest {
     function _delegatedSatelliteWallet(uint256 amount) private returns (bytes memory envelope) {
         envelope = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygon"));
         vm.prank(agent);
-        TokenLedgerHarness(address(token)).ledgerDelegateOut(alice, envelope, amount);
+        TokenLedgerHarness(address(token)).ledgerMoveOut(alice, envelope, amount);
     }
 
 }

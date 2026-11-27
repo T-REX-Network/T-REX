@@ -325,14 +325,10 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
         assertEq(_ledger().pendingInOf(address(bobIdentity)), CAP);
     }
 
-    /// @notice A discard gives the room back, so the next validation gets the whole cap again.
-    function test_discardExpiredValidations_Success_WhenTheRoomComesBack() public {
+    /// @notice A cancel gives the room back, so the next validation gets the whole cap again.
+    function test_cancelTickets_Success_WhenTheRoomComesBack() public {
         bytes32 id = _issue(10, CAP);
-        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = id;
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(ids);
+        _cancelUnanswered(id, bobSat, "");
 
         assertEq(boundCompliance.ticketOf(_issue(10, CAP)).amountMax, CAP);
     }
@@ -353,11 +349,7 @@ contract MaxBalancePerIdentityModuleTest is InteropSuiteTest {
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.receiptRouteFor(polygon));
         bytes32 late = _issue(10, CAP);
-        vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = late;
-        vm.prank(keeper);
-        boundCompliance.cancelTickets(ids);
+        _cancelUnanswered(late, bobSat, "");
 
         _issue(10, CAP);
 

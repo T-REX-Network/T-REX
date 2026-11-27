@@ -62,7 +62,9 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.PeerSet.selector, EventsLib.PeerSet.selector);
         assertEq(ITREXMessaging.HalfPinned.selector, EventsLib.HalfPinned.selector);
         assertEq(ITREXMessaging.ProtocolMessageSent.selector, EventsLib.ProtocolMessageSent.selector);
-        assertEq(ITREXMessaging.BurnProofReceived.selector, EventsLib.BurnProofReceived.selector);
+        assertEq(ITREXMessaging.TicketRouteSet.selector, EventsLib.TicketRouteSet.selector);
+        assertEq(ITREXMessaging.FormerRouteKept.selector, EventsLib.FormerRouteKept.selector);
+        assertEq(ITREXMessaging.HostilePeerReplaced.selector, EventsLib.HostilePeerReplaced.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -70,7 +72,6 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);
         assertEq(ITREXMessaging.ChainNotRegistered.selector, ErrorsLib.ChainNotRegistered.selector);
         assertEq(ITREXMessaging.BridgeNotOnRoute.selector, ErrorsLib.BridgeNotOnRoute.selector);
-        assertEq(ITREXMessaging.BridgeNotPinned.selector, ErrorsLib.BridgeNotPinned.selector);
         assertEq(ITREXMessaging.NotAReceiptBridge.selector, ErrorsLib.NotAReceiptBridge.selector);
         assertEq(ITREXMessaging.NotATicketBridge.selector, ErrorsLib.NotATicketBridge.selector);
         assertEq(ITREXMessaging.ReceiptBridgeNotFullFinality.selector, ErrorsLib.ReceiptBridgeNotFullFinality.selector);
@@ -80,7 +81,7 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.MessageTypeNotInbound.selector, ErrorsLib.MessageTypeNotInbound.selector);
         assertEq(ITREXMessaging.PeerChainMismatch.selector, ErrorsLib.PeerChainMismatch.selector);
         assertEq(ITREXMessaging.SenderNotPeer.selector, ErrorsLib.SenderNotPeer.selector);
-        assertEq(ITREXMessaging.ValidationAlreadyRouted.selector, ErrorsLib.ValidationAlreadyRouted.selector);
+        assertEq(ITREXMessaging.RouteChangedTooRecently.selector, ErrorsLib.RouteChangedTooRecently.selector);
         assertEq(ITREXMessaging.UnsupportedMessageVersion.selector, ErrorsLib.UnsupportedMessageVersion.selector);
     }
 

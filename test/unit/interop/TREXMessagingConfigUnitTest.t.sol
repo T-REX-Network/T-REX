@@ -43,6 +43,7 @@ import { Vm } from "@forge-std/Vm.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { TrustedGatewayRegistry } from "contracts/interop/TrustedGatewayRegistry.sol";
 import { AccessManagerSetupLib } from "contracts/libraries/AccessManagerSetupLib.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -92,6 +93,11 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         _grantManagerRoles(identityManager);
         _grantInteropManagerRole(interopManager);
+
+        // A route or peer change reads the away chain's waiting time from the compliance: none is set for either
+        // chain here, so a change keeps no former pair.
+        vm.mockCall(compliance, abi.encodeCall(ITickets.waitingTimeOf, (evmChain)), abi.encode(uint64(0)));
+        vm.mockCall(compliance, abi.encodeCall(ITickets.waitingTimeOf, (nonEvmChain)), abi.encode(uint64(0)));
 
         ERC7786GatewayMock receiptBridge = new ERC7786GatewayMock(0x89);
         receiptBridge.setReceivingPolicy(awayChainSelector, awayReceiptBridge, bytes4(0));

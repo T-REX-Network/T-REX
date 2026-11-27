@@ -79,8 +79,7 @@ contract InboundMessagingTest is InteropSuiteTest {
 
         _openEvmChain(token, POLYGON, address(routedGateway));
 
-        // A never-issued id reverts at the compliance, so the transport cases below run on a real one, which
-        // settles for good.
+        // The transport cases below run on a real ticket, whose receipt settles for good.
         vm.prank(agent);
         token.unpause();
         satelliteFrom = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), 1000);
@@ -135,17 +134,20 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertFalse(token.paused());
     }
 
-    /// @dev A receipt for an id this token has no record of reaches the compliance, which refuses it: the delivery
-    ///      reverts and stays deliverable at the bridge, and no chain is blocked over an id home does not know.
-    function testAReceiptForAnUnknownIdRevertsAndBlocksNobody() public {
+    /// @dev A receipt for an id this token has no record of reaches the compliance, which puts its amount on hold under
+    ///      its sender with no destination: the delivery is consumed and no chain is blocked over an id home does not
+    ///      know.
+    function testAReceiptForAnUnknownIdIsPutOnHoldAndBlocksNobody() public {
         bytes32 neverIssued = bytes32(uint256(ticketId) + 1);
         MessageTypesLib.ReceiptMessage memory receipt = _settlement(neverIssued, satelliteFrom, satelliteTo, amount);
         uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(receipt));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, neverIssued));
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptWithoutTicket(neverIssued, originChain, satelliteFrom, satelliteTo, amount);
         routedGateway.relay(index);
 
-        _assertNothingApplied(routedGateway, index);
+        assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(index)), "consumed");
+        assertEq(uint8(boundCompliance.statusOf(neverIssued)), uint8(ITickets.TicketStatus.OnHold));
         assertFalse(boundCompliance.isAwayChainBlocked(originChain), "no chain is blocked");
         assertFalse(token.paused());
     }
@@ -201,39 +203,37 @@ contract InboundMessagingTest is InteropSuiteTest {
         IReceiptHandler(compliance).receiveReceipt(originChain, address(routedGateway), _peerKey(), n);
     }
 
-    /* ----- Burn proof: the recall path ----- */
+    /* ----- A bring home's receipt ----- */
 
-    /// @dev The proof reaches the recall path with every field intact and credits the instructed wallet; the
-    ///      settlement handler never sees it.
-    function testBurnProofReachesTheRecallPathIntact() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
-        uint256 index =
-            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+    /// @dev A bring home's receipt reaches the compliance through the same handler as every receipt and mints at the
+    ///      home wallet what the away token burned.
+    function testABringHomeReceiptReachesTheComplianceIntact() public {
+        bytes32 bringHomeId = _bringHome(100);
+        MessageTypesLib.ReceiptMessage memory receipt = _bringHomeReceipt(bringHomeId, 100);
+        uint256 index = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(receipt));
         uint256 nativeBefore = token.balanceOf(alice);
 
-        vm.expectCall(compliance, abi.encodeWithSelector(IReceiptHandler.receiveReceipt.selector), 0);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.BurnProofReceived(originChain, recallId, satelliteFrom, 100);
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.RecallSettled(recallId, originChain, 100);
+        vm.expectCall(
+            compliance,
+            abi.encodeCall(IReceiptHandler.receiveReceipt, (originChain, address(routedGateway), _peerKey(), receipt))
+        );
         routedGateway.relay(index);
 
         assertEq(token.balanceOf(alice), nativeBefore + 100);
         assertEq(token.awayBalanceOf(satelliteFrom), 900);
     }
 
-    /// @dev A proof answering a recall this token never issued stops nothing: the delivery reverts and stays
-    ///      deliverable, the token keeps running and the chain stays open.
-    function testBurnProofForANeverIssuedRecallStopsNothing() public {
+    /// @dev A second-half receipt for an id home has no record of is consumed and announced: it stops nothing.
+    function testASecondHalfReceiptForAnUnknownIdStopsNothing() public {
+        bytes32 neverIssued = keccak256("a bring home this token never wrote");
         uint256 index =
-            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(99, satelliteFrom, amount)));
+            _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(_bringHomeReceipt(neverIssued, amount)));
         uint256 nativeBefore = token.balanceOf(alice);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RecallNotPending.selector, 99));
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptUnknown(MessageTypesLib.halfKeyOf(neverIssued, 1), originChain);
         routedGateway.relay(index);
 
-        _assertNothingApplied(routedGateway, index);
         assertFalse(token.paused());
         assertFalse(boundCompliance.isAwayChainBlocked(originChain));
         assertEq(token.balanceOf(alice), nativeBefore);
@@ -260,13 +260,13 @@ contract InboundMessagingTest is InteropSuiteTest {
         );
         routedGateway.relay(mint);
 
-        uint256 recall =
+        uint256 bringHome =
             _liteSends(routedGateway, token, MessageTypesLib.encode(MessageTypesLib.Message.BRING_HOME, body));
 
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.MessageTypeNotInbound.selector, MessageTypesLib.Message.BRING_HOME)
         );
-        routedGateway.relay(recall);
+        routedGateway.relay(bringHome);
     }
 
     /* ----- The rejection matrix: three trust levels, three errors ----- */
@@ -362,33 +362,31 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(satelliteTo), amount, "applied once");
     }
 
-    /// @dev A blocked away chain's receipt is consumed and waits at the compliance, tagged with its bridge and peer;
-    ///      its burn proof is refused after attribution and stays deliverable. Once the block is lifted, anyone
-    ///      applies the waiting receipt and the proof lands.
-    function testABlockedChainsReceiptWaitsAndItsBurnProofStaysDeliverable() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+    /// @dev A blocked away chain's receipts are consumed and wait at the compliance, tagged with their bridge and
+    ///      peer, a bring home's included. Once the block is lifted, anyone applies the waiting receipts.
+    function testABlockedChainsReceiptsWait() public {
+        bytes32 bringHomeId = _bringHome(100);
         MessageTypesLib.ReceiptMessage memory receipt = _issuedSettlement();
+        MessageTypesLib.ReceiptMessage memory bringHomeReceipt = _bringHomeReceipt(bringHomeId, 100);
         uint256 settlement = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(receipt));
-        uint256 proof =
-            _liteSends(routedGateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        uint256 burned = _liteSends(routedGateway, token, MessageTypesLib.encodeSettlement(bringHomeReceipt));
         uint256 nativeBefore = token.balanceOf(alice);
         vm.prank(agent);
         boundCompliance.blockAwayChain(originChain);
 
         routedGateway.relay(settlement);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, originChain));
-        routedGateway.relay(proof);
+        routedGateway.relay(burned);
         assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(settlement)), "consumed");
-        _assertNothingApplied(routedGateway, proof);
+        assertTrue(token.messageReceived(address(routedGateway), routedGateway.receiveIdFor(burned)), "consumed");
         assertEq(token.awayBalanceOf(satelliteTo), 0, "the receipt waits");
+        assertEq(token.balanceOf(alice), nativeBefore, "the bring home's receipt waits");
         assertTrue(token.isChainOpen(originChain), "outbound is not gated");
         assertFalse(token.paused());
 
         vm.prank(agent);
         boundCompliance.unblockAwayChain(originChain);
         boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(receipt.ticketId, 0), receipt);
-        routedGateway.relay(proof);
+        boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(bringHomeId, 1), bringHomeReceipt);
 
         assertEq(token.awayBalanceOf(satelliteTo), amount);
         assertEq(token.balanceOf(alice), nativeBefore + 100);
@@ -404,15 +402,14 @@ contract InboundMessagingTest is InteropSuiteTest {
 
     /// @dev A gateway that names no delivery keeps delivering: a first zero id must not refuse every later one.
     function testZeroReceiveIdDoesNotBlockLaterMessages() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+        bytes32 bringHomeId = _bringHome(100);
         uint256 nativeBefore = token.balanceOf(alice);
 
         _deliverWithZeroReceiveId(_settlementPayload());
-        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 100)));
 
         assertEq(token.awayBalanceOf(satelliteTo), amount, "the settlement applied");
-        assertEq(token.balanceOf(alice), nativeBefore + 100, "the burn proof applied");
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "the bring home's receipt applied");
         assertFalse(token.messageReceived(address(routedGateway), bytes32(0)), "a zero id is never recorded");
         assertFalse(token.paused());
     }
@@ -432,38 +429,61 @@ contract InboundMessagingTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(satelliteFrom), 1000 - amount, "debited once");
     }
 
-    /// @dev A burn proof delivered twice under a zero id is recognised by the settled proof's hash: credited once,
+    /// @dev A bring home's receipt delivered twice under a zero id is recognised by the half's receipt: minted once,
     ///      and the second delivery changes nothing.
-    function testZeroReceiveIdBurnProofReplayIsRefusedByTheSettledProof() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
-        bytes memory proof = MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100));
+    function testZeroReceiveIdBringHomeReceiptReplayIsADuplicate() public {
+        bytes32 bringHomeId = _bringHome(100);
+        bytes memory payload = MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 100));
         uint256 nativeBefore = token.balanceOf(alice);
-        _deliverWithZeroReceiveId(proof);
+        _deliverWithZeroReceiveId(payload);
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.BurnProofDuplicate(recallId, originChain);
-        _deliverWithZeroReceiveId(proof);
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptDuplicate(bringHomeId, originChain);
+        _deliverWithZeroReceiveId(payload);
 
         assertFalse(token.paused());
-        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "minted once");
         assertEq(token.awayBalanceOf(satelliteFrom), 900, "debited once");
     }
 
-    /// @dev A different proof for the recall already settled, under a zero id, is the replay emergency.
-    function testZeroReceiveIdDifferentProofForASettledRecallPausesTheChain() public {
-        vm.prank(agent);
-        uint256 recallId = token.instructRecall(satelliteFrom, 100, alice);
+    /// @dev Another receipt for a bring home half that already has one, under a zero id, blocks the chain.
+    function testZeroReceiveIdAnotherReceiptForAnsweredHalfBlocksTheChain() public {
+        bytes32 bringHomeId = _bringHome(100);
         uint256 nativeBefore = token.balanceOf(alice);
-        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 100)));
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 100)));
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ReplayedBurnProof(recallId, originChain);
-        _deliverWithZeroReceiveId(MessageTypesLib.encodeBurnProof(_burnProof(recallId, satelliteFrom, 60)));
+        vm.expectEmit(true, true, false, true, compliance);
+        emit EventsLib.ReceiptRefused(bringHomeId, originChain, 60, bytes32(0));
+        _deliverWithZeroReceiveId(MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 60)));
 
         assertTrue(boundCompliance.isAwayChainBlocked(originChain));
         assertFalse(token.paused());
-        assertEq(token.balanceOf(alice), nativeBefore + 100, "credited once");
+        assertEq(token.balanceOf(alice), nativeBefore + 100, "minted once");
+    }
+
+    /// @dev An agent brings `bringAmount` of alice's away wallet home.
+    function _bringHome(uint256 bringAmount) private returns (bytes32) {
+        vm.prank(agent);
+        return boundCompliance.bringHome(satelliteFrom, bringAmount, alice, _salt());
+    }
+
+    /// @dev The away token's receipt for the first half of a bring home: it names the burned wallet only.
+    function _bringHomeReceipt(bytes32 bringHomeId, uint256 burned)
+        private
+        view
+        returns (MessageTypesLib.ReceiptMessage memory)
+    {
+        return MessageTypesLib.ReceiptMessage({
+            ticketId: bringHomeId,
+            from: satelliteFrom,
+            to: "",
+            amount: burned,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 1,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
     }
 
     /* ----- Envelope refusals ----- */

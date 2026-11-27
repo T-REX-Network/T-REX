@@ -107,26 +107,23 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).askBlockHash, sent.askBlockHash);
     }
 
-    /// @notice A move between two away chains is done in two halves, the second sent by home once the first is
-    ///         done; until home sends second halves the ask is refused, and nothing is sent.
-    function test_askToMove_reverts_when_theReceiverIsOnAnotherAwayChain() public {
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
-        boundCompliance.askToMove(aliceSat, bobOptimism, 10, 90, "", _salt());
+    /// @notice A move between two away chains is done in two halves: the ticket goes to the sender's chain only, and
+    ///         home sends the second half once the first is done.
+    function test_askToMove_sendsTheTicketToTheSendersChainOnly_whenTheReceiverIsOnAnotherAwayChain() public {
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
 
-        assertEq(polygonGateway.queueLength(), 0);
-        assertEq(optimismGateway.queueLength(), 0);
-        _assertNothingRecorded(aliceSat, bobOptimism, "", 10, 90);
+        assertEq(polygonGateway.queueLength(), 1, "the ticket went to the sender's chain");
+        assertEq(optimismGateway.queueLength(), 0, "nothing goes to the receiver's chain yet");
+        assertEq(boundCompliance.ticketOf(id).toChainKey, optimism);
     }
 
-    /// @notice Nothing would keep a native balance in place between issuance and settlement, so no satellite is
-    ///         ever authorized to move one: a native position goes out through delegation-out, which burns first.
-    function test_requestTransferValidation_RevertWhen_TheHolderSendsFromTheirNativeBalance() public {
+    /// @notice A home wallet asks for no more than its unfrozen balance: the amount is burned in the ask itself.
+    function test_askToMove_reverts_when_theHomeSenderAsksAboveItsBalance() public {
         vm.prank(agent);
         token.mint(alice, 50);
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotOnSatellite.selector, nativeAlice));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, nativeAlice, 50, 200));
         boundCompliance.askToMove(nativeAlice, bobSat, 10, 200, "", _salt());
 
         assertEq(polygonGateway.queueLength(), 0);
@@ -152,13 +149,13 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         boundCompliance.askToMove(aliceSat, bobSat, 10, 90, spender, _salt());
     }
 
-    function test_requestTransferValidation_Success_WhenSlippageIsCappedAtTheBalance() public {
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 90, 110);
+    /// @notice The asked maximum is part of the id, so a request above the free balance is refused, never narrowed.
+    function test_askToMove_reverts_when_theRequestIsAboveTheFreeBalance() public {
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceSat, BALANCE, 110));
+        boundCompliance.askToMove(aliceSat, bobSat, 90, 110, "", _salt());
 
-        MessageTypesLib.TicketMessage memory sent = _decodeQueuedValidation(polygonGateway, 0);
-        assertEq(sent.amountMin, 90);
-        assertEq(sent.amountMax, BALANCE);
-        assertEq(boundCompliance.ticketOf(id).amountMax, BALANCE);
+        assertEq(polygonGateway.queueLength(), 0);
     }
 
     /* ----- Authorization ----- */
@@ -259,24 +256,23 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 0);
     }
 
-    /// @notice A cross-chain request with one chain closed sends nothing at all.
-    function test_requestTransferValidation_RevertWhen_TheSecondLegHasNoRoute() public {
+    /// @notice The receiver's chain is not asked at the ask: with its route closed the ticket still goes to the
+    ///         sender's chain, and home decides at the first half's receipt whether the second half can go.
+    function test_askToMove_sendsTheTicket_whenTheReceiversChainHasNoRoute() public {
         _closeEvmChain(token, OPTIMISM);
 
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
-        boundCompliance.askToMove(aliceSat, bobOptimism, 10, 90, "", _salt());
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
 
-        assertEq(polygonGateway.queueLength(), 0);
-        _assertNothingRecorded(aliceSat, bobOptimism, "", 10, 90);
+        assertEq(polygonGateway.queueLength(), 1);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
     }
 
     function test_requestTransferValidation_Success_WhenARouteSwitchPinsTheNewGatewayForNewIdsOnly() public {
-        bytes32 first = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
+        bytes32 first = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 40);
         ERC7786GatewayMock replacement = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(replacement));
 
-        bytes32 second = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 90);
+        bytes32 second = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 40);
 
         assertEq(_pinnedBridgeOf(first), address(polygonGateway));
         assertEq(_pinnedBridgeOf(second), address(replacement));

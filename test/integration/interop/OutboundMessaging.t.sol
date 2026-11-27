@@ -82,16 +82,33 @@ contract OutboundMessagingTest is InteropSuiteTest {
         vm.stopPrank();
     }
 
-    /// @dev Alice delegates `amount` of her own balance to her Polygon wallet: the one way a mint instruction leaves.
+    /// @dev Alice's home wallet moves `amount` out to her Polygon wallet: a move out leaves at once.
     function _delegate(uint256 amount) private returns (bytes32) {
+        bytes memory aliceHome = InteroperableAddress.formatEvmV1(block.chainid, alice);
         vm.prank(alice);
-        return token.delegateOut(alice, aliceSat, amount);
+        return boundCompliance.askToMove(aliceHome, aliceSat, amount, amount, "", _salt());
     }
 
-    /// @dev The agent orders `amount` of Alice's Polygon wallet back: the one way a recall instruction leaves.
-    function _instruct(uint256 amount) private returns (uint256) {
+    /// @dev The agent brings `amount` of Alice's Polygon wallet home: a bring home leaves at once.
+    function _instruct(uint256 amount) private returns (bytes32) {
         vm.prank(agent);
-        return token.instructRecall(aliceSat, amount, alice);
+        return boundCompliance.bringHome(aliceSat, amount, alice, _salt());
+    }
+
+    /// @dev Lands a move out's receipt for `amount`, so the away wallet holds it.
+    function _landMoveOut(bytes32 moveOutId, uint256 amount) private {
+        MessageTypesLib.ReceiptMessage memory receipt = MessageTypesLib.ReceiptMessage({
+            ticketId: moveOutId,
+            from: "",
+            to: aliceSat,
+            amount: amount,
+            askBlockHash: bytes32(0),
+            seenMax: 0,
+            seenValidUntil: 0,
+            half: 1,
+            answer: MessageTypesLib.ReceiptAnswer.Executed
+        });
+        gateway.relay(_liteSettles(gateway, token, receipt));
     }
 
     function _dispatch(bytes32 id, bytes32 chainKey) private returns (bytes32) {
@@ -155,99 +172,80 @@ contract OutboundMessagingTest is InteropSuiteTest {
         assertEq(_pinnedBridgeOf(ticketId), address(gateway));
     }
 
-    /// @dev Its legs could never be accepted through the new gateway, so the re-dispatch says so now.
-    function testRedispatchThroughAnotherGatewayIsRefused() public {
+    /// @dev After a planned route change, a ticket sent before it is still asked through the pair it was pinned to:
+    ///      the away token that holds it answers on that pair, which home keeps as the former one for a while.
+    function testRedispatchAfterARouteChangeGoesThroughThePinnedFormerPair() public {
         _dispatch(ticketId, satellite);
 
         ERC7786GatewayMock other = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(other));
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, ticketId, satellite, address(gateway))
-        );
         _dispatch(ticketId, satellite);
 
-        assertEq(other.queueLength(), 0);
+        assertEq(gateway.queueLength(), 2, "asked through the pinned former bridge");
+        assertEq(other.queueLength(), 0, "not through the new route");
+        assertEq(_pinnedBridgeOf(ticketId), address(gateway), "the pin never moves");
     }
 
-    /// @dev A ticket is the first half of its move, sent to one away chain and pinned there once: sending it toward
-    ///      another away chain is refused, and nothing leaves.
-    function testATicketIsPinnedToOneAwayChainOnly() public {
-        ERC7786GatewayMock optimismGateway = _newReceiptBridge(OPTIMISM);
-        _openEvmChain(token, OPTIMISM, address(optimismGateway));
+    /* ----- Move out: the second half of a move, here with no first half ----- */
 
-        _dispatch(ticketId, satellite);
-
-        vm.prank(compliance);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidationAlreadyRouted.selector, ticketId, optimism, address(gateway))
-        );
-        token.sendOnTicketRoute(optimism, ticketId, abi.encode("validation"));
-
-        assertEq(_pinnedBridgeOf(ticketId), address(gateway));
-        assertEq(gateway.queueLength(), 1);
-        assertEq(optimismGateway.queueLength(), 0);
-    }
-
-    /* ----- Mint instruction: one per delegation ----- */
-
-    function testADelegationOutSendsAMintInstructionAndItIsAnnounced() public {
+    function testAHomeWalletMoveOutSendsAMoveOutAndItIsAnnounced() public {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.MOVE_OUT, satellite, gateway.receiveIdFor(0));
 
-        bytes32 sendId = _delegate(10);
+        bytes32 moveOutId = _delegate(10);
 
         assertEq(gateway.queueLength(), 1);
-        assertEq(sendId, gateway.receiveIdFor(0));
-
         (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(0).payload, (uint8, uint8, bytes));
         assertEq(messageType, uint8(MessageTypesLib.Message.MOVE_OUT));
-        MessageTypesLib.MoveOutMessage memory instruction = MessageTypesLib.decodeMintInstruction(body);
-        assertEq(instruction.delegationId, 1);
-        assertEq(instruction.toWallet, aliceSat);
-        assertEq(instruction.amount, 10);
-        assertEq(instruction.holder, alice);
+        MessageTypesLib.MoveOutMessage memory moveOut = MessageTypesLib.decodeMintInstruction(body);
+        assertEq(moveOut.ticketId, moveOutId);
+        assertEq(moveOut.half, 1);
+        assertEq(moveOut.toWallet, aliceSat);
+        assertEq(moveOut.amount, 10);
+        assertEq(moveOut.validUntil, block.timestamp + POLYGON_WINDOW);
     }
 
-    /// @dev A mint instruction pins no route: its validation-free resend goes through the current one.
-    function testAMintInstructionPinsNothing() public {
-        _delegate(10);
-        _delegate(10);
+    /// @dev A move out pins its half to the route and peer it left through: its receipt is taken from that pair.
+    function testAMoveOutPinsItsHalf() public {
+        bytes32 first = _delegate(10);
+        bytes32 second = _delegate(10);
 
         assertEq(gateway.queueLength(), 2);
-        assertEq(_pinnedBridgeOf(bytes32(uint256(1))), address(0));
-        assertEq(_pinnedBridgeOf(bytes32(uint256(2))), address(0));
+        (address firstBridge,) = token.pinOf(MessageTypesLib.halfKeyOf(first, 1));
+        (address secondBridge,) = token.pinOf(MessageTypesLib.halfKeyOf(second, 1));
+        assertEq(firstBridge, address(gateway));
+        assertEq(secondBridge, address(gateway));
     }
 
-    /* ----- Recall instruction: an order out, a proof back ----- */
+    /* ----- Bring home: a half out, a receipt back ----- */
 
-    function testARecallInstructionIsAnnouncedAndRecorded() public {
-        _delegate(100);
+    function testABringHomeIsAnnouncedAndRecorded() public {
+        _landMoveOut(_delegate(100), 100);
 
         vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.BRING_HOME, satellite, gateway.receiveIdFor(1));
+        emit EventsLib.ProtocolMessageSent(MessageTypesLib.Message.BRING_HOME, satellite, gateway.receiveIdFor(2));
 
-        uint256 recallId = _instruct(40);
+        bytes32 bringHomeId = _instruct(40);
 
-        assertEq(recallId, 1);
-        assertEq(gateway.queueLength(), 2);
-
-        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(1).payload, (uint8, uint8, bytes));
+        assertEq(gateway.queueLength(), 3, "the move out, its receipt, the bring home");
+        (uint8 messageType,, bytes memory body) = abi.decode(gateway.queuedMessage(2).payload, (uint8, uint8, bytes));
         assertEq(messageType, uint8(MessageTypesLib.Message.BRING_HOME));
-        MessageTypesLib.BringHomeMessage memory instruction = MessageTypesLib.decodeRecallInstruction(body);
-        assertEq(instruction.recallId, 1);
-        assertEq(instruction.wallet, aliceSat);
-        assertEq(instruction.amount, 40);
-        assertEq(instruction.nativeWallet, alice);
+        MessageTypesLib.BringHomeMessage memory half = MessageTypesLib.decodeBringHome(body);
+        assertEq(half.ticketId, bringHomeId);
+        assertEq(half.half, 1);
+        assertEq(half.wallet, aliceSat);
+        assertEq(half.amount, 40);
 
-        assertEq(_pendingRecall(1).amount, 40);
-        assertEq(_pendingRecall(1).gateway, address(gateway), "the dispatch gateway is recorded");
-        assertEq(_pendingRecall(1).peerKey, keccak256(token.peerFor(satellite)), "and the dispatch peer");
+        assertEq(token.reservedOf(aliceSat), 40, "the bring home reserves its amount");
+        (address pinnedBridge, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(bringHomeId, 1));
+        assertEq(pinnedBridge, address(gateway), "the half is pinned to the bridge it left through");
+        assertEq(pinnedPeerKey, keccak256(token.peerFor(satellite)), "and to the peer");
     }
 
-    /// @dev The order changes nothing on the ledger: the position only moves when the answering proof arrives.
-    function testARecallInstructionMovesNothing() public {
-        _delegate(100);
+    /// @dev The order changes nothing on the ledger: the position only moves when the answering receipt arrives.
+    function testABringHomeMovesNothing() public {
+        _landMoveOut(_delegate(100), 100);
         _instruct(40);
 
         assertEq(token.awayBalanceOf(aliceSat), 100);
@@ -291,32 +289,28 @@ contract OutboundMessagingTest is InteropSuiteTest {
         vm.prank(alice);
         token.sendOnTicketRoute(satellite, ticketId, validationBody);
 
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, bob));
-        vm.prank(bob);
-        token.delegateOut(alice, aliceSat, 1);
+        vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
+        vm.prank(alice);
+        token.sendOnReceiptRoute(satellite, ticketId, MessageTypesLib.Message.MOVE_OUT, validationBody);
 
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
         vm.prank(alice);
-        token.instructRecall(aliceSat, 1, alice);
-
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, alice));
-        vm.prank(alice);
-        token.resend(0, 1, "");
+        boundCompliance.bringHome(aliceSat, 1, alice, _salt());
 
         assertEq(gateway.queueLength(), 0);
     }
 
-    /// @dev The agent issues instructions, never a validation: the body and the id it travels under are
-    ///      the compliance's to author, and no role reaches past that.
-    function testAgentCannotDispatchAValidationEvenThoughItDispatchesInstructions() public {
-        _delegate(100);
+    /// @dev The agent brings home, never sends a validation: the body and the id it travels under are the
+    ///      compliance's to author, and no role reaches past that.
+    function testAgentCannotDispatchAValidationEvenThoughItBringsHome() public {
+        _landMoveOut(_delegate(100), 100);
         _instruct(40);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SenderNotCompliance.selector, agent));
         vm.prank(agent);
         token.sendOnTicketRoute(satellite, ticketId, validationBody);
 
-        assertEq(gateway.queueLength(), 2);
+        assertEq(gateway.queueLength(), 3, "the move out, its receipt, the bring home");
         assertEq(_pinnedBridgeOf(ticketId), address(0));
     }
 

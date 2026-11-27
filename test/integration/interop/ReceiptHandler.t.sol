@@ -426,11 +426,15 @@ contract ReceiptHandlerTest is InteropSuiteTest {
             polygonBridge, token, _settlementUnder(unknownId, aliceOnPolygon, bobOnPolygon, 95, keccak256("copy"))
         );
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknownId));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWithoutTicket(unknownId, polygon, aliceOnPolygon, bobOnPolygon, 95);
         polygonBridge.relay(unknownIndex);
 
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the away chain is not blocked");
-        assertFalse(token.messageReceived(address(polygonBridge), polygonBridge.receiveIdFor(unknownIndex)));
+        assertTrue(token.messageReceived(address(polygonBridge), polygonBridge.receiveIdFor(unknownIndex)), "consumed");
+        assertEq(
+            uint8(boundCompliance.statusOf(unknownId)), uint8(ITickets.TicketStatus.OnHold), "held, no destination"
+        );
 
         bytes32 ticketId = _ask(aliceOnPolygon, bobOnPolygon, 10, 50);
         polygonBridge.relay(_liteSettles(polygonBridge, token, _settlement(ticketId, aliceOnPolygon, bobOnPolygon, 50)));
@@ -449,7 +453,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         ITickets.TicketLimits memory limits = boundCompliance.ticketLimitsOf(polygon);
         assertEq(limits.perTicketCap, 70);
         assertEq(limits.perWindowCap, 700);
-        assertEq(boundCompliance.ticketLimitsOf(optimism).perTicketCap, 0, "per away chain");
+        assertEq(boundCompliance.ticketLimitsOf(optimism).perTicketCap, TICKET_CAP, "per away chain");
     }
 
     /// @notice A ticket sent under the higher cap may still be executed until its valid until, and its honest

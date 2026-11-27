@@ -60,7 +60,7 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
         nativeUser2 = satelliteEnvelope(block.chainid, user2);
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -113,9 +113,10 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
     /// @notice The compliance never issues a validation out of a native wallet, and the ledger refuses one on
     ///         its own account: a settlement only ever debits a position a satellite held.
+    /// @notice A home wallet holds no away balance: outside a hold of its own move out, nothing is taken from it.
     function test_settleValidation_RevertWhen_FromIsNative() public {
         vm.prank(compliance);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, nativeUser1, 0, 25));
         token.finishMove(nativeUser1, satellite2, 25, VALIDATION_ID);
     }
 
@@ -135,7 +136,7 @@ contract TokenSettleValidationUnitTest is TokenLedgerBaseUnitTest {
 
     function test_settleValidation_RevertWhen_BothWalletsAreNative() public {
         vm.prank(compliance);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, nativeUser1));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, nativeUser1, 0, 10));
         token.finishMove(nativeUser1, nativeUser2, 10, VALIDATION_ID);
     }
 

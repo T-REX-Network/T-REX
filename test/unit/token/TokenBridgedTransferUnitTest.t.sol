@@ -55,7 +55,7 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         super.setUp();
         vm.startPrank(agent);
         token.mint(user1, 100);
-        ledger.ledgerDelegateOut(user1, satellite1, 60);
+        ledger.ledgerMoveOut(user1, satellite1, 60);
         vm.stopPrank();
     }
 
@@ -129,10 +129,10 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         assertEq(token.awayBalanceOf(satellite2), 0);
     }
 
-    function test_bridgedTransfer_ThenRecallFromTheReceiver() public {
+    function test_bridgedTransfer_ThenBringHomeFromTheReceiver() public {
         vm.startPrank(agent);
         ledger.bridgedTransfer(satellite1, satellite2, 30, VALIDATION_ID);
-        ledger.ledgerRecall(satellite2, user2, 30);
+        ledger.ledgerBringHome(satellite2, user2, 30);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user2), 30);
@@ -171,11 +171,13 @@ contract TokenBridgedTransferUnitTest is TokenLedgerBaseUnitTest {
         _assertPartition();
     }
 
+    /// @notice A home wallet holds no away balance: outside a hold of its own move out, the ledger has nothing to
+    ///         take from it.
     function test_bridgedTransfer_RevertWhen_SourceIsOnTheReferenceChain() public {
         bytes memory native = satelliteEnvelope(block.chainid, user1);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotASatelliteWallet.selector, native));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, native, 0, 1));
         vm.prank(agent);
-        ledger.bridgedTransfer(native, satellite2, 0, VALIDATION_ID);
+        ledger.bridgedTransfer(native, satellite2, 1, VALIDATION_ID);
     }
 
     function test_bridgedTransfer_RevertWhen_SourceEnvelopeIsNotCanonical() public {

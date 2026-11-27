@@ -12,6 +12,7 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
+import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 import { SatelliteLiteMock } from "test/integration/mocks/SatelliteLiteMock.sol";
 
@@ -42,13 +43,14 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         super.setUp();
         polygonGateway = _newReceiptBridge(POLYGON);
         optimismGateway = _newReceiptBridge(OPTIMISM);
-        _openEvmChain(token, POLYGON, address(polygonGateway));
-        _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
+        // The away token is the token's peer before the route opens: a peer set on an open route is a change.
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
         vm.stopPrank();
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        _openEvmChain(token, OPTIMISM, address(optimismGateway));
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");
         aliceSat = _linkSatelliteWallet(aliceIdentity, POLYGON, aliceOnPolygon);
@@ -63,10 +65,12 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         vm.prank(deployer);
         boundCompliance.setTicketLimits(polygon, DELEGATED, DELEGATED);
 
+        bytes memory aliceHome = InteroperableAddress.formatEvmV1(block.chainid, alice);
         vm.prank(alice);
-        token.delegateOut(alice, aliceSat, DELEGATED);
+        boundCompliance.askToMove(aliceHome, aliceSat, DELEGATED, DELEGATED, "", _salt());
         _relayAll(polygonGateway);
-        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "the Lite minted what the token delegated");
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "the Lite minted what the token moved out");
+        assertEq(token.awayBalanceOf(aliceSat), DELEGATED, "and its receipt landed");
     }
 
     /* ----- Case 1: the issuance is re-included behind another one ----- */
@@ -101,9 +105,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     /* ----- Case 2: the ask is dropped from the canonical chain ----- */
 
     /// @notice The away token executed a ticket from a home block a reorg dropped. Its receipt names an id home has
-    ///         no record of: it reverts and stays deliverable at the bridge, and no chain is blocked. The request
-    ///         sent again with the same terms and salt takes the same id in a later block, and the receipt, delivered
-    ///         again, is applied on the older terms it echoes.
+    ///         no record of: its amount is put on hold under the sender with no destination, and no chain is blocked.
+    ///         The request sent again with the same terms and salt takes the same id in a later block, and takes the
+    ///         money on hold: the move the away token made is finished.
     function test_reorg_Success_WhenADroppedIssuanceIsResubmittedWithTheSameSalt() public {
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -113,30 +117,26 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         _execute(id, 95);
         uint256 receipt = _last(polygonGateway);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, id));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWithoutTicket(id, polygon, aliceSat, bobSat, 95);
         polygonGateway.relay(receipt);
 
         assertFalse(token.paused(), "the token keeps running");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest away chain is not blocked");
-        assertFalse(token.messageReceived(address(polygonGateway), polygonGateway.receiveIdFor(receipt)));
-        assertEq(token.awayBalanceOf(bobSat), 0, "nothing applied");
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.OnHold), "on hold with no destination");
+        assertEq(token.onHoldOf(id), 95);
+        assertEq(boundCompliance.uncountedCreditOf(bobSat), 95, "bob holds tokens home does not count for him yet");
 
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.HoldTaken(id);
         vm.prank(address(aliceIdentity));
         assertEq(boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt), id);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
-
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptOnOlderTerms(id, polygon, 100);
-        polygonGateway.relay(receipt);
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertEq(boundCompliance.ticketOf(id).moved, 95);
         assertEq(token.awayBalanceOf(bobSat), 95);
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
-        assertTrue(
-            boundCompliance.ticketOf(id).askBlockHash != orphaned.askBlockHash,
-            "same request, same id; another block, another copy"
-        );
+        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "now counted");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
@@ -150,11 +150,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
 
-        ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
-        vm.warp(uint256(issued.waitingEndsAt) + (issued.waitingEndsAt - issued.validUntil) + 1);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = id;
-        boundCompliance.cancelTickets(ids);
+        _cancelUnanswered(id, bobSat, "");
         assertEq(token.reservedOf(aliceSat), 0, "the cancel released the reservation");
 
         polygonGateway.relay(receipt);
@@ -174,12 +170,10 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         _execute(id, 98);
         uint256 receipt = _last(polygonGateway);
 
-        // Another ask reserved part of the wallet in the meantime: the same request is now narrowed to 95.
-        uint256 reservedByTheOtherAsk = DELEGATED - 95;
-        vm.startPrank(address(aliceIdentity));
-        boundCompliance.askToMove(aliceSat, bobSat, 1, reservedByTheOtherAsk, "", _salt());
+        // A rule bound in the meantime caps what bob may receive: the same request is now narrowed to 95.
+        _bindRecipientCap(95);
+        vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
-        vm.stopPrank();
         assertEq(boundCompliance.ticketOf(id).amountMax, 95, "narrowed by home");
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
@@ -191,13 +185,14 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(token.awayBalanceOf(bobSat), 98, "applied as it happened");
-        assertEq(token.reservedOf(aliceSat), reservedByTheOtherAsk, "the ticket's reservation is released");
-        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), reservedByTheOtherAsk);
+        assertEq(token.reservedOf(aliceSat), 0, "the ticket's reservation is released");
+        assertEq(boundCompliance.pendingInOf(address(bobIdentity)), 0);
     }
 
-    /// @notice The request sent again waits for approval: the receipt of the dropped copy now names a ticket written
-    ///         and not sent, so it waits here, and is applied once the approval sends the ticket.
-    function test_reorg_Success_WhenTheResubmittedRequestWaitsForApproval() public {
+    /// @notice The request sent again waits for approval: the receipt of the dropped copy answers no ticket home
+    ///         sent, so it is put on hold with no destination, never applied as that ticket's move. The approver can no
+    ///         longer answer the request, and the held money is cancelled back once nobody takes it.
+    function test_reorg_putsTheReceiptOnHold_whenTheResubmittedRequestWaitsForApproval() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
         MessageTypesLib.TicketMessage memory orphaned = _orphanedIssuance(salt, bobSat, 90, 100);
@@ -209,47 +204,29 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
 
-        MessageTypesLib.ReceiptMessage memory waiting = _receiptOf(receipt);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptWaiting(id, polygon, address(polygonGateway), waiting);
+        emit EventsLib.ReceiptWithoutTicket(id, polygon, aliceSat, bobSat, 95);
         polygonGateway.relay(receipt);
-        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "waits for the answer");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing is blocked");
-        assertEq(token.awayBalanceOf(bobSat), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id));
-        boundCompliance.applyWaitingReceipt(id, waiting);
+        ITickets.Ticket memory held = boundCompliance.ticketOf(id);
+        assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold), "on hold");
+        assertFalse(held.written, "no ticket home sent answers it");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing is blocked");
+        assertEq(token.reservedOf(aliceSat), 0, "the request's reservation is released");
 
         vm.prank(backend);
         module.approveValidation(address(boundCompliance), id, 100);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.ValidationNotAwaitingApproval.selector, id, uint8(ITickets.TicketStatus.OnHold)
+            )
+        );
         module.finalize(address(boundCompliance), id);
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
-
-        // A waiting receipt waits under a block of its chain, and under a stop of the token, as a delivery does.
-        vm.prank(agent);
-        boundCompliance.blockAwayChain(polygon);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.applyWaitingReceipt(id, waiting);
-        vm.startPrank(agent);
-        boundCompliance.unblockAwayChain(polygon);
-        token.pause();
-        vm.stopPrank();
-        vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.applyWaitingReceipt(id, waiting);
-        vm.prank(agent);
-        token.unpause();
-
-        vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.WaitingReceiptApplied(id, polygon);
-        boundCompliance.applyWaitingReceipt(id, waiting);
-
-        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
-        assertEq(token.awayBalanceOf(bobSat), 95);
-        assertEq(boundCompliance.waitingReceiptOf(id).bodyHash, bytes32(0));
     }
 
-    /// @notice Refused, the request sends nothing and the receipt stays waiting for the operator to read.
-    function test_reorg_LeavesTheLegParked_WhenTheResubmittedRequestIsRefused() public {
+    /// @notice Refused before the receipt lands, the request sends nothing; the receipt of the dropped copy is then
+    ///         put on hold with no destination.
+    function test_reorg_putsTheReceiptOnHold_whenTheResubmittedRequestIsRefused() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
         bytes32 id = _orphanedIssuance(salt, bobSat, 90, 100).ticketId;
@@ -258,17 +235,16 @@ contract ReorgRecoveryTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         boundCompliance.askToMove(aliceSat, bobSat, 90, 100, "", salt);
-        polygonGateway.relay(receipt);
         vm.prank(backend);
         module.refuseValidation(address(boundCompliance), id);
-
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Cancelled));
-        assertTrue(boundCompliance.waitingReceiptOf(id).bodyHash != bytes32(0), "left for the operator");
-        assertEq(boundCompliance.waitingReceiptOf(id).amount, 95);
+
+        polygonGateway.relay(receipt);
+
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.OnHold), "on hold with no destination");
+        assertEq(token.onHoldOf(id), 95);
         assertEq(token.awayBalanceOf(bobSat), 0);
-        MessageTypesLib.ReceiptMessage memory waiting = _receiptOf(receipt);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoWaitingReceipt.selector, id));
-        boundCompliance.applyWaitingReceipt(id, waiting);
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
     /// @notice The requester need not come back: the copy the away token holds carries the whole request, the asked
@@ -439,8 +415,25 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         approvers[0] = backend;
         bytes[] memory settings = new bytes[](1);
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
-        vm.prank(deployer);
+        // An approval module is bound only while asks are paused.
+        vm.startPrank(deployer);
+        boundCompliance.setAsksPaused(true);
         boundCompliance.addAndSetModule(address(module), settings);
+        boundCompliance.setAsksPaused(false);
+        vm.stopPrank();
+    }
+
+    /// @dev A rule capping what any identity may receive at `cap`, bound while no ticket is open.
+    function _bindRecipientCap(uint256 cap) private {
+        CappedRecipientModule capRule = CappedRecipientModule(
+            address(
+                new ModuleProxy(address(new CappedRecipientModule()), abi.encodeCall(RecordingModule.initialize, ()))
+            )
+        );
+        vm.startPrank(deployer);
+        boundCompliance.addModule(address(capRule));
+        boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (cap)), address(capRule));
+        vm.stopPrank();
     }
 
 }
