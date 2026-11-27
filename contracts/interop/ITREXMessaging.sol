@@ -81,7 +81,7 @@ interface ITREXMessaging {
     error ChainNotRegistered(bytes32 chainKey);
     error BridgeNotOnRoute(address gateway, bytes32 chainKey);
     error NotAReceiptBridge(address bridge);
-    error NotATicketBridge(address bridge);
+    error BridgeNotTrusted(address gateway);
     error ReceiptBridgeNotFullFinality(address bridge, bytes32 chainKey);
     error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
@@ -111,8 +111,8 @@ interface ITREXMessaging {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `bridge` must be recorded as a receipt bridge in the registry; otherwise reverts with `NotAReceiptBridge`.
-    ///   A ticket bridge, a distrusted bridge and zero all fail this.
+    /// - `bridge` must be trusted by the registry at depth zero; otherwise reverts with `NotAReceiptBridge`. A bridge
+    ///   at another depth, a distrusted bridge and zero all fail this.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
     /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
@@ -154,8 +154,8 @@ interface ITREXMessaging {
     ///
     /// The two routes of a chain split its traffic by what a reorg can cost:
     /// - the ticket route carries tickets out, and only tickets. A ticket moves nothing on its own.
-    /// - the receipt route carries money messages out and is the only route receipts are taken from. A ticket
-    ///   bridge never delivers to this token: the token takes deliveries from receipt bridges only.
+    /// - the receipt route carries money messages out and is the only route receipts are taken from. The token
+    ///   takes deliveries from receipt bridges, trusted at depth zero, only.
     ///
     /// A ticket goes out on the ticket route when it is set and still trusted, otherwise on the receipt route.
     /// The chain must be open on its receipt route either way, and the half is pinned to that receipt route,
@@ -164,8 +164,8 @@ interface ITREXMessaging {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `bridge` must be recorded as a ticket bridge in the registry, or zero; otherwise reverts with
-    ///   `NotATicketBridge`. A bridge has one record, so a receipt bridge of any away chain is refused.
+    /// - `bridge` must be trusted by the registry, or zero; otherwise reverts with `BridgeNotTrusted`. Its depth is
+    ///   not checked: a ticket moves nothing on its own.
     /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
     ///   `InvalidChainReference`.
     ///
@@ -254,15 +254,16 @@ interface ITREXMessaging {
     /// @return peerKey The `keccak256` of the peer the half was sent to.
     function pinOf(bytes32 halfKey) external view returns (address bridge, bytes32 peerKey);
 
-    /// @dev Whether `chainKey` is routed right now: a receipt route, a peer, and a bridge still recorded as a
-    /// receipt bridge. Re-reads the registry, so distrusting a bridge closes every chain routed through it. A blocked
+    /// @dev Whether `chainKey` is routed right now: a receipt route, a peer, and a bridge still trusted at depth zero.
+    /// Re-reads the registry, so distrusting a bridge, or setting its depth above zero, closes every chain routed
+    /// through it. A blocked
     /// away chain is the compliance's, see `ITickets.isAwayChainBlocked`, and stays open here.
     /// @param chainKey The chain to check.
     /// @return True when the chain has a receipt route, a peer and a receipt bridge.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
 
     /// @dev Runs the route check a receipt passes at delivery again, for a receipt the compliance kept waiting:
-    /// `bridge` must still be a receipt bridge of the network, the away chain's receipt route must be open, the
+    /// `bridge` must still be trusted by the network at depth zero, the away chain's receipt route must be open, the
     /// pair must be the one the half was pinned to, the chain's current route and peer, or its former ones as long as
     /// the receipt arrived inside the window of their planned change, and the bridge's receiving policy must still
     /// admit that away chain at full finality only. A bridge distrusted, a route closed or changed, or a peer replaced

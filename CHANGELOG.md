@@ -27,7 +27,9 @@ All notable changes to this project will be documented in this file.
     `sendOnReceiptRoute`, `checkReceiptOrigin`, `putOnHold`, `burnOntoHold`, `finishMove`, `reserveForTicket`,
     `releaseFromTicket`, and the views `awayBalanceOf`, `totalAwayBalance`, `onHoldOf`, `totalOnHold`,
     `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. On `TrustedGatewayRegistry`:
-    `trustTicketBridge`, `trustReceiptBridge`, `distrustBridge`, `isReceiptBridge`, `depthOf`.
+    `depthOf`, and `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for (zero is full
+    finality). A receipt bridge is a bridge trusted at depth zero; a depth may be set again and is read on every
+    use, and a distrusted bridge is never trusted again.
   - *Deleted functions.* `requestTransferValidation`, `resendValidation`, `discardExpiredValidations`,
     `resolveStuckValidation`, `settleParkedLeg`, `parkedLegOf`, `validationOf`, `handleSettlement`,
     `setReconciliationWindow`, `reconciliationWindowOf`, `setDefaultValidityWindow`, `defaultValidityWindow`,
@@ -35,7 +37,7 @@ All notable changes to this project will be documented in this file.
     `instructRecall`, `pendingRecall`, `syncOwner`, `resend`, `holdInTransit`, `returnHeldInTransit`,
     `settleValidation`, `reserveForValidation`, `releaseFromValidation`, `dispatchComplianceValidation`, `setRoute`,
     `routeFor`, `setFastRoute`, `fastRouteFor`, `pinnedRouteFor`, `bridgedBalanceOf`, `totalBridged`, `inTransitOf`,
-    `totalInTransit`, and `setTrustedGateway` on the registry.
+    `totalInTransit`, and `setTrustedGateway(gateway, trusted)` on the registry (now with a depth).
   - *Roles.* The agent asks to move any wallet's tokens (`askToMove`; the identity linked to the sender, or a home
     sender itself, asks too) and brings home (`bringHome`). The agent pauser blocks and unblocks an away chain and
     refuses a waiting receipt. The compliance manager sets the validity windows, waiting times, measured times, ask

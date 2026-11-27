@@ -137,7 +137,7 @@ contract CloseByHandTest is HoldsSuiteTest {
     /// @notice Distrusting the route's bridge does not open close by hand: only closing the receipt route does.
     function test_closeByHand_reverts_when_theReceiptBridgeIsOnlyDistrusted() public {
         bytes32 ticketId = _executedTicketWhoseReceiptIsLost(FOUR);
-        trustedGatewayRegistry.distrustBridge(address(polygonGateway));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false, 0);
         assertFalse(token.isChainOpen(polygon), "a distrusted bridge carries nothing");
         MessageTypesLib.ReceiptMessage memory stored = polygonLite.storedReceipt(ticketId, 0);
 

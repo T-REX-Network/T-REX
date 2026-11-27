@@ -689,8 +689,8 @@ interface ITickets {
     /// - No hostile change running on the sender's away chain; otherwise reverts with `HostileChangeNotOver`: an
     ///   honest receipt still on the replaced pair may answer the ticket. This holds for a ticket `WaitingForApproval`
     ///   too.
-    /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
-    ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
+    /// - The sender's away chain open on the token: a receipt route set, through a bridge still trusted at depth
+    ///   zero; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
     ///   taken as missing: once the route is closed, {closeByHand} decides it from a read of that chain.
     /// - No receipt for the ticket waiting that can be applied now; otherwise reverts with
     ///   `ApplyWaitingReceiptFirst`: the receipt is already here, and {applyWaitingReceipt} applies it first. A

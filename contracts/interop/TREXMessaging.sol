@@ -152,12 +152,12 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
     }
 
     /// @inheritdoc ERC7786Recipient
-    /// @dev Everything a token receives reports value that moved, so only a receipt bridge delivers to it. A ticket
-    ///  bridge relays before finality and is refused here, whichever away chain it serves. The refusal reverts with
-    ///  OpenZeppelin's `ERC7786RecipientUnauthorizedGateway`: it is the design's `WrongRoute`, and the message stays
-    ///  deliverable through a receipt bridge.
+    /// @dev Everything a token receives reports value that moved, so only a receipt bridge, trusted at depth zero,
+    ///  delivers to it. A ticket bridge relays before finality and is refused here, whichever away chain it serves.
+    ///  The refusal reverts with OpenZeppelin's `ERC7786RecipientUnauthorizedGateway`: it is the design's
+    ///  `WrongRoute`, and the message stays deliverable through a receipt bridge.
     function _isAuthorizedGateway(address gateway, bytes calldata) internal view override returns (bool) {
-        return TREXMessagingLib.layout().registry.isReceiptBridge(gateway);
+        return TREXMessagingLib.isReceiptBridge(gateway);
     }
 
     /// @inheritdoc ERC7786Recipient

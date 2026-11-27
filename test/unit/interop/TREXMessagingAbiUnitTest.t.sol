@@ -73,7 +73,7 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.ChainNotRegistered.selector, ErrorsLib.ChainNotRegistered.selector);
         assertEq(ITREXMessaging.BridgeNotOnRoute.selector, ErrorsLib.BridgeNotOnRoute.selector);
         assertEq(ITREXMessaging.NotAReceiptBridge.selector, ErrorsLib.NotAReceiptBridge.selector);
-        assertEq(ITREXMessaging.NotATicketBridge.selector, ErrorsLib.NotATicketBridge.selector);
+        assertEq(ITREXMessaging.BridgeNotTrusted.selector, ErrorsLib.BridgeNotTrusted.selector);
         assertEq(ITREXMessaging.ReceiptBridgeNotFullFinality.selector, ErrorsLib.ReceiptBridgeNotFullFinality.selector);
         assertEq(ITREXMessaging.InvalidChainReference.selector, ErrorsLib.InvalidChainReference.selector);
         assertEq(ITREXMessaging.InvalidPeer.selector, ErrorsLib.InvalidPeer.selector);

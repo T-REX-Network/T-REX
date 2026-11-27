@@ -247,7 +247,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     /// @notice The same when the receipt bridge is distrusted: nothing can deliver the receipt meanwhile.
     function test_cancelTickets_RevertWhen_TheReceiptBridgeIsDistrusted() public {
         _askAndLetTheAskGoUnanswered(id, bobSat, "");
-        trustedGatewayRegistry.distrustBridge(token.receiptRouteFor(polygon));
+        trustedGatewayRegistry.setTrustedGateway(token.receiptRouteFor(polygon), false, 0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         boundCompliance.cancelTickets(_ids(id));

@@ -530,7 +530,7 @@ contract InboundMessagingTest is InteropSuiteTest {
     function testUntrustingTheGatewayStopsInboundToo() public {
         uint256 index = _peerSendsSettlement();
 
-        trustedGatewayRegistry.distrustBridge(address(routedGateway));
+        trustedGatewayRegistry.setTrustedGateway(address(routedGateway), false, 0);
 
         vm.expectRevert(
             abi.encodeWithSelector(

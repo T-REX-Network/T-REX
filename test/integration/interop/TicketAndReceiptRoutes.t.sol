@@ -13,10 +13,10 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev Each away chain has two routes. The ticket route carries tickets out and nothing else, through a ticket
+/// @dev Each away chain has two routes. The ticket route carries tickets out and nothing else, through any trusted
 ///      bridge; the receipt route carries money messages out and is the only one receipts and burn proofs are taken
-///      from, through a receipt bridge. A bridge has one record in the registry, so it is never both kinds, for any
-///      away chain. Every message type is tried on each route.
+///      from, through a receipt bridge: one the registry trusts at depth zero, read again on every use. Every message
+///      type is tried on each route.
 contract TicketAndReceiptRoutesTest is InteropSuiteTest {
 
     /// @dev The depth the ticket bridges here wait for before they relay.
@@ -115,29 +115,27 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         assertTrue(token.isChainOpen(polygon), "the away chain stays open on its receipt route");
     }
 
-    function test_setTicketRoute_RevertWhen_TheBridgeIsNotRecorded() public {
+    function test_setTicketRoute_RevertWhen_TheBridgeIsNotTrusted() public {
         address unknownBridge = address(new ERC7786GatewayMock(POLYGON));
         (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotATicketBridge.selector, unknownBridge));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotTrusted.selector, unknownBridge));
         vm.prank(deployer);
         token.setTicketRoute(chainType, chainReference, unknownBridge);
     }
 
-    function test_setTicketRoute_RevertWhen_TheBridgeIsTheReceiptRoute() public {
-        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
+    /// @dev The ticket route's depth is not checked: a ticket may ride a bridge at full finality, the receipt route's
+    ///  own included.
+    function test_setTicketRoute_takesTheReceiptRoute() public {
+        _setTicketRoute(POLYGON, address(receiptBridge));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotATicketBridge.selector, address(receiptBridge)));
-        vm.prank(deployer);
-        token.setTicketRoute(chainType, chainReference, address(receiptBridge));
+        assertEq(token.ticketRouteFor(polygon), address(receiptBridge));
     }
 
-    function test_setTicketRoute_RevertWhen_TheBridgeIsTheReceiptBridgeOfAnotherAwayChain() public {
-        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
+    function test_setTicketRoute_takesTheReceiptBridgeOfAnotherAwayChain() public {
+        _setTicketRoute(POLYGON, address(optimismReceiptBridge));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotATicketBridge.selector, address(optimismReceiptBridge)));
-        vm.prank(deployer);
-        token.setTicketRoute(chainType, chainReference, address(optimismReceiptBridge));
+        assertEq(token.ticketRouteFor(polygon), address(optimismReceiptBridge));
     }
 
     function test_setReceiptRoute_RevertWhen_TheBridgeIsTheTicketRoute() public {
@@ -197,7 +195,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
 
     /// @dev The registry distrusted the ticket bridge: tickets fall back to the receipt route rather than stopping.
     function test_askToMove_sendsTheTicketOnTheReceiptRoute_whenTheTicketBridgeIsDistrusted() public {
-        trustedGatewayRegistry.distrustBridge(address(ticketBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(ticketBridge), false, 0);
 
         _issue();
 
@@ -355,6 +353,54 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         receiptBridge.relay(index);
 
         assertEq(uint8(boundCompliance.statusOf(bringHomeId)), uint8(ITickets.TicketStatus.Open), "still open");
+    }
+
+    /* ----- A depth set again ----- */
+
+    /// @dev The registry may set a bridge's depth again, so it is read on every receipt: a receipt bridge set above
+    ///  depth zero delivers nothing, and its receipt stays deliverable until the depth is zero again.
+    function test_receiveReceipt_RevertWhen_TheReceiptBridgeDepthIsSetAboveZero() public {
+        bytes32 id = _issue();
+        uint256 index = _liteSettles(receiptBridge, token, _settlement(id, aliceSat, bobSat, 60));
+        trustedGatewayRegistry.setTrustedGateway(address(receiptBridge), true, TICKET_DEPTH);
+
+        _expectNotAReceiptBridgeDelivery(receiptBridge);
+        receiptBridge.relay(index);
+        assertFalse(token.isChainOpen(polygon), "the chain is no longer open");
+        assertFalse(token.messageReceived(address(receiptBridge), receiptBridge.receiveIdFor(index)), "deliverable");
+
+        trustedGatewayRegistry.setTrustedGateway(address(receiptBridge), true, 0);
+        receiptBridge.relay(index);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Done));
+    }
+
+    /// @dev The depth is read on every money message sent: a receipt route set above depth zero carries none.
+    function test_bringHome_RevertWhen_TheReceiptBridgeDepthIsSetAboveZero() public {
+        trustedGatewayRegistry.setTrustedGateway(address(receiptBridge), true, TICKET_DEPTH);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        vm.prank(agent);
+        boundCompliance.bringHome(aliceSat, 100, alice, _salt());
+    }
+
+    function test_askToMove_RevertWhen_TheMoveOutsReceiptBridgeDepthIsSetAboveZero() public {
+        trustedGatewayRegistry.setTrustedGateway(address(receiptBridge), true, TICKET_DEPTH);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        vm.prank(alice);
+        boundCompliance.askToMove(_aliceHome(), aliceSat, 100, 100, "", _salt());
+    }
+
+    /// @dev A bridge recorded at a depth becomes a receipt bridge once its depth is set to zero.
+    function test_setReceiptRoute_takesABridgeWhoseDepthIsSetToZero() public {
+        ticketBridge.setReceivingPolicy(_awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON), FULL_FINALITY);
+        trustedGatewayRegistry.setTrustedGateway(address(ticketBridge), true, 0);
+
+        _openEvmChain(token, POLYGON, address(ticketBridge));
+
+        assertEq(token.receiptRouteFor(polygon), address(ticketBridge));
+        assertTrue(token.isChainOpen(polygon));
     }
 
 }

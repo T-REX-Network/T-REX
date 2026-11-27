@@ -240,7 +240,7 @@ contract RouteSwitchTest is InteropSuiteTest {
         uint256 viaOld = _settlementFrom(oldGateway, inFlight);
         uint256 viaNew = _settlementFrom(newGateway, inFlight);
 
-        trustedGatewayRegistry.distrustBridge(address(oldGateway));
+        trustedGatewayRegistry.setTrustedGateway(address(oldGateway), false, 0);
 
         vm.expectRevert(
             abi.encodeWithSelector(

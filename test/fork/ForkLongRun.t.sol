@@ -123,7 +123,7 @@ contract ForkLongRunTest is ForkBase {
 
     function _trustGateway(DeployConfig memory c, Addrs memory a) internal {
         address gateway = makeAddr("bridge gateway");
-        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.trustReceiptBridge, (gateway));
+        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (gateway, true, 0));
         _expectSafeCallReverts(Actor.OperationsSafe, a.gatewayRegistry, trust);
         _fromSafe(
             c,

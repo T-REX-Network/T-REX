@@ -140,18 +140,16 @@ library AccessManagerSetupLib {
         require(role != PUBLIC_ROLE, ErrorsLib.PlatformRoleCannotBePublic());
     }
 
-    /// @notice Maps `trustTicketBridge`, `trustReceiptBridge` and `distrustBridge` to `interopManagerRole`, the role
-    ///         governance picks for interop configuration.
+    /// @notice Maps `setTrustedGateway` to `interopManagerRole`, the role governance picks for interop
+    ///         configuration.
     function setupTrustedGatewayRegistryRoles(
         IAccessManager accessManager,
         address trustedGatewayRegistry,
         uint64 interopManagerRole
     ) internal {
         _requireNotPublicRole(interopManagerRole);
-        bytes4[] memory functions = new bytes4[](3);
-        functions[0] = TrustedGatewayRegistry.trustTicketBridge.selector;
-        functions[1] = TrustedGatewayRegistry.trustReceiptBridge.selector;
-        functions[2] = TrustedGatewayRegistry.distrustBridge.selector;
+        bytes4[] memory functions = new bytes4[](1);
+        functions[0] = TrustedGatewayRegistry.setTrustedGateway.selector;
         accessManager.setTargetFunctionRole(trustedGatewayRegistry, functions, interopManagerRole);
     }
 

@@ -385,7 +385,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
     function test_sendSecondHalf_sendsTheSameHalfThroughTheNewRoute_whenThePinnedBridgeIsDistrusted() public {
         bytes32 id = _bringHome(BROUGHT);
         uint256 throughTheOldBridge = _liteSettles(polygonGateway, token, _burned(id, 1, BROUGHT));
-        trustedGatewayRegistry.distrustBridge(address(polygonGateway));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false, 0);
 
         vm.expectRevert(
             abi.encodeWithSelector(

@@ -218,9 +218,9 @@ contract SeedInterop is Script {
         // The loopback gateway plays the home receipt bridge: its receiving policy admits the satellite's
         // receipt bridge (the deployer, who plays every satellite contract) at full finality only.
         gateway.setReceivingPolicy(_satelliteChainSelector(), _satelliteReceiptBridge(), bytes4(0));
-        if (!registry.isReceiptBridge(address(gateway))) {
-            registry.trustReceiptBridge(address(gateway));
-            console.log("Gateway recorded as a receipt bridge in TrustedGatewayRegistry");
+        if (!registry.isTrusted(address(gateway))) {
+            registry.setTrustedGateway(address(gateway), true, 0);
+            console.log("Gateway trusted at full finality in TrustedGatewayRegistry");
         }
         idFactory.setTrustedGateway(address(gateway), chainType, chainReference, true);
         console.log("Gateway trusted in IdentityFactory for the satellite chain");

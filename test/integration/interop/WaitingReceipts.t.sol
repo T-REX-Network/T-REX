@@ -91,7 +91,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         MessageTypesLib.ReceiptMessage memory receipt = _receipt(ticketId, 40);
         polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
 
-        trustedGatewayRegistry.distrustBridge(address(polygonBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonBridge), false, 0);
         _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
@@ -298,7 +298,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         bytes32 ticketId = _ask(10, 50);
         _askForTheReceipt(ticketId);
         _receiptWaitingUnderABlock(ticketId, 40);
-        trustedGatewayRegistry.distrustBridge(address(polygonBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonBridge), false, 0);
         _openEvmChain(token, POLYGON, address(_newReceiptBridge(POLYGON)));
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);

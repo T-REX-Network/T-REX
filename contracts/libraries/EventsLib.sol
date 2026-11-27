@@ -62,7 +62,6 @@ import { IIdentity } from "@onchain-id/solidity/contracts/interface/IIdentity.so
 
 import { ITickets } from "../compliance/modular/ITickets.sol";
 import { IModule } from "../compliance/modular/modules/IModule.sol";
-import { ITrustedGatewayRegistry } from "../interop/ITrustedGatewayRegistry.sol";
 import { ITREXImplementationAuthority } from "../proxy/beacon/ITREXImplementationAuthority.sol";
 import { MessageTypesLib } from "./MessageTypesLib.sol";
 import { Version } from "./VersionLib.sol";
@@ -138,11 +137,8 @@ library EventsLib {
 
     // TrustedGatewayRegistry Events
 
-    /// @notice Emitted when a reviewed bridge gets its one record: its standing and, for a ticket bridge, the
-    ///  depth it waits for (zero is full finality).
-    event BridgeTrusted(address indexed bridge, ITrustedGatewayRegistry.BridgeStanding standing, uint64 depth);
-    /// @notice Emitted when a bridge is distrusted, for good.
-    event BridgeDistrusted(address indexed bridge);
+    /// @notice Emitted when `bridge` is trusted at `depth` (zero is full finality), or distrusted for good.
+    event TrustedGatewaySet(address indexed bridge, bool trusted, uint64 depth);
 
     // TREXMessaging Events
 

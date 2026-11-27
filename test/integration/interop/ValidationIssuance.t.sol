@@ -245,7 +245,7 @@ contract ValidationIssuanceTest is InteropSuiteTest {
     /* ----- Fail closed ----- */
 
     function test_requestTransferValidation_RevertWhen_TheGatewayIsNoLongerTrusted() public {
-        trustedGatewayRegistry.distrustBridge(address(polygonGateway));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false, 0);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));

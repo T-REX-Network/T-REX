@@ -267,7 +267,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         bytes memory solanaReceiptBridge = abi.encode(makeAddr("solanaReceiptBridge"));
         ERC7786GatewayMock solanaRoute = new ERC7786GatewayMock(0x01);
         solanaRoute.setReceivingPolicy(solanaSelector, solanaReceiptBridge, FULL_FINALITY);
-        trustedGatewayRegistry.trustReceiptBridge(address(solanaRoute));
+        trustedGatewayRegistry.setTrustedGateway(address(solanaRoute), true, 0);
         vm.prank(deployer);
         token.setReceiptRoute(bytes2(0x0002), hex"01", address(solanaRoute), solanaSelector, solanaReceiptBridge);
 
@@ -319,7 +319,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(ticketId, satellite);
         assertEq(gateway.queueLength(), 1);
 
-        trustedGatewayRegistry.distrustBridge(address(gateway));
+        trustedGatewayRegistry.setTrustedGateway(address(gateway), false, 0);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, satellite));
         _dispatch(bytes32(uint256(2)), satellite);

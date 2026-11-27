@@ -64,9 +64,11 @@ other chain, and blocks that chain.
 2. **Accept only the reference token as author**, through its own gateway; never act on a message from another away
    token.
 2a. **Send every receipt on the receipt route, at full finality.** A chain may have two routes on the reference
-   side: a ticket route, set with `setTicketRoute` to a ticket bridge, that carries tickets out ahead of finality and
+   side: a ticket route, set with `setTicketRoute` to a trusted bridge, that carries tickets out ahead of finality and
    nothing else, and the receipt route, set with `setReceiptRoute` to a receipt bridge, that carries money messages out
-   and is the only one receipts are taken from. The token takes deliveries from receipt bridges only,
+   and is the only one receipts are taken from. A receipt bridge is a bridge the registry trusts at depth zero
+   (`setTrustedGateway(bridge, true, 0)`, `depthOf`); the depth may be set again and is read on every send of a money
+   message and every receipt. The token takes deliveries from receipt bridges only,
    so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`, OZ's `WrongRoute`: the message stays
    deliverable through a receipt bridge), and it reads the receipt
    bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
@@ -262,7 +264,7 @@ distrust its gateway.
 | block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home); move outs, bring homes, new tickets and asks for receipts toward it; cancels of its tickets | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms | the pauser, `unblockAwayChain` |
 | hostile peer replaced, `replaceHostilePeer` | asks, ticket sends, asks for receipts and cancels for one away chain, for four of its waiting times (`HostileChangeNotOver`); receipts still land | the identity manager | nobody: it ends by itself at `hostileChangeEndsAt` |
 | receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled on home's clock meanwhile: the identity manager closes it by hand, `closeByHand` on the compliance, from a read of that chain's stored receipt and clock in one final block | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
-| bridge distrust, `distrustBridge` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled on home's clock meanwhile, only closed by hand from a read of its chain | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
+| bridge distrust, `setTrustedGateway(bridge, false, 0)` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled on home's clock meanwhile: the route is closed, then the ticket is closed by hand from a read of its chain | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
 Before lifting the token pause or the block of a chain, the operator refuses the receipts that waited and should
 never be applied, with `refuseWaitingReceipt(halfKey)` while the chain is still blocked: once lifted, anyone applies

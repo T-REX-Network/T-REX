@@ -69,15 +69,16 @@ import { ITrustedGatewayRegistry } from "./ITrustedGatewayRegistry.sol";
  * @dev The network's record of reviewed ERC-7786 bridges.
  *
  * A network singleton, deployed once per deployment and shared by every token. It is deliberately not
- * upgradeable and holds nothing but the records. Each bridge has one standing: a ticket bridge with its depth,
- * a receipt bridge, or distrusted. A record is written once, so one bridge can never be both kinds, and a
+ * upgradeable and holds nothing but the records: whether each bridge is trusted, and the depth it waits for. A
  * distrusted bridge is never trusted again.
  */
 contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable {
 
-    /// @dev The standing of a bridge, and the depth a ticket bridge waits for (zero is full finality).
+    /// @dev Whether a bridge is trusted, whether it was ever distrusted, and the depth it waits for (zero is full
+    ///  finality).
     struct BridgeRecord {
-        BridgeStanding standing;
+        bool trusted;
+        bool distrusted;
         uint64 depth;
     }
 
@@ -89,55 +90,28 @@ contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable
     }
 
     /// @inheritdoc ITrustedGatewayRegistry
-    function trustTicketBridge(address bridge, uint64 depth) external restricted {
-        _record(bridge, BridgeStanding.TicketBridge, depth);
-    }
-
-    /// @inheritdoc ITrustedGatewayRegistry
-    function trustReceiptBridge(address bridge) external restricted {
-        _record(bridge, BridgeStanding.ReceiptBridge, 0);
-    }
-
-    /// @inheritdoc ITrustedGatewayRegistry
-    function distrustBridge(address bridge) external restricted {
+    function setTrustedGateway(address bridge, bool trusted, uint64 depth) external restricted {
         require(bridge != address(0), ErrorsLib.ZeroAddress());
         BridgeRecord storage record = _records[bridge];
-        require(record.standing != BridgeStanding.Distrusted, ErrorsLib.BridgeDistrusted(bridge));
+        bool trustsADistrustedBridge = trusted && record.distrusted;
+        require(!trustsADistrustedBridge, ErrorsLib.BridgeDistrusted(bridge));
 
-        record.standing = BridgeStanding.Distrusted;
+        record.trusted = trusted;
+        record.depth = depth;
+        if (!trusted) record.distrusted = true;
 
-        emit EventsLib.BridgeDistrusted(bridge);
+        emit EventsLib.TrustedGatewaySet(bridge, trusted, depth);
     }
 
     /// @inheritdoc ITrustedGatewayRegistry
     function isTrusted(address bridge) public view returns (bool) {
-        BridgeStanding standing = _records[bridge].standing;
-        return standing == BridgeStanding.TicketBridge || standing == BridgeStanding.ReceiptBridge;
-    }
-
-    /// @inheritdoc ITrustedGatewayRegistry
-    function isReceiptBridge(address bridge) external view returns (bool) {
-        return _records[bridge].standing == BridgeStanding.ReceiptBridge;
+        return _records[bridge].trusted;
     }
 
     /// @inheritdoc ITrustedGatewayRegistry
     function depthOf(address bridge) external view returns (uint64) {
         require(isTrusted(bridge), ErrorsLib.BridgeNotTrusted(bridge));
         return _records[bridge].depth;
-    }
-
-    /// @dev Writes the one record a bridge ever gets. Distrust is checked before "already recorded", so a
-    ///  distrusted bridge is always refused with the reason that matters.
-    function _record(address bridge, BridgeStanding standing, uint64 depth) private {
-        require(bridge != address(0), ErrorsLib.ZeroAddress());
-        BridgeRecord storage record = _records[bridge];
-        require(record.standing != BridgeStanding.Distrusted, ErrorsLib.BridgeDistrusted(bridge));
-        require(record.standing == BridgeStanding.Unknown, ErrorsLib.BridgeAlreadyRecorded(bridge));
-
-        record.standing = standing;
-        record.depth = depth;
-
-        emit EventsLib.BridgeTrusted(bridge, standing, depth);
     }
 
 }

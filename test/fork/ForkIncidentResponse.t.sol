@@ -70,7 +70,7 @@ contract ForkIncidentResponseTest is ForkBase {
 
         // The attacker queues a trusted gateway of their own (24 h delay) before anyone notices.
         address evilGateway = makeAddr("evil gateway");
-        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.trustReceiptBridge, (evilGateway));
+        bytes memory trust = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (evilGateway, true, 0));
         _fromSafe(
             c,
             Actor.OperationsSafe,
@@ -292,7 +292,7 @@ contract ForkIncidentResponseTest is ForkBase {
         Addrs memory a = _live(c);
         address gateway = makeAddr("gateway");
         bytes memory chainRef = bytes("8453");
-        bytes memory trustReg = abi.encodeCall(TrustedGatewayRegistry.trustReceiptBridge, (gateway));
+        bytes memory trustReg = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (gateway, true, 0));
         bytes memory trustIdf =
             abi.encodeCall(IdentityFactory.setTrustedGateway, (gateway, bytes2(0x0000), chainRef, true));
         _scheduleAndExecute(c, Actor.OperationsSafe, a.platformAM, a.gatewayRegistry, trustReg, c.configDelay);
@@ -304,7 +304,7 @@ contract ForkIncidentResponseTest is ForkBase {
         );
 
         // It turns hostile: no immediate path, not for the operator and not for the Protocol Admin Safe.
-        bytes memory distrustReg = abi.encodeCall(TrustedGatewayRegistry.distrustBridge, (gateway));
+        bytes memory distrustReg = abi.encodeCall(TrustedGatewayRegistry.setTrustedGateway, (gateway, false, 0));
         bytes memory distrustIdf =
             abi.encodeCall(IdentityFactory.setTrustedGateway, (gateway, bytes2(0x0000), chainRef, false));
         _expectSafeCallReverts(

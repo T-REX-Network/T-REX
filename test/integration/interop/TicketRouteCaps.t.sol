@@ -118,7 +118,7 @@ contract TicketRouteCapsTest is InteropSuiteTest {
         bytes32 ticketId = _ask(CAP);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
         assertFalse(ticket.onReceiptRoute);
-        trustedGatewayRegistry.distrustBridge(address(ticketBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(ticketBridge), false, 0);
 
         vm.warp(ticket.validUntil + ticket.waitingTime);
         boundCompliance.sendTicket(ticketId, bobSat, "");

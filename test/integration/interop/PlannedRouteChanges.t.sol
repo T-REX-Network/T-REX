@@ -337,7 +337,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         uint64 awayChainSelector = _awayChainSelector(POLYGON);
         ERC7786GatewayMock nextBridge = new ERC7786GatewayMock(POLYGON);
         nextBridge.setReceivingPolicy(awayChainSelector, nextAwayReceiptBridge, FULL_FINALITY);
-        trustedGatewayRegistry.trustReceiptBridge(address(nextBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(nextBridge), true, 0);
         (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
         vm.prank(deployer);
         token.setReceiptRoute(chainType, chainReference, address(nextBridge), awayChainSelector, nextAwayReceiptBridge);
@@ -424,7 +424,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
     function test_sendTicket_asksThroughTheCurrentPair_whenTheFormerBridgeIsDistrusted() public {
         bytes32 ticketId = _ask(10, 50);
         ERC7786GatewayMock nextBridge = _changeRoute();
-        trustedGatewayRegistry.distrustBridge(address(polygonBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonBridge), false, 0);
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         uint256 formerQueueLength = polygonBridge.queueLength();
 
@@ -482,7 +482,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         _changeRoute();
         bytes32 ticketId = _ask(10, 50);
         MessageTypesLib.ReceiptMessage memory receipt = _formerPairReceiptWaitingUnderABlock(ticketId, 40);
-        trustedGatewayRegistry.distrustBridge(address(polygonBridge));
+        trustedGatewayRegistry.setTrustedGateway(address(polygonBridge), false, 0);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
 

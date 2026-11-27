@@ -204,9 +204,17 @@ library TREXMessagingLib {
         address bridge = messagingStorage.receiptRoutes[chainKey];
 
         bool routeSet = bridge != address(0);
-        bool routeIsAReceiptBridge = messagingStorage.registry.isReceiptBridge(bridge);
+        bool routeIsAReceiptBridge = isReceiptBridge(bridge);
         bool peerKnown = peerFor(chainKey).length > 0;
         return routeSet && routeIsAReceiptBridge && peerKnown;
+    }
+
+    /// @dev Whether `bridge` is a receipt bridge right now: trusted by the registry at depth zero, full finality. The
+    ///  registry may set a bridge's depth again, so the depth is read on every use, never cached.
+    function isReceiptBridge(address bridge) public view returns (bool) {
+        ITrustedGatewayRegistry registry = layout().registry;
+        if (!registry.isTrusted(bridge)) return false;
+        return registry.depthOf(bridge) == 0;
     }
 
     /* ----- Configuration ----- */
@@ -231,8 +239,8 @@ library TREXMessagingLib {
     ) external {
         MessagingStorage storage messagingStorage = layout();
 
-        // A ticket bridge, a distrusted bridge and zero are all refused here: none is a receipt bridge.
-        require(messagingStorage.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
+        // A bridge at a depth other than zero, a distrusted bridge and zero are all refused here.
+        require(isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
         bytes32 chainKey = _registerChain(messagingStorage, chainType, chainReference);
         _requireFullFinality(bridge, chainKey, awayChainSelector, awayReceiptBridge);
         _requireNoChangeInsideTheWindow(messagingStorage, chainKey);
@@ -261,12 +269,10 @@ library TREXMessagingLib {
     function setTicketRoute(bytes2 chainType, bytes calldata chainReference, address bridge) external {
         MessagingStorage storage messagingStorage = layout();
 
-        // A receipt bridge is never a ticket route: a bridge has one record, so it can never carry receipts in
-        // for one away chain while it carries tickets ahead of finality for another.
+        // The ticket route's depth is not checked: a ticket moves nothing on its own.
         bool sendsTicketsOnTheReceiptRoute = bridge == address(0);
-        bool isTicketBridge =
-            messagingStorage.registry.isTrusted(bridge) && !messagingStorage.registry.isReceiptBridge(bridge);
-        require(sendsTicketsOnTheReceiptRoute || isTicketBridge, ErrorsLib.NotATicketBridge(bridge));
+        bool bridgeTrusted = messagingStorage.registry.isTrusted(bridge);
+        require(sendsTicketsOnTheReceiptRoute || bridgeTrusted, ErrorsLib.BridgeNotTrusted(bridge));
 
         bytes32 chainKey = _registerChain(messagingStorage, chainType, chainReference);
         messagingStorage.ticketRoutes[chainKey] = bridge;
@@ -411,7 +417,7 @@ library TREXMessagingLib {
         uint64 arrivedAt
     ) external view {
         MessagingStorage storage messagingStorage = layout();
-        require(messagingStorage.registry.isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
+        require(isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
 
         bool fromThePinnedPair = _isFromThePinnedPair(messagingStorage, bridge, chainKey, senderPeerKey, halfKey);
         bool fromTheFormerPair = _isFromTheFormerPair(messagingStorage, bridge, chainKey, senderPeerKey, arrivedAt);
@@ -521,7 +527,7 @@ library TREXMessagingLib {
     {
         gateway = messagingStorage.receiptRoutes[chainKey];
         bool routeSet = gateway != address(0);
-        bool routeIsAReceiptBridge = messagingStorage.registry.isReceiptBridge(gateway);
+        bool routeIsAReceiptBridge = isReceiptBridge(gateway);
         require(routeSet, ErrorsLib.ChainNotOpen(chainKey));
         require(routeIsAReceiptBridge, ErrorsLib.ChainNotOpen(chainKey));
 
@@ -617,7 +623,7 @@ library TREXMessagingLib {
     {
         bool pinnedToTheFormerPair =
             _isFromTheFormerPair(messagingStorage, pin.bridge, chainKey, pin.peerKey, uint64(block.timestamp));
-        return pinnedToTheFormerPair && messagingStorage.registry.isReceiptBridge(pin.bridge);
+        return pinnedToTheFormerPair && isReceiptBridge(pin.bridge);
     }
 
     /// @dev The away side to ask `gateway`'s receiving policy about: the former one when the receipt came through the

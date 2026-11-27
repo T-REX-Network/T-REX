@@ -103,7 +103,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         receiptBridge.setReceivingPolicy(awayChainSelector, awayReceiptBridge, bytes4(0));
         trustedGateway = address(receiptBridge);
         vm.prank(interopManager);
-        registry.trustReceiptBridge(trustedGateway);
+        registry.setTrustedGateway(trustedGateway, true, 0);
     }
 
     /* ----- Registry ----- */
@@ -223,7 +223,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         ERC7786GatewayMock fastPolicyBridge = new ERC7786GatewayMock(0x89);
         fastPolicyBridge.setReceivingPolicy(awayChainSelector, awayReceiptBridge, depthThree);
         vm.prank(interopManager);
-        registry.trustReceiptBridge(address(fastPolicyBridge));
+        registry.setTrustedGateway(address(fastPolicyBridge), true, 0);
 
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ReceiptBridgeNotFullFinality.selector, address(fastPolicyBridge), evmChain)
@@ -245,7 +245,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         assertTrue(token.isChainOpen(evmChain));
 
         vm.prank(interopManager);
-        registry.distrustBridge(trustedGateway);
+        registry.setTrustedGateway(trustedGateway, false, 0);
 
         assertFalse(token.isChainOpen(evmChain));
         assertEq(token.receiptRouteFor(evmChain), trustedGateway, "the route is stored, it is trust that went away");

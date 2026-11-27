@@ -243,18 +243,18 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         return abi.encode(address(uint160(uint256(keccak256(abi.encode("away receipt bridge", chainId))))));
     }
 
-    /// @dev A receipt bridge standing in for `chainId`'s counterpart, recorded in the registry, whose receiving
+    /// @dev A receipt bridge standing in for `chainId`'s counterpart, trusted by the registry at depth zero, whose receiving
     ///  policy admits that chain's away receipt bridge at full finality only.
     function _newReceiptBridge(uint256 chainId) internal returns (ERC7786GatewayMock bridge) {
         bridge = new ERC7786GatewayMock(chainId);
         bridge.setReceivingPolicy(_awayChainSelector(chainId), _awayReceiptBridge(chainId), FULL_FINALITY);
-        trustedGatewayRegistry.trustReceiptBridge(address(bridge));
+        trustedGatewayRegistry.setTrustedGateway(address(bridge), true, 0);
     }
 
     /// @dev A ticket bridge toward `chainId`, recorded in the registry with the depth it waits for.
     function _newTicketBridge(uint256 chainId, uint64 depth) internal returns (ERC7786GatewayMock bridge) {
         bridge = new ERC7786GatewayMock(chainId);
-        trustedGatewayRegistry.trustTicketBridge(address(bridge), depth);
+        trustedGatewayRegistry.setTrustedGateway(address(bridge), true, depth);
     }
 
     /// @dev Sets `_token`'s receipt route for the EVM chain `chainId` to `bridge`, as the issuer.
