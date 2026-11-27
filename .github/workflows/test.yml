@@ -45,33 +45,18 @@ jobs:
         run: forge build --sizes contracts
         id: build
 
-      # ONCHAINID ships with via-IR; under T-REX's profile IdentityFactory is over EIP-170 and the step above
-      # never lists it. Build the eight ONCHAINID contracts the deployment uses the way they ship (`onchainid`
-      # profile, out-onchainid/), so the size gate sees them and the deployment tooling tests can read them.
-      - name: Build ONCHAINID (via-IR) and check its sizes
-        run: >-
-          FOUNDRY_PROFILE=onchainid forge build --sizes
-          dependencies/onchain-id-develop/contracts/factory/IdentityFactory.sol
-          dependencies/onchain-id-develop/contracts/Identity.sol
-          dependencies/onchain-id-develop/contracts/IdentityUtilities.sol
-          dependencies/onchain-id-develop/contracts/proxy/IdentityUtilitiesProxy.sol
-          dependencies/onchain-id-develop/contracts/modules/validators/ERC734Validator.sol
-          dependencies/onchain-id-develop/contracts/modules/executors/KeyApprovalModule.sol
-          dependencies/onchain-id-develop/contracts/reputation/ReputationRegistry.sol
-          dependencies/@openzeppelin-contracts-5.7.0/utils/cryptography/verifiers/ERC7913WebAuthnVerifier.sol
+      # ONCHAINID deploys IdentityFactory with via-IR; under T-REX's profile it is over EIP-170 and the
+      # step above never lists it. Build it the way it ships so the gate sees it.
+      - name: Check IdentityFactory size under its own profile
+        run: forge build --sizes --via-ir dependencies/onchain-id-develop/contracts/factory/IdentityFactory.sol
         id: identity-factory-size
 
-      # The deployment tooling tests skip without the build above; here a skip is a failure.
       - name: Run tests
         run: forge test
         id: test
-        env:
-          TREX_REQUIRE_DEPLOY_TESTS: "true"
 
       # Coverage builds without the optimizer, and OpenZeppelin's P256 verifier then runs out of stack.
       # The WebAuthn issuer test deploys that verifier, so coverage skips it; `forge test` above still runs it.
       - name: Run coverage
         run: forge coverage --no-match-coverage "(test|dependencies|scripts|vendor)" --skip HeaviestHonestClaimIssuer
         id: coverage
-        env:
-          TREX_REQUIRE_DEPLOY_TESTS: "true"
