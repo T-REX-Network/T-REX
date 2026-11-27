@@ -1,26 +1,8 @@
 [profile.default]
 src = "contracts"
 out = "out"
-script = "scripts"
 test = "test"
 libs = ["dependencies"]
-
-# scripts/DeployUtilityChecker.s.sol reads and merges the network deployment manifest.
-fs_permissions = [
-    { access = "read-write", path = "./deployments" },
-    # scratch manifest for test/unit/scripts/DeployUtilityChecker.t.sol
-    { access = "read-write", path = "./cache" },
-    # scripts/deploy: committed config, address tables and creation bytecode (written by ExportBytecode and
-    # AddressTable), and the build artifacts the bytecode is exported from.
-    { access = "read-write", path = "./deploy" },
-    { access = "read", path = "./out" },
-    { access = "read", path = "./out-onchainid" },
-    # ExportBytecode records the ONCHAINID revision the bytecode was built from.
-    { access = "read", path = "./soldeer.lock" },
-    # scripts/SeedActivity.s.sol and scripts/SeedGoldToken.s.sol append the identities they
-    # create to the sibling ONCHAINID checkout's deployment log.
-    { access = "read-write", path = "../ONCHAINID/deployments" },
-]
 
 solc_version = "0.8.30"
 optimizer = true
@@ -43,15 +25,6 @@ runs = 256
 depth = 64
 fail_on_revert = false
 call_override = false
-
-# ONCHAINID build used by scripts/deploy/ExportBytecode.s.sol. IdentityFactory is over the EIP-170 limit
-# without the IR pipeline, and upstream builds and tests every ONCHAINID contract with it, so the deployed
-# ONCHAINID bytecode comes from this profile. Build the contracts by path (see deploy/README.md); the
-# artifacts go to their own folders so they never mix with the default build.
-[profile.onchainid]
-via_ir = true
-out = "out-onchainid"
-cache_path = "cache-onchainid"
 
 # Fast profile used by the Gambit mutation-testing runner (mutation/run_mutation.sh).
 # Reduced fuzz/invariant budgets keep per-mutant wall-clock low while still exercising
@@ -88,13 +61,3 @@ forge-std = "1.16.2"
 # were given, and the freeze tag needs recutting against this pin.
 # TODO: repin to the ONCHAINID v3 release tag once it is cut, and drop this note with it.
 onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "4c6d074cec62b286804519a594c91a2136fce798" }
-
-[rpc_endpoints]
-ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-base = "https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-polygon = "https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-baseSepolia = "https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}"
-
-
-[etherscan]
-baseSepolia = { key = "${BASESCAN_API_KEY}", chain = 84532 }
