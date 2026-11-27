@@ -78,7 +78,8 @@ import { IModule } from "./modules/IModule.sol";
  * @title HoldLib
  * @dev Money on hold with no ticket, deployed once and linked: a first-half receipt that no ticket home sent answers.
  * After a home reorg deeper than the ticket route waits for, or from a hostile away token, a receipt can name an id
- * home has no record of, or a ticket home wrote and never sent. Home blocks nobody for it: it puts the amount on hold
+ * home has no record of, or a ticket home wrote and never sent. Home blocks nobody for an id it has no record of, and
+ * blocks the chain of a receipt that breaks the terms of a ticket it wrote. Either way it puts the amount on hold
  * under the sender, with no destination, and when the tokens stayed on the away chain the receiver gets uncounted
  * credit, tokens it holds there that home does not count for it yet and that it can never ask to move.
  *
@@ -201,9 +202,8 @@ library HoldLib {
     /* ----- The ask mined again ----- */
 
     /// @dev See {ITickets-askToMove}: the ask mined again takes the money on hold under its id. The held receipt must
-    ///  name the ask's wallets, and keep the terms of the ask and the away chain's per-ticket cap, as a receipt on
-    ///  older terms must. A move inside
-    ///  one away chain is applied when the receiver may take it now and its hold is cancelled otherwise; a move out of
+    ///  name the ask's wallets. One that breaks the terms of the ask or the away chain's per-ticket cap is still
+    ///  taken, and blocks its chain, as a receipt on older terms does. A move inside one away chain is applied when the receiver may take it now and its hold is cancelled otherwise; a move out of
     ///  the away chain is decided as a first-half receipt is, see {SecondHalfLib-takeTheHold}.
     /// @param token the token the compliance is bound to
     function take(
@@ -220,10 +220,10 @@ library HoldLib {
 
         // Checks
         _requireTheHeldReceiptNamesTheAsksWallets(ticket, ticketId, from, to);
-        _requireTheHoldCanBeTaken(ticket, ticketId, requestedMin, requestedMax, token);
+        _requireTheHoldCanBeTaken(ticket, ticketId, token);
         IModule.TransferContext memory move = _theMoveAsAsked(ticket, from, to, spender, token);
         if (_insideOneAwayChain(ticket) && !_receiverMayTakeItNow(move, to, token)) {
-            _cancel(ticket, ticketId, to, token);
+            _cancelTheRefusedTake(ticket, ticketId, to, requestedMin, requestedMax, token);
             return;
         }
 
@@ -237,11 +237,42 @@ library HoldLib {
         ticket.salt = salt;
         emit EventsLib.HoldTaken(ticketId);
 
-        if (!_insideOneAwayChain(ticket)) {
+        _finishTheTake(ticket, ticketId, move, from, to, token);
+    }
+
+    /// @dev The take, once the record is the ask's ticket: the move is finished as the away token made it. One on terms
+    ///  the ask never gave is still taken as it happened, and the chain that made it is blocked, as for a receipt on
+    ///  older terms. The ask's range is on the ticket now. In its own call frame: {take} has no stack room left.
+    function _finishTheTake(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        IModule.TransferContext memory move,
+        bytes calldata from,
+        bytes calldata to,
+        address token
+    ) private {
+        bool breaksTheAsksTerms = _heldReceiptBreaksTheAsksTerms(ticket, ticket.amountMin, ticket.requestedMax);
+        if (_insideOneAwayChain(ticket)) {
+            _applyTheMoveInsideOneAwayChain(ticket, ticketId, move, from, to, token);
+        } else {
             SecondHalfLib.takeTheHold(ticketId, from, to, token);
-            return;
         }
-        _applyTheMoveInsideOneAwayChain(ticket, ticketId, move, from, to, token);
+        if (breaksTheAsksTerms) TicketLib.blockAwayChain(ticket.fromChainKey);
+    }
+
+    /// @dev The receiver may not take the move now, so the hold is cancelled; a held receipt on terms the ask never
+    ///  gave still blocks the chain that made it.
+    function _cancelTheRefusedTake(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata to,
+        uint256 requestedMin,
+        uint256 requestedMax,
+        address token
+    ) private {
+        bool breaksTheAsksTerms = _heldReceiptBreaksTheAsksTerms(ticket, requestedMin, requestedMax);
+        _cancel(ticket, ticketId, to, token);
+        if (breaksTheAsksTerms) TicketLib.blockAwayChain(ticket.fromChainKey);
     }
 
     /* ----- The cancel ----- */
@@ -426,27 +457,29 @@ library HoldLib {
     /* ----- Private: the take ----- */
 
     /// @dev Whether the ask may take the money on hold now: the token runs, the sender's chain is not blocked and has
-    ///  no hostile change running, the money carries no earlier hold's credit (the tokens the sender spent are not
-    ///  its own yet), and the held receipt keeps the terms of the ask, as a receipt on older terms must: the amount
-    ///  inside the asked range and below the maximum it echoed, that maximum within what was asked and the away
-    ///  chain's per-ticket cap.
-    function _requireTheHoldCanBeTaken(
-        ITickets.Ticket storage ticket,
-        bytes32 ticketId,
-        uint256 requestedMin,
-        uint256 requestedMax,
-        address token
-    ) private view {
+    ///  no hostile change running, and the money carries no earlier hold's credit (the tokens the sender spent are not
+    ///  its own yet).
+    function _requireTheHoldCanBeTaken(ITickets.Ticket storage ticket, bytes32 ticketId, address token) private view {
         TicketLib.requireTicketCanBeDecided(token, ticket);
         bytes32 earlierHoldId = ticket.carriedFrom;
         require(earlierHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(earlierHoldId, ticketId));
+    }
 
+    /// @dev Whether the held receipt breaks the terms of the ask, as a receipt on older terms is judged: the amount
+    ///  outside the asked range or above the maximum it echoed, or that maximum above what was asked or above the
+    ///  away chain's per-ticket cap.
+    function _heldReceiptBreaksTheAsksTerms(ITickets.Ticket storage ticket, uint256 requestedMin, uint256 requestedMax)
+        private
+        view
+        returns (bool)
+    {
         uint256 seenMax = ticket.amountMax;
         uint256 perTicketCap = TicketLib.layout().ticketLimits[ticket.fromChainKey].perTicketCap;
-        require(ticket.moved >= requestedMin, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
-        require(ticket.moved <= seenMax, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
-        require(seenMax <= requestedMax, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
-        require(seenMax <= perTicketCap, ErrorsLib.HeldReceiptBreaksItsTerms(ticketId));
+        bool movedInsideTheAskedRange = ticket.moved >= requestedMin && ticket.moved <= seenMax;
+        bool echoedMaxWithinTheAsk = seenMax <= requestedMax;
+        bool echoedMaxWithinTheCap = seenMax <= perTicketCap;
+        bool keepsTheTerms = movedInsideTheAskedRange && echoedMaxWithinTheAsk && echoedMaxWithinTheCap;
+        return !keepsTheTerms;
     }
 
     /// @dev The held receipt must name the wallets of the ask: the id names them, but a hostile away token chooses

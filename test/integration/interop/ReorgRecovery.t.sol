@@ -190,8 +190,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     }
 
     /// @notice The request sent again waits for approval: the receipt of the dropped copy answers no ticket home
-    ///         sent, so it is put on hold with no destination, never applied as that ticket's move. The approver can no
-    ///         longer answer the request, and the held money is cancelled back once nobody takes it.
+    ///         sent, so it is put on hold with no destination, never applied as that ticket's move. A ticket that waits
+    ///         for approval has no honest copy but home's own, so the receipt breaks its terms and blocks the chain.
+    ///         The approver can no longer answer the request.
     function test_reorg_putsTheReceiptOnHold_whenTheResubmittedRequestWaitsForApproval() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
@@ -211,7 +212,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         ITickets.Ticket memory held = boundCompliance.ticketOf(id);
         assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold), "on hold");
         assertFalse(held.written, "no ticket home sent answers it");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing is blocked");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "only home's own copy of an approval ticket is honest");
         assertEq(token.reservedOf(aliceSat), 0, "the request's reservation is released");
 
         vm.prank(backend);
@@ -225,7 +226,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
     }
 
     /// @notice Refused before the receipt lands, the request sends nothing; the receipt of the dropped copy is then
-    ///         put on hold with no destination.
+    ///         put on hold with no destination, and blocks its chain as any copy but home's own of such a ticket does.
     function test_reorg_putsTheReceiptOnHold_whenTheResubmittedRequestIsRefused() public {
         AsyncApprovalModule module = _bindApprovalModule();
         bytes32 salt = _salt();
@@ -244,7 +245,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.OnHold), "on hold with no destination");
         assertEq(token.onHoldOf(id), 95);
         assertEq(token.awayBalanceOf(bobSat), 0);
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the refused ticket had only its own copy");
     }
 
     /// @notice The requester need not come back: the copy the away token holds carries the whole request, the asked

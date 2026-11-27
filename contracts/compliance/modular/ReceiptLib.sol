@@ -191,7 +191,7 @@ library ReceiptLib {
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, waiting.chainKey);
         if (withoutTicket) {
-            HoldLib.bookWithoutTicket(waiting.chainKey, receipt, token);
+            _bookWithoutTicket(ticket, waiting.chainKey, receipt, token);
             return;
         }
         _apply(ticket, waiting.chainKey, receipt, token);
@@ -237,7 +237,7 @@ library ReceiptLib {
         store.receiptHashes[halfKey] = receiptHash;
         emit EventsLib.WaitingReceiptApplied(halfKey, originChainKey);
         if (withoutTicket) {
-            HoldLib.bookWithoutTicket(originChainKey, receipt, token);
+            _bookWithoutTicket(ticket, originChainKey, receipt, token);
             return;
         }
         _apply(ticket, originChainKey, receipt, token);
@@ -273,6 +273,23 @@ library ReceiptLib {
             return;
         }
         TicketLib.layout().receiptHashes[halfKey] = receiptHash;
+        _bookWithoutTicket(TicketLib.layout().validations[receipt.ticketId], originChainKey, receipt, token);
+    }
+
+    /// @dev Books a receipt no ticket home sent answers on hold, see {HoldLib-bookWithoutTicket}. For a ticket home
+    ///  wrote and never sent, the receipt is first held to that ticket's terms as any receipt is: one that breaks them
+    ///  blocks its chain, and is still booked, since the away token already moved the tokens.
+    function _bookWithoutTicket(
+        ITickets.Ticket storage ticket,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        address token
+    ) private {
+        bool movesSomething = receipt.amount != 0;
+        bool againstAWrittenTicket = ticket.written && movesSomething;
+        if (againstAWrittenTicket && _breaksItsTerms(ticket, originChainKey, receipt)) {
+            TicketLib.blockAwayChain(originChainKey);
+        }
         HoldLib.bookWithoutTicket(originChainKey, receipt, token);
     }
 
@@ -329,8 +346,8 @@ library ReceiptLib {
     }
 
     /// @dev A still open answer: the away token holds the ticket unexecuted, valid until `seenValidUntil`. It is not
-    ///  an answer to an ask for the receipt. Ignored for an id with no open ticket, from another chain or for a second
-    ///  half. On home's own ask block hash it must echo home's own valid until, or it is a bad receipt. Otherwise it
+    ///  an answer to an ask for the receipt. Ignored for an id with no open ticket that home sent, from another chain or
+    ///  for a second half. On home's own ask block hash it must echo home's own valid until, or it is a bad receipt. Otherwise it
     ///  raises `seenValidUntil`, up to a cap: valid until plus the chain's full finality delivery plus its clock lead,
     ///  the latest an honest copy can be valid until; past the cap it counts as no answer. An answer that moves the
     ///  valid until gives an ask back, so the ticket keeps its asks after the new waiting time.
@@ -344,7 +361,8 @@ library ReceiptLib {
         bool ticketOpen = ticket.status == ITickets.TicketStatus.Open;
         bool fromTheChainTheTicketWentTo = originChainKey == ticket.fromChainKey;
         bool answersTheTicket = receipt.half == 0;
-        bool answersAnOpenTicket = ticketOpen && fromTheChainTheTicketWentTo && answersTheTicket;
+        bool ticketSent = !TicketLib.neverSent(ticket);
+        bool answersAnOpenTicket = ticketOpen && ticketSent && fromTheChainTheTicketWentTo && answersTheTicket;
         if (!answersAnOpenTicket) return;
 
         bool onHomesOwnCopy = receipt.askBlockHash == ticket.askBlockHash;
@@ -505,14 +523,7 @@ library ReceiptLib {
             return;
         }
 
-        bool breaksItsTerms;
-        bool onHomesOwnCopy = receipt.askBlockHash == ticket.askBlockHash;
-        if (onHomesOwnCopy) {
-            breaksItsTerms = _breaksHomesOwnTerms(ticket, receipt);
-        } else {
-            emit EventsLib.ReceiptOnOlderTerms(receipt.ticketId, originChainKey, receipt.seenMax);
-            breaksItsTerms = _breaksOlderTerms(ticket, originChainKey, receipt);
-        }
+        bool breaksItsTerms = _breaksItsTerms(ticket, originChainKey, receipt);
 
         bool insideOneAwayChain = ticket.toChainKey == ticket.fromChainKey;
         if (insideOneAwayChain) {
@@ -522,6 +533,19 @@ library ReceiptLib {
         }
 
         if (breaksItsTerms) TicketLib.blockAwayChain(originChainKey);
+    }
+
+    /// @dev Whether a receipt that moved something breaks the terms of the ticket home wrote: home's own copy's, or a
+    ///  copy's from a home block a reorg dropped, announced with `ReceiptOnOlderTerms`.
+    function _breaksItsTerms(
+        ITickets.Ticket storage ticket,
+        bytes32 originChainKey,
+        MessageTypesLib.ReceiptMessage calldata receipt
+    ) private returns (bool) {
+        bool onHomesOwnCopy = receipt.askBlockHash == ticket.askBlockHash;
+        if (onHomesOwnCopy) return _breaksHomesOwnTerms(ticket, receipt);
+        emit EventsLib.ReceiptOnOlderTerms(receipt.ticketId, originChainKey, receipt.seenMax);
+        return _breaksOlderTerms(ticket, originChainKey, receipt);
     }
 
     /// @dev On home's own ask block hash the away token executed the copy home sent, so the receipt must echo that

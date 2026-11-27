@@ -94,8 +94,10 @@ interface IReceiptHandler {
     ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
     ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt, or one from a
     ///   wallet to itself, ends the id `Done`; any other puts its amount on hold under the sender with no destination,
-    ///   gives uncounted credit to a receiver on the same away chain, and blocks nobody (`ReceiptWithoutTicket`). The
-    ///   same ask mined again takes it; otherwise anyone cancels it with `cancelHold`.
+    ///   gives uncounted credit to a receiver on the same away chain, and blocks nobody (`ReceiptWithoutTicket`). For a
+    ///   ticket home wrote, a receipt that moved something is first held to that ticket's terms: one that breaks them
+    ///   blocks its chain and is still booked. The same ask mined again takes it; otherwise anyone cancels it with
+    ///   `cancelHold`.
     /// - A bad receipt: another body for a half that already has one, applied or waiting. For the ticket's own half:
     ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
     ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet

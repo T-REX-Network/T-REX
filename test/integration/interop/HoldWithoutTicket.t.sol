@@ -155,7 +155,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertAMalformedReceiverIsRefused(keccak256("a zero receipt with a padded receiver"), 0);
     }
 
-    function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketNeverLeft() public {
+    /// @notice A ticket home wrote and never sent waited for approval, so home's own copy is its only honest one: a
+    ///         receipt on any other copy breaks its terms and blocks the chain, and is still booked on hold.
+    function test_receiveReceipt_putsTheReceiptOnHoldAndBlocksTheChain_whenTheTicketNeverLeft() public {
         _bindApprovalModule(approver);
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         _askAgain(aliceSat, bobSat, FOUR, salt);
@@ -172,7 +174,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(token.reservedOf(aliceSat), 0, "the ask's reservation is given back");
         assertEq(token.onHoldOf(ticketId), FOUR);
         assertEq(token.awayBalanceOf(bobSat), 0, "never applied as the ticket's move");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the receipt breaks the terms of the ticket");
         _assertPositionsAreTheSupply();
     }
 
@@ -265,9 +267,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertHomeAgreesWithPolygon();
     }
 
-    /// @notice A forged or dropped copy above the away chain's per-ticket cap is never taken as a ticket: the ask
-    ///         reverts and the money stays on hold for its cancel.
-    function test_askToMove_reverts_when_theHeldReceiptPassesThePerTicketCap() public {
+    /// @notice A dropped copy above the away chain's per-ticket cap was executed all the same: the ask mined again
+    ///         takes it as it happened, and the chain that made it is blocked. Nothing reverts.
+    function test_askToMove_takesTheHeldReceiptAndBlocksTheChain_whenItPassesThePerTicketCap() public {
         // The cap may be lowered once every ticket sent toward the chain is past its valid until.
         vm.warp(block.timestamp + 1 days);
         uint256 perTicketCap = 1;
@@ -276,12 +278,16 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, TWO);
         polygonGateway.relay(receiptIndex);
 
-        vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HeldReceiptBreaksItsTerms.selector, ticketId));
-        boundCompliance.askToMove(aliceSat, bobSat, TWO, TWO, "", salt);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.HoldTaken(ticketId);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockSet(polygon, true);
+        _askAgain(aliceSat, bobSat, TWO, salt);
 
-        _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "still on hold");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "a take that breaks the terms blocks nobody");
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "taken as it happened");
+        assertEq(token.awayBalanceOf(bobSat), TWO, "counted for bob");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that made the move is blocked");
+        _assertHomeAgreesWithPolygon();
     }
 
     /// @notice A hostile away token books another holder's money under Bob's own request id. Bob's ask must not take

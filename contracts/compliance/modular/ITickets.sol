@@ -437,8 +437,9 @@ interface ITickets {
     /// out of the away chain is decided as a first-half receipt is. The take is refused while an approval module is
     /// bound (`TicketAlreadyWritten`), while the token is paused, the sender's chain blocked or a hostile change runs
     /// on it, while the hold carries an earlier hold's credit (`LaterHoldStillCarries`: the tokens spent are not the
-    /// sender's yet), and when the held receipt breaks the terms of the ask or the away chain's per-ticket cap
-    /// (`HeldReceiptBreaksItsTerms`). Emits `HoldTaken`.
+    /// sender's yet), and when the held receipt names other wallets than the ask (`HeldReceiptBreaksItsTerms`). A held
+    /// receipt that breaks the terms of the ask or the away chain's per-ticket cap is still taken as it happened, and
+    /// blocks the sender's chain (`AwayChainBlockSet`). Emits `HoldTaken`.
     ///
     /// Requirements:
     /// - Asks not paused for the token; otherwise reverts with `AsksPaused`.

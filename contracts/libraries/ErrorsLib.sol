@@ -282,8 +282,7 @@ library ErrorsLib {
     ///  earlier one is not cancelled before the later one gives it back, and the later one is not taken before the
     ///  earlier one is.
     error LaterHoldStillCarries(bytes32 ticketId, bytes32 laterTicketId);
-    /// @dev The receipt held under `ticketId` moved an amount the ask mined again does not allow, or echoed a maximum
-    ///  above what was asked or above the away chain's per-ticket cap: the ask does not take it.
+    /// @dev The receipt held under `ticketId` names other wallets than the ask mined again: the ask does not take it.
     error HeldReceiptBreaksItsTerms(bytes32 ticketId);
     /// @dev The block read from the closed away chain is at `awayClockTime` on that chain's clock, before `validUntil`:
     ///  the half or the ticket of `ticketId` could still be executed there, so close by hand does not decide yet.

@@ -413,8 +413,9 @@ contract ApprovalTicketsTest is InteropSuiteTest {
 
     /* ----- A receipt before the first send ----- */
 
-    /// @notice A receipt that comes before the yes answers no ticket home sent: it is put on hold with no ticket,
-    ///         the approver can no longer answer, the ticket can no longer be sent, and once home stopped waiting
+    /// @notice A receipt that comes before the yes answers no ticket home sent: it is put on hold with no ticket and
+    ///         blocks its chain, since only home's own copy of a ticket that waited for approval is honest; the
+    ///         approver can no longer answer, the ticket can no longer be sent, and once home stopped waiting
     ///         anyone cancels the hold.
     function test_receiveReceipt_putsTheReceiptOnHold_whenItComesBeforeTheYes() public {
         bytes32 ticketId = _ask(bobSat, 1, 50);
@@ -442,6 +443,28 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         );
         boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
         _assertTheHoldIsCancelledOnceHomeStopsWaiting(ticketId);
+    }
+
+    /// @notice A still open answer speaks for a ticket home sent: for an approved ticket not sent yet, it is ignored
+    ///         and moves no clock.
+    function test_receiveReceipt_ignoresAStillOpenAnswer_whenTheApprovedTicketWasNeverSent() public {
+        bytes32 ticketId = _askAndApprove(bobSat, 50);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
+        MessageTypesLib.ReceiptMessage memory stillOpen =
+            _settlementUnder(ticketId, aliceSat, bobSat, 0, keccak256("a copy home never sent"));
+        stillOpen.seenValidUntil = validUntil + 10;
+        stillOpen.answer = MessageTypesLib.ReceiptAnswer.StillOpen;
+        uint256 index = _liteSettles(receiptBridge, token, stillOpen);
+
+        vm.recordLogs();
+        receiptBridge.relay(index);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != EventsLib.TicketStillOpen.selector, "a still open answer was taken");
+        }
+        assertEq(boundCompliance.ticketOf(ticketId).seenValidUntil, 0, "the seen valid until is unchanged");
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open), "still open, unsent");
     }
 
     /* ----- Helpers ----- */
@@ -504,10 +527,15 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         receiptBridge.relay(index);
 
         assertFalse(boundCompliance.ticketOf(ticketId).written, "no ticket home sent answers it");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing blocks the chain");
+        assertTrue(
+            boundCompliance.isAwayChainBlocked(polygon), "a ticket that waited for approval has only its own copy"
+        );
     }
 
+    /// @dev The receipt blocked its chain; once the block is lifted, anyone cancels the hold when home stops waiting.
     function _assertTheHoldIsCancelledOnceHomeStopsWaiting(bytes32 ticketId) private {
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(polygon);
         uint64 stopWaitingAt = boundCompliance.ticketOf(ticketId).stopWaitingAt;
         vm.warp(stopWaitingAt - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, stopWaitingAt));

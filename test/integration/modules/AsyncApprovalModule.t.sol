@@ -545,8 +545,8 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     }
 
     /// @notice Nothing was sent for a request still waiting, so a receipt for it answers no ticket home sent: its
-    ///         amount is put on hold under the sender with no destination, no chain is blocked, and the request can
-    ///         no longer be answered.
+    ///         amount is put on hold under the sender with no destination, its chain is blocked since no honest copy
+    ///         but home's own exists, and the request can no longer be answered.
     function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketStillWaitsForApproval() public {
         bytes32 id = _request(10, 150);
 
@@ -557,7 +557,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         gateway.relay(index);
 
         assertFalse(token.paused(), "the token keeps running");
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nothing blocks the chain by itself");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "only home's own copy of the ticket is honest");
         ITickets.Ticket memory held = boundCompliance.ticketOf(id);
         assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold));
         assertFalse(held.written, "no ticket home sent answers it");
@@ -574,7 +574,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         gateway.relay(_liteSettles(gateway, token, _settlementUnder(id, aliceSat, bobSat, 100, keccak256("body"))));
 
         assertFalse(token.paused());
-        assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the refused ticket had only its own copy");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.OnHold), "on hold, no destination");
         assertEq(token.onHoldOf(id), 100);
         assertEq(_ledger().positionOf(address(bobIdentity)), 0, "nothing applied to the receiver");
