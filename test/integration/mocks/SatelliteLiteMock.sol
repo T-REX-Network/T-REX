@@ -68,8 +68,8 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  * a move out mints and a bring home burns `min(amount, balance)` once per half, strictly before the half's valid
  * until, and a half that arrives later is answered with a stored zero receipt; a repeated half is answered with its
  * stored receipt. Every receipt is kept per half and can be sent again byte for byte. A ticket whose id is not the id
- * of its own terms is refused. Answers to later copies and repeated halves are limited per half, and so are the
- * resends anyone asks for, apart from them, with a wait that doubles.
+ * of its own terms is refused. Answers that send a stored receipt again are limited per half, and so are the resends
+ * anyone asks for, apart from them, with a wait that doubles; a still open answer is not counted.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
@@ -92,8 +92,9 @@ contract SatelliteLiteMock is IERC7786Recipient {
     /// @notice An ask for a half's receipt came after the half used its answers: nothing was sent.
     event AnswerNotSent(bytes32 indexed ticketId, uint8 half);
 
-    /// @notice The most answers per half to later copies of a ticket or repeats of a half: home sends at most three
-    ///  asks for a ticket's receipt and three sends of a half, so six cover home and a redelivery of each.
+    /// @notice The most answers per half that send its stored receipt again, to later copies of a ticket or repeats of
+    ///  a half: home sends at most three asks for a ticket's receipt and three sends of a half, so six cover home and a
+    ///  redelivery of each. The first send of a receipt and a still open answer are not counted.
     uint8 public constant MAX_ANSWERS_PER_HALF = 6;
     /// @notice The most resends per half anyone may ask for with {resendReceipt}, counted apart from the answers.
     uint8 public constant MAX_RECEIPT_RESENDS = 3;
@@ -267,9 +268,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
             return;
         }
 
-        if (!_mayAnswer(ticketId, 0)) return;
         if (answered[ticketId]) {
-            _send(ticketId, _receipts[ticketId]);
+            if (_mayAnswer(ticketId, 0)) _send(ticketId, _receipts[ticketId]);
             return;
         }
         MessageTypesLib.TicketMessage storage firstCopy = _tickets[ticketId];
@@ -277,6 +277,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
             _answerExpired(ticketId);
             return;
         }
+        // Not counted: home gives its ask back on each still open answer, so it must hear every one.
         _send(ticketId, _ticketReceipt(firstCopy, 0, MessageTypesLib.ReceiptAnswer.StillOpen));
     }
 
@@ -338,8 +339,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
         _send(halfKey, receipt);
     }
 
-    /// @dev Counts an answer to a later copy or a repeated half; past `MAX_ANSWERS_PER_HALF` nothing is sent, and the
-    ///  delivery is consumed.
+    /// @dev Counts an answer that sends a stored receipt again, to a later copy or a repeated half; past
+    ///  `MAX_ANSWERS_PER_HALF` nothing is sent, and the delivery is consumed.
     function _mayAnswer(bytes32 ticketId, uint8 half) private returns (bool) {
         ReceiptSends storage sends = receiptSends[MessageTypesLib.halfKeyOf(ticketId, half)];
         if (sends.answersSent >= MAX_ANSWERS_PER_HALF) {

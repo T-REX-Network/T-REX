@@ -218,9 +218,11 @@ contract AwayTokenClockTest is InteropSuiteTest {
         assertFalse(polygonLite.known(forgedId), "never held");
     }
 
-    /// @notice Later copies of a ticket are answered six times at most; the seventh is consumed with nothing sent.
-    function test_awayToken_sendsNoAnswer_afterSixAnswersForTheTicket() public {
+    /// @notice Later copies of an executed ticket get its stored receipt six times at most; the seventh is consumed with
+    ///  nothing sent.
+    function test_awayToken_sendsNoAnswer_afterSixAnswersWithTheStoredReceipt() public {
         bytes32 ticketId = _askAndDeliver(10, 50);
+        _execute(ticketId, 40);
         MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
         uint8 answers = polygonLite.MAX_ANSWERS_PER_HALF();
         for (uint8 i = 0; i < answers; i++) {
@@ -237,6 +239,25 @@ contract AwayTokenClockTest is InteropSuiteTest {
         polygonGateway.relay(seventhCopyIndex);
 
         assertEq(polygonGateway.queueLength(), queuedBeforeTheSeventh, "nothing sent");
+    }
+
+    /// @notice Still open answers are not counted: after more of them than the limit, home's ask for the executed
+    ///  ticket's receipt still gets the stored receipt.
+    function test_awayToken_answersWithTheStoredReceipt_afterMoreStillOpenAnswersThanTheLimit() public {
+        bytes32 ticketId = _askAndDeliver(10, 50);
+        MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
+        uint8 answers = polygonLite.MAX_ANSWERS_PER_HALF();
+        for (uint8 i = 0; i <= answers; i++) {
+            _deliverToLite(heldCopy);
+        }
+        (, uint8 answersSent,) = polygonLite.receiptSends(ticketId);
+        assertEq(answersSent, 0, "still open answers are not counted");
+        _execute(ticketId, 40);
+
+        _deliverToLite(heldCopy);
+
+        bytes memory storedReceipt = MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(ticketId, 0));
+        assertEq(polygonGateway.queuedMessage(_last()).payload, storedReceipt, "the stored receipt is sent again");
     }
 
     /// @notice Anyone may ask for a stored receipt again three times, the waits doubling from the set wait.

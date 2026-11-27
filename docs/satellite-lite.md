@@ -84,9 +84,12 @@ other chain, and blocks that chain.
    valid until is answered with a stored zero receipt and never executed. The receipt echoes the copy held, and the
    reference chain tells which one it was. A ticket whose `ticketId` is not the id of its own terms (the formula
    above, with `kind` 0) is refused (`TicketIdMismatch`) and never held, so nobody puts other terms under a known id.
-   Answers to later copies are limited to six per half (`MAX_ANSWERS_PER_HALF`): home sends at most three asks for a
-   ticket's receipt and three sends of a half, so six covers home and a redelivery of each; past the limit the
-   delivery is consumed and nothing is sent (`AnswerNotSent`).
+   Answers that send a stored receipt again, to later copies or repeated halves, are limited to six per half
+   (`MAX_ANSWERS_PER_HALF`): home sends at most three asks for a ticket's receipt and three sends of a half, so six
+   cover home and a redelivery of each; past the limit the delivery is consumed and nothing is sent
+   (`AnswerNotSent`). The first send of a stored receipt is not counted, and neither is a still open answer: home
+   gives its ask back on each one, so it must hear every one, and counting them would use up the answers home needs
+   once the ticket executed or passed its valid until.
 4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
 6. Execute only for the named wallets, by `from` or by the named `spender`.
