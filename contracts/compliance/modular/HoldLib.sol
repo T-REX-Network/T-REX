@@ -327,7 +327,8 @@ library HoldLib {
         if (!answersTheLatestHalf) return;
         bool answersTheBringHome = receipt.from.length != 0;
         if (answersTheBringHome) {
-            _applyTheBringHomeAnswer(ticket, ticketId, receipt, token);
+            // Once close by hand ended the bring home, its late zero answer changes nothing: the credit is back.
+            if (TicketLib.aBringHomeIsOut(ticket)) _applyTheBringHomeAnswer(ticket, ticketId, receipt, token);
             return;
         }
         _applyTheMoveOutAnswer(ticket, ticketId, receipt, token);

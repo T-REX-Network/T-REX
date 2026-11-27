@@ -1095,9 +1095,11 @@ library TicketLib {
     }
 
     /// @dev Turns money on hold back toward its sender: the `OnHold` row is written again for the new destination,
-    ///  so nothing stays kept against the receiver.
+    ///  so nothing stays kept against the receiver. The halves sent so far went to the receiver, which judges their
+    ///  late answers.
     function turnTheHoldBack(ITickets.Ticket storage ticket) internal {
         _releaseTheHold(ticket);
+        ticket.lastHalfToTheReceiver = ticket.half;
         ticket.secondHalfToKey = ticket.fromKey;
         reserveTheHold(ticket);
     }

@@ -209,6 +209,57 @@ contract CloseByHandTest is HoldsSuiteTest {
         assertFalse(boundCompliance.isAwayChainBlocked(optimism), "the honest late answer blocks nobody");
     }
 
+    /// @notice After close by hand ended an open bring home with nothing moved, its half reaches the closed chain
+    ///         late: that chain refuses it past its valid until, and its zero answer changes nothing at home.
+    function test_closeByHand_isSafe_whenTheOldBringHomeArrivesLate() public {
+        uint256 broughtHome = 3;
+        vm.prank(agent);
+        bytes32 ticketId = boundCompliance.bringHome(aliceSat, broughtHome, alice, _salt());
+        uint256 oldBringHome = _nextUndelivered(polygonGateway);
+        _closeEvmChain(token, POLYGON);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+        _closeByHand(ticketId, aliceHome, _reading(validUntil));
+
+        vm.warp(validUntil);
+        polygonGateway.relay(oldBringHome);
+        assertEq(polygonLite.balanceOf(aliceSat), ALICE_AWAY_BALANCE, "refused past its valid until");
+
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        _relayAll(polygonGateway);
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "still ended with nothing moved");
+        assertEq(token.balanceOf(alice), 0, "nothing minted at home");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest late answer blocks nobody");
+    }
+
+    /// @notice A cancel's bring home on the receiver is out when the chain closes; close by hand applies the move
+    ///         inside that chain. The bring home reaches the chain late, and its zero answer changes nothing at home.
+    function test_closeByHand_isSafe_whenTheCancelsBringHomeArrivesLate() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        boundCompliance.cancelHold(ticketId, bobSat);
+        uint256 oldBringHome = _nextUndelivered(polygonGateway);
+        _closeEvmChain(token, POLYGON);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+        _closeByHand(ticketId, bobSat, _reading(validUntil));
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move inside polygon is applied");
+
+        vm.warp(validUntil);
+        polygonGateway.relay(oldBringHome);
+        assertEq(polygonLite.balanceOf(bobSat), FOUR, "refused past its valid until");
+
+        _openEvmChain(token, POLYGON, address(polygonGateway));
+        _relayAll(polygonGateway);
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "still applied");
+        assertEq(token.awayBalanceOf(bobSat), FOUR, "bob is counted once");
+        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "no credit given back twice");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest late answer blocks nobody");
+        _assertHomeAgreesWithPolygon();
+    }
+
     function test_cancelTickets_readsTheClosedChain_whenTheReceiptRouteIsClosed() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, FOUR, FOUR);
         _relayAll(polygonGateway);

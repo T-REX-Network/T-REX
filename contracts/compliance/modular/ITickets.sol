@@ -323,6 +323,12 @@ interface ITickets {
         /// An approval module was bound at the ask, so the ticket waited for its answer. Its only honest copy is
         /// home's own: a first-half receipt on any other ask block hash breaks its terms.
         bool waitedForApproval;
+
+        /* ----- The return of a move; last for the layout's sake ----- */
+
+        /// The number of the last second half sent to the receiver before close by hand turned the money on hold
+        /// back to the sender; zero when none was. An older half's late answer is judged against the receiver.
+        uint8 lastHalfToTheReceiver;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it

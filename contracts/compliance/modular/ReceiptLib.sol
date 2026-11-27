@@ -365,15 +365,24 @@ library ReceiptLib {
         bool heldWithoutTicket = !ticket.written;
         if (aBringHome || heldWithoutTicket) return !_answersTheBringHome(ticket, originChainKey, receipt);
         if (receipt.half == 0) return !_answersTheTicket(ticket, originChainKey, receipt);
-        return !_answersASecondHalf(ticket, originChainKey, receipt);
+        return !_answersASecondHalf(ticket, originChainKey, receipt, _walletTheHalfWentTo(ticket, receipt.half));
+    }
+
+    /// @dev The key of the wallet a move's second half went to: the receiver's for a half sent before close by hand
+    ///  turned the money on hold back, the latest half's wallet otherwise.
+    function _walletTheHalfWentTo(ITickets.Ticket storage ticket, uint8 half) private view returns (bytes32) {
+        bool sentBeforeTheTurnBack = half <= ticket.lastHalfToTheReceiver;
+        if (sentBeforeTheTurnBack) return ticket.toKey;
+        return ticket.secondHalfToKey;
     }
 
     /// @dev Whether a receipt answers a half home sent for a bring home, or for the cancel of money on hold with no
     ///  ticket, whose halves burn from the receiver, then return what burned. Half 0 is never such an answer. A
     ///  receipt naming no sender answers the move out that returns what was burned, and exists only once that move
     ///  out is due. Any other must come from the burned wallet's chain, name that wallet and no receiver, and either
-    ///  burn at most the half's amount for its latest half while it is out, or be a zero answer that a half expired
-    ///  unexecuted. A burn for an older half would be a second burn.
+    ///  burn at most the half's amount for its latest half while it is out, or be a zero answer that a half it sent
+    ///  expired unexecuted, the latest included once close by hand ended it. A burn for an older half would be a
+    ///  second burn.
     function _answersTheBringHome(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
@@ -384,7 +393,7 @@ library ReceiptLib {
         if (!namesTheBurnedWallet) {
             bool returnsWhatWasBurned =
                 ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.fromKey;
-            return returnsWhatWasBurned && _answersASecondHalf(ticket, originChainKey, receipt);
+            return returnsWhatWasBurned && _answersASecondHalf(ticket, originChainKey, receipt, ticket.fromKey);
         }
         // A bring home burns from its away wallet; the cancel of money on hold, from the receiver on the same chain.
         bytes32 burnedWalletKey = ticket.fromKey;
@@ -394,13 +403,13 @@ library ReceiptLib {
         bool namesNoReceiver = receipt.to.length == 0;
 
         bool answersTheLatestHalf = TicketLib.aBringHomeIsOut(ticket) && receipt.half == ticket.half;
-        bool answersAnOlderHalf = receipt.half < ticket.half;
+        bool answersASentHalf = receipt.half <= ticket.half;
         bool executed = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
         bool burnedAtMostItsAmount = executed && receipt.amount <= ticket.amountMax;
         bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount == 0;
-        bool answersTheLatestHalfRightly = answersTheLatestHalf && (burnedAtMostItsAmount || expiredUnexecuted);
-        bool answersAnOlderHalfRightly = answersAnOlderHalf && expiredUnexecuted;
-        bool answersAHalfRightly = answersTheLatestHalfRightly || answersAnOlderHalfRightly;
+        bool burnedForTheLatestHalf = answersTheLatestHalf && burnedAtMostItsAmount;
+        bool aSentHalfExpired = answersASentHalf && expiredUnexecuted;
+        bool answersAHalfRightly = burnedForTheLatestHalf || aSentHalfExpired;
         return fromTheWalletsChain && burnedTheHalfsWallet && namesNoReceiver && answersAHalfRightly;
     }
 
@@ -419,17 +428,18 @@ library ReceiptLib {
     }
 
     /// @dev Whether a receipt answers a second half home sent: the latest half, sent at least once, or an older one;
-    ///  for the half's wallet, from the chain that wallet is on, which is the chain the half was sent to; naming no
-    ///  sender; and either a mint of the money on hold or a zero answer that the half expired unexecuted. The chain
-    ///  is read off the half's own wallet, never off the ticket's sender, so a receiving chain's honest receipt never
-    ///  blocks it, and another chain cannot answer its half. An older half can only answer zero: a mint of it would
-    ///  be a second mint of one move.
+    ///  for `halfWalletKey`, the wallet that half went to, from the chain that wallet is on; naming no sender; and
+    ///  either a mint of the money on hold or a zero answer that the half expired unexecuted. The chain is read off
+    ///  the half's own wallet, never off the ticket's sender, so a receiving chain's honest receipt never blocks it,
+    ///  and another chain cannot answer its half. An older half can only answer zero: a mint of it would be a second
+    ///  mint of one move.
     function _answersASecondHalf(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
-        MessageTypesLib.ReceiptMessage calldata receipt
+        MessageTypesLib.ReceiptMessage calldata receipt,
+        bytes32 halfWalletKey
     ) private view returns (bool) {
-        bool toTheHalfsWallet = keccak256(receipt.to) == ticket.secondHalfToKey;
+        bool toTheHalfsWallet = keccak256(receipt.to) == halfWalletKey;
         if (!toTheHalfsWallet) return false;
         bool fromTheChainTheHalfWentTo = _chainKeyOf(receipt.to) == originChainKey;
         bool namesNoSender = receipt.from.length == 0;

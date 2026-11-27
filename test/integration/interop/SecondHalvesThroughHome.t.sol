@@ -320,6 +320,25 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         }
     }
 
+    /// @notice The same, for any gas a relayer picks: the delivery reverts as a whole and lands later, or the half
+    ///         left inside it.
+    function test_fuzz_receiveReceipt_neverCatchesASendThatRanOutOfGas(uint256 relayGas) public {
+        uint256 leastGasTried = 500_000;
+        uint256 mostGasTried = 3_000_000;
+        relayGas = bound(relayGas, leastGasTried, mostGasTried);
+        bytes32 id = _askAToB(MOVED);
+        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceOnA, bobOnB, MOVED));
+
+        try polygonGateway.relay{ gas: relayGas }(index) {
+            assertEq(boundCompliance.ticketOf(id).secondHalfSends, 1, "the delivery landed, so the half must have left");
+            assertFalse(boundCompliance.ticketOf(id).secondHalfOwed, "nothing caught");
+        } catch {
+            _assertStatus(id, ITickets.TicketStatus.Open);
+            polygonGateway.relay(index);
+            assertEq(boundCompliance.ticketOf(id).secondHalfSends, 1, "the same delivery lands later");
+        }
+    }
+
     /// @notice The gateway refuses the send: the receipt stays applied, the failure is announced and the half stays
     ///         owed under its own number, never sent; anyone sends it later as half 1.
     function test_receiveReceipt_leavesTheSecondHalfOwed_whenTheSendFails() public {

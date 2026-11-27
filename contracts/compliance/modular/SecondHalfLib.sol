@@ -112,9 +112,9 @@ library SecondHalfLib {
     uint8 internal constant MAX_NEW_HALVES = 4;
 
     /// @dev The gas a second half's send needs inside its receipt's delivery: below it the whole delivery reverts and
-    ///  stays deliverable, so no relayer can make the send fail on purpose. From the plan's figure for one send on
-    ///  the receipt route; to be replaced by a measured run.
-    uint256 internal constant SECOND_HALF_SEND_GAS = 288_000;
+    ///  stays deliverable, so no relayer can make the send fail on purpose. The costliest `MOVE_OUT` send measured
+    ///  449,545 gas; times 64/63 for the gas a call keeps back is 456,680, plus a fifth for margin.
+    uint256 internal constant SECOND_HALF_SEND_GAS = 550_000;
 
     /* ----- The first half landed ----- */
 
