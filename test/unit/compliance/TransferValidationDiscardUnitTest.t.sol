@@ -44,6 +44,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUnitTest.t.sol";
 import { ITransferValidation } from "contracts/compliance/modular/ITransferValidation.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
+import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -91,6 +92,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         vm.mockCall(token, abi.encodeWithSelector(Token.dispatchComplianceValidation.selector), abi.encode(bytes32(0)));
+        vm.mockCall(token, abi.encodeWithSelector(ITREXMessaging.isInboundPaused.selector), abi.encode(false));
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
         _bind(toOptimism, bobIdentity);
@@ -101,7 +103,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     /* ----- Status ----- */
 
     function test_statusOf_Success_WhenFreshlyIssued() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
         ITransferValidation.Validation memory state = mc.validationOf(id);
@@ -111,7 +113,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_statusOf_Success_WhenPastExpiryButNotPastReleaseAt() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + 1);
         assertEq(uint8(mc.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Pending));
@@ -121,7 +123,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_statusOf_Success_WhenPastReleaseAtItDerivesExpired() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
@@ -130,7 +132,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_statusOf_Success_WhenAwaitingTheMintLegNeverDerivesExpired() public {
-        uint256 id = _issueCrossChainWithBurnLeg();
+        bytes32 id = _issueCrossChainWithBurnLeg();
 
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
@@ -138,17 +140,17 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_statusOf_RevertWhen_IdWasNeverIssued() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, 0));
-        mc.statusOf(0);
+        mc.statusOf(bytes32(uint256(0)));
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, id + 1));
-        mc.statusOf(id + 1);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, bytes32(uint256(id) + 1)));
+        mc.statusOf(bytes32(uint256(id) + 1));
     }
 
     function test_stateOf_Success_WhenIdWasNeverIssued() public view {
-        ITransferValidation.Validation memory state = mc.validationOf(42);
+        ITransferValidation.Validation memory state = mc.validationOf(bytes32(uint256(42)));
 
         assertEq(uint8(state.status), 0);
         assertEq(state.executedAmount, 0);
@@ -159,7 +161,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     function test_discardExpiredValidations_Success_WhenExpired() public {
         _track();
         address recorder = _bindAfterTransferModule();
-        uint256 id = _issue();
+        bytes32 id = _issue();
         assertEq(mc.pendingInOf(bobId), 90);
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
@@ -179,7 +181,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     function test_discardExpiredValidations_Success_WhenTheReleaseFreesTheRoomForTheNext() public {
         _track();
-        uint256 id = _issue();
+        bytes32 id = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
         vm.prank(keeperAccount);
@@ -187,7 +189,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeCall(IToken.reserveForValidation, (fromSat, 90)), 1);
         vm.prank(aliceIdentity);
-        uint256 next = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        bytes32 next = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
         assertEq(mc.validationOf(next).amountMax, 90, "issued as if the discarded one never happened");
     }
 
@@ -196,7 +198,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     function test_discardExpiredValidations_Success_WhenNothingWasReservedAgainstTheIdentities() public {
         _track();
         _bind(toSat, aliceIdentity);
-        uint256 id = _issue();
+        bytes32 id = _issue();
         assertTrue(mc.validationOf(id).relocation, "nothing was reserved against the identities");
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
@@ -210,12 +212,12 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     function test_discardExpiredValidations_Success_WhenBatchingSeveralIds() public {
         _track();
-        uint256 first = _issue();
-        uint256 second = _issue();
+        bytes32 first = _issue();
+        bytes32 second = _issue();
         assertEq(mc.pendingInOf(bobId), 100, "both reserved, the second capped by the wallet");
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
 
-        uint256[] memory ids = new uint256[](2);
+        bytes32[] memory ids = new bytes32[](2);
         ids[0] = first;
         ids[1] = second;
         vm.expectEmit(true, false, false, true, address(mc));
@@ -232,7 +234,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_discardExpiredValidations_RevertWhen_NonKeeperBeforeTheSecondWindow() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         uint64 publicAt = uint64(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW);
         vm.warp(publicAt);
 
@@ -251,7 +253,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_discardExpiredValidations_Success_WhenAnyoneAfterTheSecondWindow() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + 2 * POLYGON_WINDOW + 1);
 
         vm.expectEmit(true, false, false, true, address(mc));
@@ -267,11 +269,11 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     function test_discardExpiredValidations_RevertWhen_IdWasNeverIssued() public {
         vm.prank(keeperAccount);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownValidation.selector, 7));
-        mc.discardExpiredValidations(_ids(7));
+        mc.discardExpiredValidations(_ids(bytes32(uint256(7))));
     }
 
     function test_discardExpiredValidations_RevertWhen_NotYetReleasable() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         uint64 releaseAt = uint64(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW);
 
         vm.warp(releaseAt);
@@ -283,7 +285,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
     }
 
     function test_discardExpiredValidations_RevertWhen_AlreadyDiscarded() public {
-        uint256 id = _issue();
+        bytes32 id = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
         vm.prank(keeperAccount);
         mc.discardExpiredValidations(_ids(id));
@@ -299,7 +301,7 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     function test_discardExpiredValidations_RevertWhen_AwaitingTheMintLegWhateverTheClock() public {
         _track();
-        uint256 id = _issueCrossChainWithBurnLeg();
+        bytes32 id = _issueCrossChainWithBurnLeg();
         vm.warp(ISSUED_AT + 10 * VALIDITY_WINDOW);
 
         vm.prank(keeperAccount);
@@ -317,12 +319,12 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
 
     function test_discardExpiredValidations_RevertWhen_OneIdOfTheBatchIsRefused() public {
         _track();
-        uint256 expired = _issue();
+        bytes32 expired = _issue();
         vm.warp(ISSUED_AT + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        uint256 pending = _issue();
+        bytes32 pending = _issue();
         uint64 pendingReleaseAt = uint64(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW);
 
-        uint256[] memory ids = new uint256[](2);
+        bytes32[] memory ids = new bytes32[](2);
         ids[0] = expired;
         ids[1] = pending;
         vm.prank(keeperAccount);
@@ -333,22 +335,25 @@ contract TransferValidationDiscardUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.pendingInOf(bobId), 100, "the whole batch is rolled back");
     }
 
-    function _issue() private returns (uint256 id) {
+    function _issue() private returns (bytes32 id) {
         vm.prank(aliceIdentity);
-        id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "");
+        id = mc.requestTransferValidation(fromSat, toSat, 10, 90, "", _salt());
     }
 
-    function _issueCrossChainWithBurnLeg() private returns (uint256 id) {
+    function _issueCrossChainWithBurnLeg() private returns (bytes32 id) {
         vm.prank(aliceIdentity);
-        id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "");
+        id = mc.requestTransferValidation(fromSat, toOptimism, 10, 90, "", _salt());
+        // Read before the prank: the lookup is an external call too and would consume it.
+        bytes32 hash = mc.validationOf(id).hash;
         vm.prank(token);
         mc.handleSettlement(
-            polygon, MessageTypesLib.SettlementNotification({ validationId: id, from: fromSat, to: "", amount: 50 })
+            polygon,
+            MessageTypesLib.SettlementNotification({ validationId: id, from: fromSat, to: "", amount: 50, hash: hash })
         );
     }
 
-    function _ids(uint256 id) private pure returns (uint256[] memory ids) {
-        ids = new uint256[](1);
+    function _ids(bytes32 id) private pure returns (bytes32[] memory ids) {
+        ids = new bytes32[](1);
         ids[0] = id;
     }
 

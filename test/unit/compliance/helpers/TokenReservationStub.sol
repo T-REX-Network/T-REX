@@ -51,6 +51,12 @@ contract TokenReservationStub {
 
     mapping(bytes32 walletKey => uint256) public reserved;
     mapping(bytes32 walletKey => uint256) public bridged;
+    /// @dev The token's pause, which refuses issuance and resends. Running unless a test pauses it.
+    bool public paused;
+
+    function setPaused(bool paused_) external {
+        paused = paused_;
+    }
 
     function setBridgedBalance(bytes calldata wallet, uint256 amount) external {
         bridged[keccak256(wallet)] = amount;
@@ -80,7 +86,7 @@ contract TokenReservationStub {
         reserved[key] = held < amount ? 0 : held - amount;
     }
 
-    function holdInTransit(bytes calldata wallet, uint256, uint256, uint256 amountReserved) external {
+    function holdInTransit(bytes calldata wallet, uint256, bytes32, uint256 amountReserved) external {
         bytes32 key = keccak256(wallet);
         uint256 held = reserved[key];
         reserved[key] = held < amountReserved ? 0 : held - amountReserved;

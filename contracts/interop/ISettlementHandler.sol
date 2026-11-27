@@ -71,6 +71,25 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
  */
 interface ISettlementHandler {
 
+    /// @dev What the token does once a handler has judged an inbound message it could not apply.
+    enum Verdict {
+        /// Nothing for the token to do: the message was applied, or was a harmless duplicate.
+        None,
+        /// The message reports something this chain cannot account for, so that chain's reports can no longer be
+        /// trusted: the token pauses its inbound from that chain only. For a settlement that is a leg already
+        /// accounted for, a leg under an id nothing is issued under, which is parked, and a leg outside the issued
+        /// terms, which is rejected or orphans its validation, see {handleSettlement}.
+        PauseChain,
+        /// The message names a recall the token never issued. The transport says which chain sent it, but not why
+        /// the id is unknown: a peer inventing ids, or the token's own records no longer matching what it dispatched
+        /// (a token reset with instructions in flight). The second is local and taints what every chain reports,
+        /// and the message cannot tell the two apart, so the token pauses itself. The price, accepted: a trusted
+        /// peer can halt the token with one such proof; the remedy is to distrust its gateway. A settlement never
+        /// returns this: a validation id is a function of the request, so an unknown one is the leg's chain's
+        /// problem, see {handleSettlement}.
+        HaltToken
+    }
+
     /// @dev Acts on a settlement the token has already attributed to its peer on `originChainKey`.
     ///
     /// The token guarantees three things:
@@ -80,22 +99,45 @@ interface ISettlementHandler {
     /// - the message's author is the token's peer on that chain.
     ///
     /// The notification is decoded and passed on as is; classifying it is this handler's job, against the
-    /// validation it issued: the token and the wallets must be the issued ones, the leg must come from the chain
-    /// recorded for its side, and the amount must sit inside the issued bounds. A leg that fails any of these
-    /// reverts, which leaves the message deliverable again. A leg for a `Pending` validation settles it, whatever
-    /// the clock says; one for a `Discarded` validation reconciles it late: applied anyway, since the satellite
-    /// execution is final, the modules caught up with no live reservation, `LateReconciliation` emitted and the
-    /// leg's chain paused for issuance until the manager unpauses it.
-    /// A silent failure would instead leave the message marked as received and unretryable.
+    /// validation it issued. The gate is substantive: the wallets must be the issued ones, the leg must come from
+    /// the chain recorded for its side, and the amount must sit inside the issued bounds. A leg that passes it for
+    /// a `Pending` validation settles it, whatever the clock says; one for a `Discarded` validation reconciles it
+    /// late: applied anyway, since the satellite execution is final, the modules caught up with no live
+    /// reservation, `LateReconciliation` emitted and the leg's chain paused for issuance until the manager
+    /// unpauses it. The hash the leg carries is evidence, never the gate: a leg inside the terms settles whatever
+    /// hash it names (`SettlementBodyDiverged` when it is not the issued one).
     ///
-    /// Two emergencies never revert and return `haltToken` instead: a leg already consumed, and an id that was
-    /// never issued. Both mean a trusted gateway delivered something the protocol cannot account for, so the
-    /// token pauses itself until an agent has investigated.
+    /// Nothing on this path reverts for good. A validation may travel to a satellite before this chain's finality,
+    /// so a leg the token cannot account for has a reorg as a possible cause as well as a Lite breaking a rule,
+    /// and the two are given the same outcome: nothing applied, the delivery consumed, and `PauseChain`, so the
+    /// token stops taking that chain's messages until an agent has investigated. The burden is the Lite's: one
+    /// that executes before finality owns the reorg exposure, and the token bounds it to that chain. One case
+    /// comes before these and returns `None` without applying anything:
+    /// - A delivery already consumed from that chain, whatever it came to, delivered again byte for byte under
+    ///   another receive id (`SettlementDuplicate`), as a gateway redelivery or a Lite resending its settlement
+    ///   produces. It is consumed and pauses nothing, so a chain reopened after an investigation is not paused
+    ///   again by a copy of the leg that paused it.
+    ///
+    /// Any other leg the token cannot account for is one of four cases:
+    /// - An id with no issued body: the leg is parked under its id and origin chain (`SettlementParked`), so the
+    ///   request, sent again with the same salt, issues the same id, and `settleParkedLeg` then judges it as any
+    ///   leg. A second, different leg from the same chain for a parked id is a replay.
+    /// - A leg already accounted for, including one arriving after the keeper resolved the pair, or for a
+    ///   validation ended `Orphaned`: a replay (`ReplayedSettlement`).
+    /// - A leg outside the issued terms carrying the issued hash: the Lite broke a rule on the body this chain
+    ///   issued (`SettlementRejected`); the validation stands, the discard and resolution paths still apply.
+    /// - A leg outside the issued terms carrying another hash, from a chain the validation involves: the satellite
+    ///   executed a body this chain never canonically issued (`ValidationOrphaned`). While `Pending` the validation
+    ///   ends `Orphaned` and its reservation is released; otherwise it stands. From any other chain the leg is
+    ///   rejected whatever hash it names: that chain could not have executed anything under the id.
+    /// A revert, from a tracker module for instance, leaves the message deliverable again; a silent failure would
+    /// instead leave it marked as received and unretryable.
     /// @param originChainKey The key of the chain the notification came from.
     /// @param notification The decoded settlement leg, exactly as the satellite sent it.
-    /// @return haltToken Whether the token must pause itself: a replayed or never-issued settlement.
+    /// @return verdict `None` when applied or a duplicate, `PauseChain` on every leg the token could not account
+    ///  for.
     function handleSettlement(bytes32 originChainKey, MessageTypesLib.SettlementNotification calldata notification)
         external
-        returns (bool haltToken);
+        returns (Verdict verdict);
 
 }

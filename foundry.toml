@@ -1,16 +1,8 @@
 [profile.default]
 src = "contracts"
 out = "out"
-script = "scripts"
 test = "test"
 libs = ["dependencies"]
-
-# scripts/DeployUtilityChecker.s.sol reads and merges the network deployment manifest.
-fs_permissions = [
-    { access = "read-write", path = "./deployments" },
-    # scratch manifest for test/unit/scripts/DeployUtilityChecker.t.sol
-    { access = "read-write", path = "./cache" },
-]
 
 solc_version = "0.8.30"
 optimizer = true
@@ -69,10 +61,3 @@ forge-std = "1.16.2"
 # were given, and the freeze tag needs recutting against this pin.
 # TODO: repin to the ONCHAINID v3 release tag once it is cut, and drop this note with it.
 onchain-id = { version = "develop", git = "https://github.com/T-REX-Network/ONCHAINID.git", rev = "4c6d074cec62b286804519a594c91a2136fce798" }
-
-[rpc_endpoints]
-ethereum = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-base = "https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-polygon = "https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
-baseSepolia = "https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}"
-

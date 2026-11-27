@@ -66,17 +66,23 @@ interface ITREXMessaging {
     event TrustedGatewayRegistrySet(address trustedGatewayRegistry);
     event ChainRegistered(bytes32 indexed chainKey, bytes2 chainType, bytes chainReference);
     event RouteSet(bytes32 indexed chainKey, address indexed gateway);
+    event FastRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
-    event ValidationRoutePinned(uint256 indexed validationId, bytes32 indexed chainKey, address gateway);
+    event ValidationRoutePinned(bytes32 indexed validationId, bytes32 indexed chainKey, address gateway);
     event ProtocolMessageSent(MessageTypesLib.Message indexed messageType, bytes32 indexed chainKey, bytes32 sendId);
+    event InboundPaused(bytes32 indexed chainKey);
+    event InboundUnpaused(bytes32 indexed chainKey);
     event BurnProofReceived(
         bytes32 indexed originChainKey, uint256 indexed recallId, bytes burnedWallet, uint256 amount
     );
 
+    error ChainInboundPaused(bytes32 chainKey);
     error ChainNotOpen(bytes32 chainKey);
     error ChainNotRegistered(bytes32 chainKey);
+    error FastRouteIsFinalRoute(bytes32 chainKey, address gateway);
+    error GatewayIsFastRoute(address gateway, bytes32 chainKey);
     error GatewayNotRouted(address gateway, bytes32 chainKey);
-    error GatewayNotPinned(address gateway, uint256 validationId, bytes32 chainKey);
+    error GatewayNotPinned(address gateway, bytes32 validationId, bytes32 chainKey);
     error GatewayNotTrusted(address gateway);
     error InvalidChainReference(bytes2 chainType, bytes chainReference);
     error InvalidPeer(bytes peer);
@@ -84,7 +90,7 @@ interface ITREXMessaging {
     error MessageTypeNotInbound(MessageTypesLib.Message messageType);
     error PeerChainMismatch(bytes32 chainKey, bytes32 peerChainKey);
     error SenderNotPeer(bytes32 chainKey, bytes sender);
-    error ValidationAlreadyRouted(uint256 validationId, bytes32 chainKey, address gateway);
+    error ValidationAlreadyRouted(bytes32 validationId, bytes32 chainKey, address gateway);
     error UnsupportedMessageVersion(uint8 messageVersion);
 
     error InteroperableAddressParsingError(bytes);
@@ -106,6 +112,34 @@ interface ITREXMessaging {
     /// or accepted from it, settlements of validations already sent included, until a route is set again.
     function setRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
 
+    /// @dev Routes this token's compliance validations to a chain through `gateway`, a gateway that relays ahead
+    /// of the chain's finality, while everything else keeps the final route set by `setRoute`.
+    ///
+    /// The two routes of a chain split its traffic by what a reorg can cost:
+    /// - the fast route carries validations out, and only validations. A validation moves nothing on its own.
+    /// - the final route carries mint and recall instructions out, and is the only route settlements and burn
+    ///   proofs are taken from: a message delivered by the fast route is refused with `GatewayIsFastRoute`.
+    ///
+    /// A validation goes out on the fast route when it is set and still trusted, otherwise on the final route.
+    /// The chain must be open on its final route either way, and the validation's leg is pinned to that final
+    /// route, which its settlement must come back through (see `pinnedRouteFor`). The Lite on that chain must
+    /// therefore send its settlements through its final route, not back through the gateway that delivered the
+    /// validation.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - `gateway` must be registry-trusted or zero; otherwise reverts with `GatewayNotTrusted`.
+    /// - `gateway` must not be the chain's final route; otherwise reverts with `FastRouteIsFinalRoute`. `setRoute`
+    ///   refuses the chain's fast route the same way.
+    /// - `chainReference` must be non-empty, with no leading zero byte on EVM; otherwise reverts with
+    ///   `InvalidChainReference`.
+    ///
+    /// Emits `ChainRegistered` on first sight of the prefix, then `FastRouteSet`.
+    /// @param chainType The ERC-7930 chain type, `0x0000` for EVM.
+    /// @param chainReference The ERC-7930 chain reference, the minimal big-endian chain id on EVM.
+    /// @param gateway The trusted gateway to send validations through, or zero to send them on the final route.
+    function setFastRoute(bytes2 chainType, bytes calldata chainReference, address gateway) external;
+
     /// @dev Registers this token's Lite on `chainKey`: the outbound recipient and the only accepted
     /// inbound author for that chain.
     ///
@@ -125,6 +159,32 @@ interface ITREXMessaging {
     /// @param peer The Lite as an ERC-7930 address, or empty to restore the default.
     function setPeer(bytes32 chainKey, bytes calldata peer) external;
 
+    /// @dev Stops taking messages from `chainKey`, or resumes. While paused, every settlement and burn proof
+    /// attributed to that chain reverts with `ChainInboundPaused` and stays deliverable, so the chain's reports
+    /// wait at the gateway; nothing else on the token is affected, native transfers and every other chain
+    /// included. The token sets it on its own when a chain reports a settlement or a burn proof for something
+    /// already accounted for, see `ISettlementHandler.Verdict`; lifting it is the pauser's, after an investigation.
+    ///
+    /// What waits with the chain: a delegation toward it is refused with `ChainInboundPaused`, so no more supply
+    /// reaches a chain whose reports are suspect, and the compliance neither issues a validation toward it nor
+    /// resends one, nor discards or resolves a validation still awaiting that chain's leg, since the held reports
+    /// may answer it. A recall instruction and an instruction resend still go out; the proof that answers a recall
+    /// lands once the pause is lifted. To abandon a chain for good, distrust its gateway or close its route, then
+    /// lift the pause so its validations can be discarded and resolved.
+    ///
+    /// Whether a refused delivery can be delivered again is the gateway's: this contract assumes an ERC-7786
+    /// gateway that keeps a reverted execution retryable. One that marks it failed for good loses the message,
+    /// and its author has to send it again.
+    ///
+    /// Requirements:
+    /// - The caller must hold the role bound to this selector by the AccessManager.
+    /// - The chain must have been registered by a route or a peer; otherwise reverts with `ChainNotRegistered`.
+    ///
+    /// Emits `InboundPaused` or `InboundUnpaused` when the state changes; nothing when it does not.
+    /// @param chainKey The chain whose messages are refused or taken again.
+    /// @param pause True to refuse, false to take again.
+    function setInboundPaused(bytes32 chainKey, bool pause) external;
+
     /// @dev The gateway registry this token resolves trust against. It is the network's, wired at
     /// deployment, and no role on the token can move it: removing a gateway from the registry severs
     /// every route through it, for every token.
@@ -136,6 +196,11 @@ interface ITREXMessaging {
     /// @param chainKey The chain to look up.
     /// @return The routed gateway, or zero when the chain is closed.
     function routeFor(bytes32 chainKey) external view returns (address);
+
+    /// @dev The stored fast route for `chainKey`, not re-validated against the registry.
+    /// @param chainKey The chain to look up.
+    /// @return The gateway validations go out through, or zero when they use the final route.
+    function fastRouteFor(bytes32 chainKey) external view returns (address);
 
     /// @dev The ERC-7930 prefix recorded for `chainKey`.
     /// @param chainKey The chain to look up.
@@ -149,18 +214,26 @@ interface ITREXMessaging {
     /// @return The peer as an ERC-7930 address, or empty when the chain cannot be addressed.
     function peerFor(bytes32 chainKey) external view returns (bytes memory);
 
-    /// @dev The gateway a validation's leg toward `chainKey` went out through, snapshot at dispatch.
-    /// Settlements of that validation from that chain are accepted from this gateway only, so a route
-    /// switch affects new validations and never orphans a leg in flight.
+    /// @dev The final route of `chainKey` when a validation's leg went out toward it, snapshot at dispatch, even
+    /// when the leg itself travelled on the fast route. Settlements of that validation from that chain are
+    /// accepted from this gateway only, so a route switch affects new validations and never orphans a leg in
+    /// flight.
     /// @param validationId The validation to look up.
     /// @param chainKey The chain the leg was dispatched toward.
     /// @return The pinned gateway, or zero when the leg never went out.
-    function pinnedRouteFor(uint256 validationId, bytes32 chainKey) external view returns (address);
+    function pinnedRouteFor(bytes32 validationId, bytes32 chainKey) external view returns (address);
 
-    /// @dev Whether `chainKey` can carry traffic right now: a route, a peer, and a still-trusted gateway.
-    /// Re-reads the registry, so an emergency gateway removal closes every chain routed through it.
+    /// @dev Whether `chainKey` is routed right now: a route, a peer, and a still-trusted gateway. Re-reads the
+    /// registry, so an emergency gateway removal closes every chain routed through it. The inbound pause is a
+    /// separate state, see `isInboundPaused`: a paused chain stays open for the instructions that still go out
+    /// while its deliveries are refused.
     /// @param chainKey The chain to check.
-    /// @return True when a message can be sent to, and accepted from, that chain.
+    /// @return True when the chain has a route, a peer and a trusted gateway.
     function isChainOpen(bytes32 chainKey) external view returns (bool);
+
+    /// @dev Whether messages from `chainKey` are currently refused, see `setInboundPaused`.
+    /// @param chainKey The chain to check.
+    /// @return True while that chain's inbound is paused.
+    function isInboundPaused(bytes32 chainKey) external view returns (bool);
 
 }

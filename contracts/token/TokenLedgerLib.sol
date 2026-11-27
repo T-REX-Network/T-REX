@@ -92,7 +92,7 @@ library TokenLedgerLib {
         /// @dev Amounts a satellite burned for a cross-chain validation whose mint leg has not landed, keyed by
         ///  the validation. Debited from the sender's position, still counted in `totalBridged`, still owned by
         ///  the sender the validation names.
-        mapping(uint256 validationId => uint256) inTransit;
+        mapping(bytes32 validationId => uint256) inTransit;
         /// @dev Sum of every in-transit hold: the part of `totalBridged` no wallet currently holds.
         uint256 totalInTransit;
         /// @dev What open validations may still draw from each satellite wallet. Kept here, beside the balance
@@ -144,13 +144,17 @@ library TokenLedgerLib {
         return layout().reservedForValidations[WalletKeyLib.canonicalKey(wallet)];
     }
 
-    /// @dev See {IToken-availableOf}.
+    /// @dev See {IToken-availableOf}. The open recall's amount is read off its record rather than kept as a
+    ///  second reservation, so it counts from the instruction and stops counting the moment the proof that
+    ///  settles the recall deletes the record; `recalls[0]` is never written, so a wallet without one adds zero.
     function availableOf(bytes calldata wallet) external view returns (uint256) {
         TokenStorage storage s = layout();
         bytes32 key = WalletKeyLib.canonicalKey(wallet);
         uint256 balance = s.bridgedBalance[key];
-        uint256 reserved = s.reservedForValidations[key];
-        return reserved < balance ? balance - reserved : 0;
+        uint256 reservedForValidations = s.reservedForValidations[key];
+        uint256 recalledAmount = s.recalls[s.openRecall[key]].amount;
+        uint256 heldBack = reservedForValidations + recalledAmount;
+        return heldBack < balance ? balance - heldBack : 0;
     }
 
     /* ----- Reservations ----- */
@@ -178,7 +182,7 @@ library TokenLedgerLib {
     ///  tokens leave the wallet, so the reservation that was standing in for them is given back at the same
     ///  time and there is nothing to release separately.
     /// @param reserved what this validation had reserved against the wallet, released as the hold is taken
-    function holdInTransit(bytes calldata fromWallet, uint256 amount, uint256 validationId, uint256 reserved) external {
+    function holdInTransit(bytes calldata fromWallet, uint256 amount, bytes32 validationId, uint256 reserved) external {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
 
         TokenStorage storage s = layout();
@@ -194,7 +198,7 @@ library TokenLedgerLib {
     /// @dev Puts a held amount back on the wallet it was burned from. The mirror of {holdInTransit}: the
     ///  movement is unwound where it started instead of completed, so `totalSupply` and `totalBridged` do not
     ///  move, only the hold becomes a balance again.
-    function returnHeldInTransit(bytes calldata toWallet, uint256 validationId) external {
+    function returnHeldInTransit(bytes calldata toWallet, bytes32 validationId) external {
         TokenStorage storage s = layout();
         uint256 held = s.inTransit[validationId];
         require(held != 0, ErrorsLib.NothingInTransit(validationId));
@@ -214,7 +218,7 @@ library TokenLedgerLib {
     /// @return toNative Whether the receiver is a wallet on this chain.
     /// @return recipient That wallet, when `toNative`.
     /// @return fromKey The sender's key, when `toNative`.
-    function settle(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId)
+    function settle(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId)
         external
         returns (bool toNative, address recipient, bytes32 fromKey)
     {
@@ -265,7 +269,7 @@ library TokenLedgerLib {
     ///  touch: `from` down, `to` up, nothing native. `validationId` is the validation the settlement consumed.
     ///  When its burn leg already moved the amount in transit, the hold is what `to` is credited from, and it
     ///  must be the settled amount exactly.
-    function _bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, uint256 validationId) private {
+    function _bridgedTransfer(bytes calldata from, bytes calldata to, uint256 amount, bytes32 validationId) private {
         bytes32 fromKey = WalletKeyLib.satelliteKey(from);
         bytes32 toKey = WalletKeyLib.satelliteKey(to);
 

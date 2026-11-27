@@ -85,7 +85,7 @@ contract TokenHandler is Test {
     uint256 public callsSettleHeld;
 
     struct Hold {
-        uint256 validationId;
+        bytes32 validationId;
         bytes from;
         uint256 amount;
     }
@@ -222,21 +222,25 @@ contract TokenHandler is Test {
         } catch { }
     }
 
-    /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains.
+    /// @dev Same-chain and cross-chain settlements alike: the wallets carry the chains. A fuzzed id can land on
+    ///  a live hold: the token then settles that hold instead of debiting `from`, so the model follows it.
     function bridgedTransfer(
         uint256 fromActorSeed,
         uint256 fromWalletSeed,
         uint256 toActorSeed,
         uint256 toWalletSeed,
         uint256 amount,
-        uint256 validationId
+        bytes32 validationId
     ) external {
         callsBridgedTransfer++;
         bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
         bytes memory to = _satellite(_actor(toActorSeed), toWalletSeed);
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
+        uint256 held = token.inTransitOf(validationId);
         vm.prank(agent);
-        try token.bridgedTransfer(from, to, amount, validationId) { } catch { }
+        try token.bridgedTransfer(from, to, amount, validationId) {
+            if (held != 0) _settledHold(validationId, held);
+        } catch { }
     }
 
     /// @dev A satellite position lands on another identity's native wallet: the seeds are independent, so the
@@ -247,7 +251,7 @@ contract TokenHandler is Test {
         address to = actors[_actor(nativeSeed)];
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
         vm.prank(agent);
-        try token.settleToNative(from, to, amount, nativeSeed) {
+        try token.settleToNative(from, to, amount, bytes32(nativeSeed)) {
             ghostBridgedTotal -= amount;
         } catch { }
     }
@@ -257,7 +261,7 @@ contract TokenHandler is Test {
         callsHoldInTransit++;
         bytes memory from = _satellite(_actor(fromActorSeed), fromWalletSeed);
         amount = bound(amount, 0, token.bridgedBalanceOf(from));
-        uint256 validationId = nextValidationId++;
+        bytes32 validationId = bytes32(nextValidationId++);
         vm.prank(compliance);
         try token.holdInTransit(from, amount, validationId, 0) {
             holds.push(Hold({ validationId: validationId, from: from, amount: amount }));
@@ -275,10 +279,19 @@ contract TokenHandler is Test {
         uint256 amount = exact ? hold.amount : hold.amount + 1;
         vm.prank(agent);
         try token.bridgedTransfer(hold.from, to, amount, hold.validationId) {
-            ghostInTransit -= hold.amount;
+            _settledHold(hold.validationId, hold.amount);
+        } catch { }
+    }
+
+    /// @dev A hold left the token: the model lets go of it too.
+    function _settledHold(bytes32 validationId, uint256 amount) internal {
+        ghostInTransit -= amount;
+        for (uint256 i = 0; i < holds.length; i++) {
+            if (holds[i].validationId != validationId) continue;
             holds[i] = holds[holds.length - 1];
             holds.pop();
-        } catch { }
+            return;
+        }
     }
 
     // ------------------------------------------------------------------

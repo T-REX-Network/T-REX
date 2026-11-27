@@ -64,7 +64,7 @@ contract StuckValidationTest is InteropSuiteTest {
     bytes internal aliceSat;
     bytes internal bobOptimism;
     uint256 internal issuedAt;
-    uint256 internal id;
+    bytes32 internal id;
     /// Past `releaseAt` plus one more reconciliation window; the pair spans both chains, so it is the longer.
     uint256 internal resolvableAt;
 
@@ -109,8 +109,8 @@ contract StuckValidationTest is InteropSuiteTest {
     }
 
     /// @notice A mint leg arriving after the resolution is a leg for tokens that no longer wait anywhere, so it
-    ///         halts the token the way a replayed leg does.
-    function test_handleSettlement_HaltsTheToken_WhenAMintArrivesAfterTheResolution() public {
+    ///         pauses its chain's inbound the way a replayed leg does; the token itself keeps running.
+    function test_handleSettlement_PausesTheChain_WhenAMintArrivesAfterTheResolution() public {
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
         vm.warp(resolvableAt + 1);
         vm.prank(keeper);
@@ -118,9 +118,66 @@ contract StuckValidationTest is InteropSuiteTest {
 
         optimismGateway.relay(_liteSettles(optimismGateway, token, _mintLeg(id, token, bobOptimism, EXECUTED)));
 
-        assertTrue(token.paused(), "the token halted itself");
+        assertTrue(token.isInboundPaused(optimism), "the chain that minted against nothing is paused");
+        assertFalse(token.isInboundPaused(polygon));
+        assertFalse(token.paused(), "the token is not");
         assertEq(token.bridgedBalanceOf(bobOptimism), 0, "nothing was credited");
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice While the chain owing the mint has its inbound paused, its report may be waiting at the gateway;
+    ///         resolving on its absence would return a hold that report settles. The keeper waits for the pauser.
+    function test_resolveStuckValidation_RevertWhen_TheOwedLegsChainIsPaused_ThenResolvesOnceLifted() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(optimism, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainInboundPaused.selector, optimism));
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+
+        vm.prank(agent);
+        token.setInboundPaused(optimism, false);
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice The token's own pause holds every chain's reports, the owed leg's among them, so the pair is not
+    ///         resolved under it either.
+    function test_resolveStuckValidation_RevertWhen_TheTokenIsPaused_ThenResolvesOnceUnpaused() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.pause();
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(ErrorsLib.TokenPaused.selector);
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(token.inTransitOf(id), EXECUTED, "the hold stays where it is");
+
+        vm.prank(agent);
+        token.unpause();
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+    }
+
+    /// @notice The chain whose leg already landed has nothing left to say about the pair, so its pause does not
+    ///         hold the resolution.
+    function test_resolveStuckValidation_Success_WhenOnlyTheArrivedLegsChainIsPaused() public {
+        polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(id, token, aliceSat, EXECUTED)));
+        vm.prank(agent);
+        token.setInboundPaused(polygon, true);
+        vm.warp(resolvableAt + 1);
+
+        vm.prank(keeper);
+        boundCompliance.resolveStuckValidation(id);
+
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITransferValidation.ValidationStatus.Resolved));
+        assertEq(token.bridgedBalanceOf(aliceSat), BALANCE);
     }
 
     /// @notice A pair discarded before its late burn leg landed is stuck in the same way, and resolves the same
@@ -128,7 +185,7 @@ contract StuckValidationTest is InteropSuiteTest {
     ///         need a way home.
     function test_resolveStuckValidation_Success_WhenTheBurnCameLateAfterADiscard() public {
         vm.warp(issuedAt + VALIDITY_WINDOW + OPTIMISM_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
@@ -148,7 +205,7 @@ contract StuckValidationTest is InteropSuiteTest {
     /// @notice A validation issued with a zero minimum may burn nothing. That burn held nothing in transit, so the
     ///         resolution has nothing to give back, and still releases the reservations and ends in `Resolved`.
     function test_resolveStuckValidation_Success_WhenTheBurnMovedNothing() public {
-        uint256 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
+        bytes32 zeroMinimum = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 0, 100);
         polygonGateway.relay(_liteSettles(polygonGateway, token, _burnLeg(zeroMinimum, token, aliceSat, 0)));
         assertEq(token.inTransitOf(zeroMinimum), 0, "a burn of nothing holds nothing");
 

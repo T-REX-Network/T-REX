@@ -69,6 +69,9 @@ contract PendingReservationTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        // Running: a paused token refuses every request (TokenPaused).
+        vm.prank(agent);
+        token.unpause();
         _openEvmChain(token, POLYGON, address(_newTrustedGateway(POLYGON)));
         aliceSat = _fundSatelliteWallet(aliceIdentity, alice, POLYGON, makeAccount("aliceOnPolygon"), BALANCE);
         bobSat = _linkSatelliteWallet(bobIdentity, POLYGON, makeAccount("bobOnPolygon"));
@@ -88,9 +91,9 @@ contract PendingReservationTest is InteropSuiteTest {
 
     /// @notice The first validation is counted against the recipient at its worst case.
     function test_requestTransferValidation_Success_WhenTheFirstValidationReservesItsMaximum() public {
-        uint256 id = _issue(10, 60);
+        bytes32 id = _issue(10, 60);
 
-        assertEq(id, 1);
+        assertEq(boundCompliance.validationOf(id).fromIdentity, address(aliceIdentity));
         assertEq(_max(id), 60);
         assertEq(_pendingIn(), 60, "counted at the maximum it may execute");
         assertEq(_pendingOut(address(aliceIdentity)), 60, "and against the sender too");
@@ -100,7 +103,7 @@ contract PendingReservationTest is InteropSuiteTest {
     function test_requestTransferValidation_Success_WhenTheSecondValidationIsNarrowedByTheFirst() public {
         _issue(10, 60);
 
-        uint256 id = _issue(10, 60);
+        bytes32 id = _issue(10, 60);
 
         assertEq(_max(id), 40, "only the remainder of the cap is left");
         assertEq(_pendingIn(), CAP);
@@ -113,9 +116,9 @@ contract PendingReservationTest is InteropSuiteTest {
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "");
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "", _salt());
 
-        assertEq(boundCompliance.lastValidationId(), 2, "nothing was issued");
+        _assertNothingRecorded(aliceSat);
     }
 
     /// @notice A rule that keeps no counter of its own is never told about a reservation: the compliance
@@ -140,7 +143,7 @@ contract PendingReservationTest is InteropSuiteTest {
         bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOtherOnPolygon"));
 
         vm.prank(address(aliceIdentity));
-        uint256 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, CAP, "");
+        bytes32 id = boundCompliance.requestTransferValidation(aliceSat, aliceOther, 10, CAP, "", _salt());
 
         assertTrue(boundCompliance.validationOf(id).relocation, "no reservation against the identity");
         assertEq(_pendingIn(address(aliceIdentity)), 0, "alice's own room is untouched");
@@ -154,9 +157,7 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         validation did not use comes back.
     function test_handleSettlement_Success_WhenSettlingBelowTheReservation() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
-        uint256 first = _issue(10, 60);
+        bytes32 first = _issue(10, 60);
         _issue(10, 40);
         assertEq(_pendingIn(), CAP);
 
@@ -168,7 +169,7 @@ contract PendingReservationTest is InteropSuiteTest {
 
     /// @notice The keeper's discard releases the reservation, so the next validation gets the full cap.
     function test_discardExpiredValidations_Success_WhenReissuingAfterADiscard() public {
-        uint256 id = _issue(10, CAP);
+        bytes32 id = _issue(10, CAP);
         assertEq(_pendingIn(), CAP);
 
         _discard(id);
@@ -181,11 +182,9 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         rules allow once its reservation is released. The chain that sent it stops issuing.
     function test_handleSettlement_Success_WhenALateSettlementBreachesTheCap() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
-        uint256 late = _issue(10, CAP);
+        bytes32 late = _issue(10, CAP);
         _discard(late);
-        uint256 fresh = _issue(10, CAP);
+        bytes32 fresh = _issue(10, CAP);
         assertEq(_pendingIn(), CAP, "the fresh validation now holds the whole cap");
 
         gateway.relay(_liteSettles(gateway, token, _settlement(late, aliceSat, bobSat, CAP)));
@@ -203,7 +202,7 @@ contract PendingReservationTest is InteropSuiteTest {
         boundCompliance.setIssuancePaused(polygon, false);
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 1, 0));
-        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "");
+        boundCompliance.requestTransferValidation(aliceSat, bobSat, 1, 1, "", _salt());
     }
 
     /// @notice Issue #81, first bug: a rule bound after a validation was issued still sees its settlement,
@@ -211,9 +210,7 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         design booked such a settlement against nobody.
     function test_handleSettlement_Success_WhenARuleIsBoundAfterIssuance() public {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.prank(agent);
-        token.unpause();
-        uint256 id = _issue(10, 60);
+        bytes32 id = _issue(10, 60);
 
         CappedRecipientModule latecomer = CappedRecipientModule(
             address(
@@ -255,7 +252,7 @@ contract PendingReservationTest is InteropSuiteTest {
     ///         open validation, else that reservation could never be released.
     function test_setCompliance_RevertWhen_ARelocationValidationIsPending() public {
         bytes memory aliceOtherSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygonToo"));
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
         assertTrue(boundCompliance.validationOf(id).relocation);
         assertEq(_pendingIn(address(aliceIdentity)), 0, "nothing promised to the identity");
         _recallAndBurnTheWholeSupply();
@@ -272,7 +269,7 @@ contract PendingReservationTest is InteropSuiteTest {
     /// @notice Once the relocation is discarded, nothing is promised any more and the token may leave.
     function test_setCompliance_Success_WhenThePendingRelocationWasDiscarded() public {
         bytes memory aliceOtherSat = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceOnPolygonToo"));
-        uint256 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, aliceOtherSat, 10, 60);
         _recallAndBurnTheWholeSupply();
         _discard(id);
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
@@ -315,10 +312,8 @@ contract PendingReservationTest is InteropSuiteTest {
     ///  proves it burned the whole position.
     function _recallAndBurnTheWholeSupply() private {
         ERC7786GatewayMock gateway = ERC7786GatewayMock(token.routeFor(polygon));
-        vm.startPrank(agent);
-        token.unpause();
+        vm.prank(agent);
         uint256 recallId = token.instructRecall(aliceSat, BALANCE, alice);
-        vm.stopPrank();
         gateway.relay(
             _liteSends(gateway, token, MessageTypesLib.encodeBurnProof(_burnProof(recallId, aliceSat, BALANCE)))
         );
@@ -335,19 +330,19 @@ contract PendingReservationTest is InteropSuiteTest {
         assertEq(boundCompliance.getTokenBound(), address(0), "the old compliance is free");
     }
 
-    function _issue(uint256 requestedMin, uint256 requestedMax) private returns (uint256) {
+    function _issue(uint256 requestedMin, uint256 requestedMax) private returns (bytes32) {
         return _requestValidation(address(aliceIdentity), aliceSat, bobSat, requestedMin, requestedMax);
     }
 
-    function _discard(uint256 id) private {
+    function _discard(bytes32 id) private {
         vm.warp(block.timestamp + VALIDITY_WINDOW + POLYGON_WINDOW + 1);
-        uint256[] memory ids = new uint256[](1);
+        bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;
         vm.prank(keeper);
         boundCompliance.discardExpiredValidations(ids);
     }
 
-    function _max(uint256 id) private view returns (uint256) {
+    function _max(bytes32 id) private view returns (uint256) {
         ITransferValidation.Validation memory validation = boundCompliance.validationOf(id);
         return validation.amountMax;
     }

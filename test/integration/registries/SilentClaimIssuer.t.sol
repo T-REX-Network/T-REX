@@ -139,7 +139,9 @@ contract SilentClaimIssuerTest is TREXSuiteTest {
         super.setUp();
         utilityChecker = UtilityChecker(
             address(
-                new UtilityCheckerProxy(address(new UtilityChecker()), abi.encodeCall(UtilityChecker.initialize, ()))
+                new UtilityCheckerProxy(
+                    address(new UtilityChecker()), abi.encodeCall(UtilityChecker.initialize, (address(suiteManager)))
+                )
             )
         );
     }
