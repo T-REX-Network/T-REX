@@ -117,8 +117,8 @@ interface ITREXMessaging {
     ///   `InvalidChainReference`.
     /// - The receiving policy of `bridge` for `awayChainSelector` and `awayReceiptBridge` must admit full finality
     ///   only; otherwise reverts with `ReceiptBridgeNotFullFinality`.
-    /// - The last planned change of the chain's route or peer must be four waiting times old; otherwise reverts with
-    ///   `RouteChangedTooRecently`, since this change would drop the former pair.
+    /// - While the route is open, the last planned change of the chain's route or peer must be four waiting times
+    ///   old; otherwise reverts with `RouteChangedTooRecently`, since this change would drop the former pair.
     ///
     /// Emits `ChainRegistered` on first sight of the prefix, `FormerRouteKept` when the route was open, then
     /// `ReceiptRouteSet`.
@@ -185,8 +185,8 @@ interface ITREXMessaging {
     /// - A non-empty `peer` must be a canonical ERC-7930 v1 address with an account part, 20 bytes on EVM,
     ///   and no trailing bytes; otherwise reverts with `InvalidPeer`.
     /// - Its chain prefix must hash to `chainKey`; otherwise reverts with `PeerChainMismatch`.
-    /// - The last planned change of the chain's route or peer must be four waiting times old; otherwise reverts with
-    ///   `RouteChangedTooRecently`.
+    /// - While the route is open, the last planned change of the chain's route or peer must be four waiting times
+    ///   old; otherwise reverts with `RouteChangedTooRecently`.
     ///
     /// A planned change, made on home first. A half already sent keeps its receipt accepted from the peer it was
     /// sent to, as well as from the new one; while the route is open, the former peer is also taken for every receipt

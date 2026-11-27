@@ -277,6 +277,8 @@ library HoldLib {
     ///  receiver still holds as uncounted credit is applied as the move it was, and a bring home of the cancel that is
     ///  out burned nothing once that chain's clock is past its valid until. Last in, first out: never while a later
     ///  hold carries this one's credit, and the earlier move this one carries from is applied first for that part.
+    ///  Each move is applied as a move inside one chain is: to the identity its receiver has now, never the one read
+    ///  at booking.
     /// @param receiver the receiver's wallet, checked by the caller
     /// @param awayClockTime the timestamp of the block read on the closed chain
     /// @param token the token the compliance is bound to
@@ -285,28 +287,21 @@ library HoldLib {
         ITickets.Ticket storage ticket = store.validations[ticketId];
 
         // Checks
-        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
-        bool noReturnToTheSender = ticket.secondHalfToKey != ticket.fromKey;
-        bool closable = onHold && _insideOneAwayChain(ticket) && noReturnToTheSender;
-        require(closable, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
-        bytes32 laterHoldId = ticket.carriedBy;
-        require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
-        bool cancelStarted = ticket.secondHalfToKey != bytes32(0);
-        if (!cancelStarted) {
-            require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
-        }
-        bool aBringHomeIsOut = TicketLib.aBringHomeIsOut(ticket);
-        if (aBringHomeIsOut) {
-            uint64 validUntil = ticket.secondHalfValidUntil;
-            require(
-                awayClockTime >= validUntil, ErrorsLib.AwayClockBeforeValidUntil(ticketId, awayClockTime, validUntil)
-            );
-        }
+        bool aBringHomeIsOut = _requireTheHoldCanBeClosedByHand(ticket, ticketId, awayClockTime);
+        address receiverIdentity = _identityNowOf(receiver, token);
+        bool carriesAnEarlierMove = ticket.carriedFrom != bytes32(0);
+        address senderIdentity;
+        if (carriesAnEarlierMove) senderIdentity = _identityNowOf(ticket.fromWallet, token);
 
         // Effects and interactions: what the bring home took from the receiver's credit is back, since it burned
-        // nothing; then the moves the away token made, the earlier one first.
+        // nothing; the records name the receivers' identities of now; then the moves the away token made, the earlier
+        // one first.
         if (aBringHomeIsOut) store.uncountedCredit[ticket.toKey] += ticket.amountMax;
-        if (ticket.carriedFrom != bytes32(0)) _applyTheCarriedPartFirst(ticket, ticketId, token);
+        ticket.toIdentity = receiverIdentity;
+        if (carriesAnEarlierMove) {
+            store.validations[ticket.carriedFrom].toIdentity = senderIdentity;
+            _applyTheCarriedPartFirst(ticket, ticketId, token);
+        }
         _applyWhatTheReceiverHolds(ticket, ticketId, receiver, token);
     }
 
@@ -408,9 +403,10 @@ library HoldLib {
         return awayBalance + _creditToCarry(store, WalletKeyLib.canonicalKey(wallet));
     }
 
-    /// @dev The uncounted credit of a wallet a receipt with no ticket may carry: at most what the latest money on hold
-    ///  that gave it holds, while that money is still on hold with no ticket, none of its cancel's halves is out, and
-    ///  no other hold carries from it. Otherwise none, and the receipt waits.
+    /// @dev The uncounted credit of a wallet a receipt with no ticket may carry: at most the latest money on hold that
+    ///  gave it holds of its own, not what that hold itself carries, while that money is still on hold with no ticket,
+    ///  none of its cancel's halves is out, and no other hold carries from it. Otherwise none, and the receipt waits.
+    ///  A hold that owns nothing gives nothing: its close by hand would find nothing on hold to apply from.
     function _creditToCarry(TicketLib.ValidationStorage storage store, bytes32 walletKey)
         private
         view
@@ -422,7 +418,8 @@ library HoldLib {
         bool carriedByNone = earlierHold.carriedBy == bytes32(0);
         if (!stillHeldWithoutTicket || !noHalfOut || !carriedByNone) return 0;
         uint256 credit = store.uncountedCredit[walletKey];
-        if (credit > earlierHold.moved) credit = earlierHold.moved;
+        uint256 ownOnHold = earlierHold.moved - earlierHold.carriedAmount;
+        if (credit > ownOnHold) credit = ownOnHold;
         return credit;
     }
 
@@ -683,6 +680,34 @@ library HoldLib {
 
     /* ----- Private: close by hand ----- */
 
+    /// @dev The checks of {closeHoldByHand} on the hold itself: on hold inside one away chain with no return to its
+    ///  sender, no later hold carrying its credit, its cancel due, and a bring home that is out past its valid until
+    ///  on the closed chain's clock.
+    /// @return aBringHomeIsOut whether a bring home of the hold's cancel is out
+    function _requireTheHoldCanBeClosedByHand(ITickets.Ticket storage ticket, bytes32 ticketId, uint64 awayClockTime)
+        private
+        view
+        returns (bool aBringHomeIsOut)
+    {
+        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
+        bool noReturnToTheSender = ticket.secondHalfToKey != ticket.fromKey;
+        bool closable = onHold && _insideOneAwayChain(ticket) && noReturnToTheSender;
+        require(closable, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        bytes32 laterHoldId = ticket.carriedBy;
+        require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
+        bool cancelStarted = ticket.secondHalfToKey != bytes32(0);
+        if (!cancelStarted) {
+            require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
+        }
+        aBringHomeIsOut = TicketLib.aBringHomeIsOut(ticket);
+        if (aBringHomeIsOut) {
+            uint64 validUntil = ticket.secondHalfValidUntil;
+            require(
+                awayClockTime >= validUntil, ErrorsLib.AwayClockBeforeValidUntil(ticketId, awayClockTime, validUntil)
+            );
+        }
+    }
+
     /// @dev This hold's sender spent tokens that were the earlier hold's uncounted credit: that earlier move happened
     ///  for the carried part, so it is applied first, from the earlier hold to this sender, and the part joins this
     ///  hold as its sender's own money. The earlier hold keeps the rest, and ends once nothing is left of it.
@@ -767,6 +792,12 @@ library HoldLib {
     /// @dev The identity a wallet resolves to, zero when none.
     function _identityOf(bytes calldata wallet, address token) private view returns (address) {
         return address(_registryOf(token).resolveIdentity(wallet));
+    }
+
+    /// @dev The identity a wallet resolves to now; a wallet linked to none cannot take a move.
+    function _identityNowOf(bytes memory wallet, address token) private view returns (address identity) {
+        identity = address(_registryOf(token).resolveIdentity(wallet));
+        require(identity != address(0), ErrorsLib.UnverifiedWallet(wallet));
     }
 
     /// @dev The registry of the token the compliance is bound to.

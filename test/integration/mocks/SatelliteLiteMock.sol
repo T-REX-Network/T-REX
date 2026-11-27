@@ -44,6 +44,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 
@@ -191,7 +192,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
         bytes memory homeToken = InteroperableAddress.formatEvmV1(gateway.originChainId(), referenceToken);
         require(keccak256(sender) == keccak256(homeToken), NotTheReferenceToken(sender));
 
-        (uint8 messageType,, bytes memory body) = abi.decode(payload, (uint8, uint8, bytes));
+        (uint8 messageType, uint8 messageVersion, bytes memory body) = abi.decode(payload, (uint8, uint8, bytes));
+        require(messageVersion == MessageTypesLib.VERSION, ErrorsLib.UnsupportedMessageVersion(messageVersion));
         if (messageType == uint8(MessageTypesLib.Message.TICKET)) {
             _receiveTicket(MessageTypesLib.decodeValidation(body));
         } else if (messageType == uint8(MessageTypesLib.Message.MOVE_OUT)) {

@@ -111,6 +111,39 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the chain that holds alice is not");
     }
 
+    /// @notice A sender that names no wallet is on no chain: the receipt is refused and the chain that sent it is
+    ///         blocked, the delivery does not revert.
+    function test_receiveReceipt_blocksTheChain_whenAReceiptWithNoTicketNamesNoSender() public {
+        bytes32 inventedId = keccak256("an id with an empty sender");
+        bytes memory noSender = "";
+        MessageTypesLib.ReceiptMessage memory receipt = _receiptWithNoTicket(inventedId, noSender, bobSat, FOUR);
+        uint256 index = _awayTokenSends(optimismGateway, optimismLite, receipt);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptRefused(inventedId, optimism, FOUR, receipt.askBlockHash);
+        optimismGateway.relay(index);
+
+        assertEq(token.onHoldOf(inventedId), 0, "nothing booked");
+        assertTrue(boundCompliance.isAwayChainBlocked(optimism), "the chain that sent it is blocked");
+    }
+
+    /// @notice A sender written with a trailing byte is not the wallet of the chain that sent it, even when the
+    ///         wallet it starts with is: refused, and the chain blocked.
+    function test_receiveReceipt_blocksTheChain_whenAReceiptWithNoTicketNamesASenderWithATrailingByte() public {
+        bytes32 inventedId = keccak256("an id with a padded sender");
+        bytes memory paddedSender = bytes.concat(aliceSat, hex"00");
+        MessageTypesLib.ReceiptMessage memory receipt = _receiptWithNoTicket(inventedId, paddedSender, bobSat, FOUR);
+        uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptRefused(inventedId, polygon, FOUR, receipt.askBlockHash);
+        polygonGateway.relay(index);
+
+        assertEq(token.onHoldOf(inventedId), 0, "nothing booked");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice's tokens never moved");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
+    }
+
     function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketNeverLeft() public {
         _bindApprovalModule(approver);
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);

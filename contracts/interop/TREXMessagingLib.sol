@@ -635,8 +635,11 @@ library TREXMessagingLib {
     }
 
     /// @dev Changes of route or peer on one away chain stay a window apart: a second change would drop the former
-    ///  pair while receipts sent on it may still be on their way.
+    ///  pair while receipts sent on it may still be on their way. A closed route keeps no new pair, so it drops
+    ///  nothing and may be set again at once (see `_keepTheFormerRoute`).
     function _requireNoChangeInsideTheWindow(MessagingStorage storage messagingStorage, bytes32 chainKey) private view {
+        bool chainHasARoute = messagingStorage.receiptRoutes[chainKey] != address(0);
+        if (!chainHasARoute) return;
         uint64 allowedAt = messagingStorage.formerReceiptRoutes[chainKey].acceptedUntil;
         require(block.timestamp >= allowedAt, ErrorsLib.RouteChangedTooRecently(chainKey, allowedAt));
     }

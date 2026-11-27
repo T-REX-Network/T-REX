@@ -188,7 +188,11 @@ library SecondHalfLib {
         // identity is refused here, before its tokens leave, as a transfer out of it would be.
         ComplianceLedgerLib.currentOwner(token, homeWallet, ticket.fromIdentity, 0);
 
+        // Checked again, as at the ask: tokens frozen or spent while the ask waited for its approver must not leave.
         uint256 amount = ticket.amountMax;
+        uint256 free = IToken(token).freeBalanceOf(homeWallet);
+        require(amount <= free, ErrorsLib.RequestAboveBalance(ticket.fromWallet, free, amount));
+
         ticket.moved = amount;
         TicketLib.moveTo(ticket, ITickets.TicketStatus.OnHold, token);
         ticket.secondHalfToKey = ticket.toKey;

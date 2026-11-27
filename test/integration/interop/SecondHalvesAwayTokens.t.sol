@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
+import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
@@ -91,6 +92,29 @@ contract SecondHalvesAwayTokensTest is InteropSuiteTest {
         assertEq(optimismLite.mints(), MOVED, "one mint for one move");
     }
 
+    /// @notice B's away token reads only envelope version 2: home's own move out, wrapped in an older or a newer
+    ///         version, is refused and mints nothing.
+    function test_otherAwayToken_refusesAMessageOfAnotherVersion() public {
+        uint8 olderVersion = 1;
+        uint8 newerVersion = 99;
+        _askAndExecute(MOVED);
+        _relayAll(polygonGateway);
+        uint256 moveOutIndex = _lastIndex(optimismGateway);
+        (uint8 messageType,, bytes memory body) =
+            abi.decode(optimismGateway.queuedMessage(moveOutIndex).payload, (uint8, uint8, bytes));
+        optimismGateway.drop(moveOutIndex);
+
+        uint256 olderIndex = _homeQueues(abi.encode(messageType, olderVersion, body));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, olderVersion));
+        optimismGateway.relay(olderIndex);
+
+        uint256 newerIndex = _homeQueues(abi.encode(messageType, newerVersion, body));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnsupportedMessageVersion.selector, newerVersion));
+        optimismGateway.relay(newerIndex);
+
+        assertEq(optimismLite.mints(), 0, "nothing minted");
+    }
+
     /// @notice A half that reaches B at or after its valid until is answered zero and stored: home makes a new half
     ///         owed, and the late half, sent again, still mints nothing.
     function test_otherAwayToken_answersALateHalfZero_andHomeOwesANewHalf() public {
@@ -127,11 +151,18 @@ contract SecondHalvesAwayTokensTest is InteropSuiteTest {
 
     /// @dev Home's message to B delivered a second time, under a new delivery id.
     function _homeSendsAgain(bytes memory payload) private {
+        _homeQueues(payload);
+        optimismGateway.relay(_lastIndex(optimismGateway));
+    }
+
+    /// @dev Queues `payload` on B's bridge as sent by home's token.
+    /// @return index its place in the queue
+    function _homeQueues(bytes memory payload) private returns (uint256 index) {
         vm.prank(address(token));
         optimismGateway.sendMessage(
             InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)), payload, new bytes[](0)
         );
-        optimismGateway.relay(_lastIndex(optimismGateway));
+        index = _lastIndex(optimismGateway);
     }
 
     /// @dev Delivers every queued entry of `gateway` not yet delivered or dropped, in order.

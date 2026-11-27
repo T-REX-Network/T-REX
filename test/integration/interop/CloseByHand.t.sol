@@ -472,6 +472,72 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertPositionsAreTheSupply();
     }
 
+    /// @notice The receiver was linked to no identity when the receipt was booked, and to Bob's by the close: the move
+    ///         is applied to the identity the receiver has now, as a move inside one chain would be.
+    function test_closeByHand_appliesTheMoveToTheReceiversIdentityOfNow() public {
+        Account memory newWallet = makeAccount("newWalletOnPolygon");
+        bytes memory newWalletSat = InteroperableAddress.formatEvmV1(POLYGON, newWallet.addr);
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, newWalletSat, TWO);
+        polygonGateway.relay(receiptIndex);
+        assertEq(boundCompliance.ticketOf(ticketId).toIdentity, address(0), "booked with no receiver identity");
+
+        _linkSatelliteWallet(bobIdentity, POLYGON, newWallet);
+        _closeEvmChain(token, POLYGON);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _closeByHand(ticketId, newWalletSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move inside polygon is applied");
+        assertEq(token.awayBalanceOf(newWalletSat), TWO);
+        assertEq(boundCompliance.positionOf(address(bobIdentity)), TWO, "counted for bob's identity");
+        assertEq(boundCompliance.positionOf(address(0)), 0, "never for no identity");
+    }
+
+    /// @notice A receiver still linked to no identity at the close cannot take the move: the money stays on hold
+    ///         under its sender.
+    function test_closeByHand_reverts_when_theReceiverHasNoIdentityAtTheClose() public {
+        bytes memory unlinkedSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("unlinkedOnPolygon"));
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, unlinkedSat, TWO);
+        polygonGateway.relay(receiptIndex);
+        _closeEvmChain(token, POLYGON);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, unlinkedSat));
+        boundCompliance.closeByHand(ticketId, unlinkedSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "still on hold");
+        assertEq(token.onHoldOf(ticketId), TWO, "under alice");
+    }
+
+    /// @notice Alice to Bob 2, Bob to Charlie 2, Charlie to Alice 2, all dropped. Bob's hold owns nothing, it only
+    ///         carries Alice's credit, so Charlie's receipt has nothing to carry and waits. Bob then gets 2 of his own
+    ///         by a normal move: closing Bob's hold by hand applies Alice's move and Bob's, and never takes Bob's own 2.
+    function test_closeByHand_neverTakesTheMiddleSendersOwnTokens_whenThreeRelatedAsksWereDropped() public {
+        (bytes32 aliceId, bytes32 bobId) = _bookTwoRelatedDroppedAsks();
+        (bytes32 charlieId,, uint256 charlieReceipt) = _droppedAsk(charlieOnPolygon, charlieSat, aliceSat, TWO);
+        polygonGateway.relay(charlieReceipt);
+
+        assertEq(boundCompliance.waitingReceiptOf(charlieId).amount, TWO, "charlie's receipt waits");
+        assertEq(boundCompliance.ticketOf(bobId).carriedBy, bytes32(0), "nothing carries from bob's hold");
+
+        bytes32 bobsOwnId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, TWO, TWO);
+        _relayAll(polygonGateway);
+        vm.prank(aliceOnPolygon.addr);
+        polygonLite.execute(bobsOwnId, TWO);
+        _relayAll(polygonGateway);
+        assertEq(token.awayBalanceOf(bobSat), TWO, "bob holds 2 of his own");
+
+        _closeEvmChain(token, POLYGON);
+        vm.warp(boundCompliance.ticketOf(bobId).stopWaitingAt);
+        _closeByHand(bobId, charlieSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(aliceId, ITickets.TicketStatus.Done, "alice's move applied for what bob carried");
+        _assertStatus(bobId, ITickets.TicketStatus.Done, "then bob's");
+        assertEq(token.awayBalanceOf(bobSat), TWO, "bob's own 2 untouched");
+        assertEq(token.awayBalanceOf(charlieSat), TWO);
+        assertEq(token.onHoldOf(aliceId), 0, "nothing left on hold under alice");
+    }
+
     /// @notice A short cancel burned 1 of 2 and gave that 1 back to alice; close by hand applies only what bob still
     ///         holds as credit inside polygon, and mints nothing more to alice.
     function test_closeByHand_returnsOnlyTheLatestHalfAmount() public {

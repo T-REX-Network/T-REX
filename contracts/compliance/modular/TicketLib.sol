@@ -1079,9 +1079,10 @@ library TicketLib {
     ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
     ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token. An
     ///    open bring home is one identity's two wallets, so it holds its amount in the total and on its away wallet;
-    ///  - `OnHold`: `moved`, reserved in the ledger's total, and against the receiver's identity when the money goes
-    ///    to the receiver and the two wallets are not one identity's. Written by {reserveTheHold} once the
-    ///    destination is known, since the rules judge the receiver between the ask's release and this write;
+    ///  - `OnHold`: `moved`, reserved in the ledger's total, against the receiver's identity when the money goes
+    ///    to the receiver and the two wallets are not one identity's, and as on hold forward from the chain it left
+    ///    when it goes to the receiver. Written by {reserveTheHold} once the destination is known, since the rules
+    ///    judge the receiver between the ask's release and this write;
     ///  - `Cancelled`, `Done`: nothing.
     ///  The first two rows also count as one of the sender's identity's open tickets, see {ITickets-AskLimits}.
     ///  The release is read off the two rows, so it runs exactly once and is never skipped.
@@ -1101,6 +1102,7 @@ library TicketLib {
     function reserveTheHold(ITickets.Ticket storage ticket) internal {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal += ticket.moved;
+        if (_holdGoesForward(ticket)) ledger.onHoldForward[ticket.fromChainKey] += ticket.moved;
         if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] += ticket.moved;
     }
 
@@ -1118,15 +1120,21 @@ library TicketLib {
     function _releaseTheHold(ITickets.Ticket storage ticket) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal -= ticket.moved;
+        if (_holdGoesForward(ticket)) ledger.onHoldForward[ticket.fromChainKey] -= ticket.moved;
         if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] -= ticket.moved;
     }
 
-    /// @dev Whether the money on hold is kept against the receiver's identity: it goes to the receiver, and the two
-    ///  wallets are not one identity's. Money on hold with no ticket goes to nobody: while it is cancelled, its half
-    ///  burns from the receiver, and nothing was kept against it.
-    function _holdReservesForTheReceiver(ITickets.Ticket storage ticket) private view returns (bool) {
+    /// @dev Whether the money on hold of a ticket goes on to its receiver. Money on hold with no ticket goes to
+    ///  nobody: while it is cancelled, its half burns from the receiver.
+    function _holdGoesForward(ITickets.Ticket storage ticket) private view returns (bool) {
         bool goesToTheReceiver = ticket.secondHalfToKey == ticket.toKey;
-        return goesToTheReceiver && !ticket.relocation && ticket.written;
+        return goesToTheReceiver && ticket.written;
+    }
+
+    /// @dev Whether the money on hold is kept against the receiver's identity: it goes forward, and the two wallets
+    ///  are not one identity's.
+    function _holdReservesForTheReceiver(ITickets.Ticket storage ticket) private view returns (bool) {
+        return _holdGoesForward(ticket) && !ticket.relocation;
     }
 
     /// @dev Whether a half that burns is out for the ticket: an open bring home's, or the bring home of a cancel of

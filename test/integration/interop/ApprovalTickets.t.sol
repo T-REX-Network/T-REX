@@ -2,7 +2,6 @@
 pragma solidity 0.8.30;
 
 import { Vm } from "@forge-std/Vm.sol";
-import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
@@ -332,15 +331,16 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     }
 
     /// @notice The home wallet's tokens are burned at the first send, not reserved at the ask: a holder that spent
-    ///         them meanwhile makes the first send fail on its balance.
+    ///         them meanwhile makes the first send fail on its free balance, checked again as at the ask.
     function test_sendTicket_reverts_when_theHomeHolderSpentItsTokensBeforeTheFirstSend() public {
         uint256 homeAmount = 100;
         bytes32 ticketId = _askFromAliceHome(homeAmount);
         _approve(ticketId, homeAmount);
         vm.prank(agent);
         token.burn(alice, homeAmount);
+        bytes memory aliceHome = InteroperableAddress.formatEvmV1(block.chainid, alice);
 
-        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, 0, homeAmount));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, 0, homeAmount));
         boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
     }
 

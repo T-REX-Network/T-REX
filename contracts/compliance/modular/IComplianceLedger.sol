@@ -96,6 +96,11 @@ interface IComplianceLedger {
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 
+    /// @dev The money on hold that left `chainKey` and goes on to its receiver: it left that chain, but is told done
+    ///  only when the receiver's chain answers. What a limit on what leaves a chain must count on top of done moves.
+    /// @param chainKey the chain the money left, keyed as `MessageTypesLib.chainKey` computes it
+    function onHoldForwardOf(bytes32 chainKey) external view returns (uint256);
+
     /// @dev The identity a native wallet's tokens are counted under: the one it was last credited to. An empty
     ///  wallet follows the registry on its next movement; a funded one keeps this owner until the registry names
     ///  it again. Zero for a wallet the ledger has never credited.

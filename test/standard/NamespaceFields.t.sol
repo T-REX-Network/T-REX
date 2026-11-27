@@ -315,12 +315,14 @@ contract NamespaceFieldsTest is Test {
         ledger.pendingOut[ALICE] = 13;
         ledger.ownerOf[ALICE] = BOB;
         ledger.pendingTotal = 14;
+        ledger.onHoldForward[KEY] = 15;
 
         assertEq(_word(_entry(_field(base, 0), _key(ALICE))), 11, "position");
         assertEq(_word(_entry(_field(base, 1), _key(ALICE))), 12, "pendingIn");
         assertEq(_word(_entry(_field(base, 2), _key(ALICE))), 13, "pendingOut");
         assertEq(_word(_entry(_field(base, 4), _key(ALICE))), uint256(uint160(BOB)), "ownerOf");
         assertEq(_word(_field(base, 5)), 14, "pendingTotal");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 15, "onHoldForward");
     }
 
     function test_TransferValidation() public {

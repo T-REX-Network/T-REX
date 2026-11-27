@@ -159,6 +159,27 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the change passes once the window ends");
     }
 
+    /// @notice A closed route has no pair a change could drop: inside the window of an earlier change, its peer and
+    ///         its route are set again at once, and the former pair kept by that earlier change still lands receipts.
+    function test_setReceiptRoute_setsAClosedRouteAgain_insideTheWindowOfAnEarlierChange() public {
+        uint256 executed = 40;
+        bytes32 sentOnTheFirstPair = _ask(10, 50);
+        _changeRoute();
+        _closeEvmChain(token, POLYGON);
+        ERC7786GatewayMock thirdBridge = _newReceiptBridge(POLYGON);
+
+        vm.prank(deployer);
+        token.setPeer(polygon, nextPeerEnvelope);
+        _openEvmChain(token, POLYGON, address(thirdBridge));
+
+        assertEq(token.peerFor(polygon), nextPeerEnvelope, "the peer of a closed route is set inside the window");
+        assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "and so is the route");
+        uint256 index = _formerLiteSends(polygonBridge, _receipt(sentOnTheFirstPair, executed));
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptApplied(sentOnTheFirstPair, polygon, executed);
+        polygonBridge.relay(index);
+    }
+
     /// @notice Home changes the route first; the away token executed the ticket, its receipt was lost, and the ask
     ///         for the receipt goes out on the former pair, which still reaches it. Its answer lands, the ticket is
     ///         done, and nobody can cancel an executed ticket.

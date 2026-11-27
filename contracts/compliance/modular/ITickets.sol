@@ -701,7 +701,8 @@ interface ITickets {
     /// `ChainNotPartOfValidation`; the token not paused and that chain open as at a request (`TokenPaused`,
     /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`); no receipt waiting for the ticket, otherwise
     /// `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove` does with no approval module, or, for a home
-    /// `from`, burns onto hold and sends the `MOVE_OUT`.
+    /// `from`, burns onto hold and sends the `MOVE_OUT`; its maximum must still fit in the wallet's unfrozen balance,
+    /// as at the ask, otherwise `RequestAboveBalance`.
     ///
     /// Otherwise an ask for the receipt of an open ticket: sends the ticket again, byte for byte, through the bridge
     /// the first send pinned. The away token answers a later copy with the receipt it stored, a zero receipt when the
@@ -844,7 +845,8 @@ interface ITickets {
     ///   the money goes back to the sender by a new `MOVE_OUT`, minted at once to a home sender;
     /// - money on hold with no ticket, moved inside that chain: what the receiver still holds as uncounted credit is
     ///   applied as the move inside that chain it was, never minted to the sender, after the carried part of an
-    ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit.
+    ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit. Each
+    ///   move counts for the identity its receiver has at the close, not the one read when the receipt was booked.
     /// Money going back to a sender whose own chain is the closed one is not closed by hand: it waits for that chain.
     ///
     /// Requirements:
@@ -864,7 +866,8 @@ interface ITickets {
     /// - `reading.awayClockTime` at or after the valid until the case needs; otherwise reverts with
     ///   `AwayClockBeforeValidUntil`.
     /// - For money on hold with no ticket: no later hold carrying it, otherwise `LaterHoldStillCarries`; and, before
-    ///   its cancel started, `stopWaitingAt` passed, otherwise `CancelNotDue`.
+    ///   its cancel started, `stopWaitingAt` passed, otherwise `CancelNotDue`; `receiver`, and the sender when its
+    ///   hold carries an earlier one, linked to an identity now, otherwise `UnverifiedWallet`.
     ///
     /// Emits what the applied receipt, the cancel or the return emits, then `ClosedByHand`.
     /// @param ticketId The ticket, money on hold or id to close.

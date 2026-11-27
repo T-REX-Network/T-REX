@@ -89,6 +89,9 @@ library ComplianceLedgerLib {
         /// a reservation for. Zero is what lets the compliance leave a token or be bound to another one without
         /// carrying a promise it could no longer release.
         uint256 pendingTotal;
+        /// The money on hold that left each chain and goes on to its receiver: it left that chain already, but is
+        /// told done only once the receiver's chain answers.
+        mapping(bytes32 chainKey => uint256 amount) onHoldForward;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));

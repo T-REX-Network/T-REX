@@ -301,7 +301,8 @@ library ReceiptLib {
     /// @dev A first-half receipt that no ticket home sent answers is bad when another body came for the id, when its
     ///  sender is not on the chain it came from, when an expired answer still moved something, or, for a ticket home
     ///  wrote, when it names other wallets. With no ticket to compare it to, a receipt is held to the chain that holds
-    ///  its sender: no other away chain can move that sender's tokens.
+    ///  its sender: no other away chain can move that sender's tokens. A sender that is not a well formed wallet is on
+    ///  no chain, so it is refused too, not reverted.
     function _isBadReceiptWithoutTicket(
         TicketLib.ValidationStorage storage store,
         bytes32 halfKey,
@@ -311,7 +312,10 @@ library ReceiptLib {
         bool anotherBodyApplied =
             store.receiptHashes[halfKey] != bytes32(0);
         bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
-        bool fromTheSendersChain = _chainKeyOf(receipt.from) == originChainKey;
+        (bool fromIsAWallet, bytes2 fromChainType, bytes memory fromChainReference,) =
+            WalletKeyLib.tryParse(receipt.from);
+        bool fromTheSendersChain =
+            fromIsAWallet && MessageTypesLib.chainKey(fromChainType, fromChainReference) == originChainKey;
         bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
         if (anotherBodyApplied || anotherBodyWaiting || !fromTheSendersChain || expiredYetMoved) return true;
 

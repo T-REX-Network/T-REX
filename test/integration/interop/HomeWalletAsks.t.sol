@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
-import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
@@ -120,7 +119,7 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
     }
 
     /// @notice A home wallet reserves nothing on the token while its ask waits: if the holder spent the tokens
-    ///         meanwhile, the send after the answer cannot burn them and reverts.
+    ///         meanwhile, the send after the answer finds them no longer free and reverts.
     function test_sendTicket_reverts_when_theHomeHolderSpentItsTokensWhileTheAskWaited() public {
         uint256 atHome = MINTED - ALICE_ON_A;
         uint256 spent = atHome - MOVED + 1;
@@ -135,11 +134,31 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         _approve(id, MOVED);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, alice, atHome - spent, MOVED)
+            abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, atHome - spent, MOVED)
         );
         boundCompliance.sendTicket(id, optimism, bobOnB, "");
 
         _assertStatus(id, ITickets.TicketStatus.Open);
+    }
+
+    /// @notice Tokens frozen while the ask waited are not free: the send after the answer checks the free balance
+    ///         again, as the ask did, and burns nothing.
+    function test_sendTicket_reverts_when_theHomeTokensWereFrozenAfterTheAsk() public {
+        uint256 atHome = MINTED - ALICE_ON_A;
+        uint256 frozenAfterTheAsk = atHome - MOVED + 1;
+        uint256 freeAtTheSend = atHome - frozenAfterTheAsk;
+        vm.prank(alice);
+        bytes32 id = boundCompliance.askToMove(aliceHome, bobOnB, MOVED, MOVED, "", _salt());
+        vm.prank(agent);
+        token.freezePartialTokens(alice, frozenAfterTheAsk);
+        _approve(id, MOVED);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, freeAtTheSend, MOVED));
+        boundCompliance.sendTicket(id, optimism, bobOnB, "");
+
+        _assertStatus(id, ITickets.TicketStatus.Open);
+        assertEq(token.balanceOf(alice), atHome, "nothing burned");
+        assertEq(token.getFrozenTokens(alice), frozenAfterTheAsk, "the frozen tokens stay at home");
     }
 
     /// @notice A ticket waiting for approval reserves its maximum on the away wallet. A bring home asked meanwhile

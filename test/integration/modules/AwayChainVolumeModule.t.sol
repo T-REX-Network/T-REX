@@ -175,6 +175,28 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobOnOptimism), 0, "no mint to the receiver");
     }
 
+    /// @notice Money home put on hold toward a receiver on Optimism has left Polygon before its second half is done:
+    ///         it takes room at once, so a second forward in the same window finds only what is left and goes back.
+    function test_checkTransfer_countsTheMoneyOnHoldForward_whenTwoForwardsComeInOneWindow() public {
+        uint256 eachMove = 60;
+        bytes32 firstForward = _askFromPolygon(bobOnOptimism, eachMove, eachMove);
+        bytes32 secondForward = _askFromPolygon(bobOnOptimism, eachMove, eachMove);
+
+        polygonBridge.relay(
+            _liteSettles(polygonBridge, token, _settlement(firstForward, aliceSat, bobOnOptimism, eachMove))
+        );
+        ITickets.Ticket memory first = boundCompliance.ticketOf(firstForward);
+        assertEq(first.secondHalfToKey, first.toKey, "the first goes on to the receiver");
+        assertEq(_roomOn(polygon), LIMIT - eachMove, "it took room while on hold");
+
+        polygonBridge.relay(
+            _liteSettles(polygonBridge, token, _settlement(secondForward, aliceSat, bobOnOptimism, eachMove))
+        );
+        ITickets.Ticket memory second = boundCompliance.ticketOf(secondForward);
+        assertEq(second.secondHalfToKey, second.fromKey, "the second finds no room and goes back to the sender");
+        assertEq(_roomOn(polygon), LIMIT - eachMove, "money on hold back to the sender takes no room");
+    }
+
     /// @notice A move inside Polygon whose receipt finds no room left is applied all the same, since the tokens
     ///         already moved there; it is announced, and counted.
     function test_afterTransfer_countsAMoveInsideTheChain_thatBreachedTheLimitAtItsReceipt() public {

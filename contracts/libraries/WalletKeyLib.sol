@@ -85,6 +85,22 @@ library WalletKeyLib {
         pure
         returns (bytes2 chainType, bytes memory chainReference, bytes memory addr)
     {
+        bool canonical;
+        (canonical, chainType, chainReference, addr) = tryParse(envelope);
+        require(canonical, ErrorsLib.NonCanonicalInteroperableAddress(envelope));
+    }
+
+    /// @notice {parse} without the revert, for a caller that must refuse a malformed wallet rather than revert.
+    /// @param envelope the interoperable address
+    /// @return canonical whether the envelope is a version 1 ERC-7930 envelope written the one standard way
+    /// @return chainType the CAIP-350 chain type
+    /// @return chainReference the chain reference bytes
+    /// @return addr the address bytes
+    function tryParse(bytes memory envelope)
+        internal
+        pure
+        returns (bool canonical, bytes2 chainType, bytes memory chainReference, bytes memory addr)
+    {
         bool success;
         (success, chainType, chainReference, addr) = InteroperableAddress.tryParseV1(envelope);
 
@@ -93,9 +109,7 @@ library WalletKeyLib {
         // Only an EVM envelope has one standard spelling this library can rebuild and compare against.
         bool writtenTheStandardWay = chainType != EVM_CHAIN_TYPE || _isCanonicalEvm(envelope);
 
-        require(
-            success && noTrailingBytes && writtenTheStandardWay, ErrorsLib.NonCanonicalInteroperableAddress(envelope)
-        );
+        canonical = success && noTrailingBytes && writtenTheStandardWay;
     }
 
     /// @dev Whether an EVM envelope is written the one standard way: a 20-byte address and the shortest chain
