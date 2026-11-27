@@ -417,7 +417,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.prank(address(module));
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotAwaitingApproval.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
+                ErrorsLib.NotWaitingForApproval.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
             )
         );
         boundCompliance.answerApproval(ticketId, 50);
@@ -458,6 +458,26 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         }
         assertEq(boundCompliance.ticketOf(ticketId).seenValidUntil, 0, "the seen valid until is unchanged");
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open), "still open, unsent");
+    }
+
+    /// @notice An answer is zero, a refusal, or inside the asked range: one below the minimum or above the maximum is
+    ///         refused, and the ticket keeps waiting.
+    function test_answerApproval_reverts_when_theAnswerIsOutsideTheRange() public {
+        uint256 amountMin = 10;
+        uint256 amountMax = 50;
+        bytes32 ticketId = _ask(bobSat, amountMin, amountMax);
+
+        vm.prank(address(module));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, amountMin, amountMax));
+        boundCompliance.answerApproval(ticketId, amountMin - 1);
+
+        vm.prank(address(module));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, amountMin, amountMax));
+        boundCompliance.answerApproval(ticketId, amountMax + 1);
+
+        assertEq(
+            uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.WaitingForApproval), "still waiting"
+        );
     }
 
     /* ----- Helpers ----- */
@@ -562,9 +582,9 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         bytes[] memory settings = new bytes[](1);
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addAndSetModule(address(approval), settings);
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
     }
 

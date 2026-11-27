@@ -104,7 +104,7 @@ interface ITickets {
     event ValidityWindowsSet(uint64 onTicketRoute, uint64 onReceiptRoute);
     event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
     event MeasuredTimesSet(bytes32 indexed chainKey, MeasuredTimes times);
-    event AsksPausedSet(bool paused);
+    event AsksPausedSet(bytes32 indexed chainKey, bool paused);
     event AskLimitsSet(AskLimits limits);
     event AskLimitOfSet(address indexed identity, uint32 asksPerWindow);
     event ReceiptAsked(bytes32 indexed ticketId, uint8 askNumber);
@@ -152,7 +152,7 @@ interface ITickets {
     error AsksNotPaused();
     error AskLimitReached(address identity);
     error TooManyOpenTickets(address identity);
-    error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
+    error BelowMinimumAmount(uint256 requestedMax, uint256 smallestAmount);
     error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);
     error ZeroDuration();
     error ChainNotOpen(bytes32 chainKey);
@@ -442,7 +442,8 @@ interface ITickets {
     /// blocks the sender's chain (`AwayChainBlockSet`). Emits `HoldTaken`.
     ///
     /// Requirements:
-    /// - Asks not paused for the token; otherwise reverts with `AsksPaused`.
+    /// - Asks not paused for every chain, nor for the chain the first message goes to; otherwise reverts with
+    ///   `AsksPaused`.
     /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
     /// - The id of the request not yet recorded, or money on hold the ask may take; otherwise reverts with
     ///   `TicketAlreadyWritten`.
@@ -462,7 +463,7 @@ interface ITickets {
     ///   `TooManyOpenTickets` or `AskLimitReached`.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
     /// - `requestedMax` at least the smallest amount, and at most `from`'s free balance: its away balance less what
-    ///   is reserved, or a home wallet's unfrozen balance; otherwise `BelowSmallestAmount` or `RequestAboveBalance`.
+    ///   is reserved, or a home wallet's unfrozen balance; otherwise `BelowMinimumAmount` or `RequestAboveBalance`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - A home `from` not frozen; otherwise `FrozenWallet`.
     /// - The chain the first message goes to open on the token; otherwise the token reverts with `ChainNotOpen`.
@@ -502,24 +503,26 @@ interface ITickets {
     /// bound `APPROVAL` module answers, before the deadline. A request nobody answered is discarded with
     /// `cancelTickets` once the deadline passed.
     ///
-    /// An answer below the requested minimum is a refusal: the reservation is released and the ticket ends
-    /// `Cancelled`. Any other answer lowers the maximum to `approvedMax` when it is lower, releases the
-    /// difference, and opens the ticket: nothing is sent, anyone makes the first send with `sendTicket`, so the
+    /// A zero is a refusal: the reservation is released and the ticket ends `Cancelled`. An answer inside
+    /// `[amountMin, amountMax]` lowers the maximum to `approvedMax` when it is lower, releases the difference, and
+    /// opens the ticket: nothing is sent, anyone makes the first send with `sendTicket`, so the
     /// approver never pays for a send. No rule runs again: they ran at the request. The deadline stays the
     /// request's `validUntil`, so the time spent waiting comes out of the away token's time to execute, and the
     /// rules are never older than the validity window when it does.
     ///
     /// Requirements:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - It must be stored `WaitingForApproval`; otherwise reverts with `ValidationNotAwaitingApproval`.
+    /// - It must be stored `WaitingForApproval`; otherwise reverts with `NotWaitingForApproval`.
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
     /// - No receipt for the ticket waiting: it answers no copy home sent, and is booked on hold once it can be;
     ///   otherwise reverts with `ApplyWaitingReceiptFirst`.
+    /// - `approvedMax` zero or inside `[amountMin, amountMax]`; otherwise reverts with
+    ///   `EmptyValidationRange(amountMin, amountMax)`, the range an answer must fall in.
     ///
     /// Emits nothing on an approval (`TicketWritten` comes with the first send), or `ValidationApprovalRefused`.
     /// @param ticketId The ticket awaiting approval.
-    /// @param approvedMax The largest amount approved; below the requested minimum, a refusal.
+    /// @param approvedMax The largest amount approved; zero, a refusal.
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
 
     /// @dev Sets the two validity windows: a ticket is valid until the ask's time plus the window of the route it
@@ -568,15 +571,17 @@ interface ITickets {
     /// @param times The measured times, in seconds.
     function setMeasuredTimes(bytes32 chainKey, MeasuredTimes calldata times) external;
 
-    /// @dev Pauses or resumes new asks for the whole token. Receipts, asks for receipts and cancels go on, so the
-    /// tickets already out can end.
+    /// @dev Pauses or resumes new asks whose first message goes to `chainKey`, or every new ask when `chainKey` is
+    /// zero. Receipts, asks for receipts and cancels go on, so the tickets already out can end. Binding an approval
+    /// module needs every ask paused.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     ///
     /// Emits `AsksPausedSet`.
+    /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it, or zero for every chain.
     /// @param paused Whether new asks are refused.
-    function setAsksPaused(bool paused) external;
+    function setAsksPaused(bytes32 chainKey, bool paused) external;
 
     /// @dev Sets the limits on asks: how many tickets one identity may hold open, how many asks it may make per
     /// window, and the smallest amount one may ask to move. One identity can then use up only its own share of what
@@ -686,7 +691,7 @@ interface ITickets {
     ///   too.
     /// - The sender's away chain open on the token: a receipt route set, through a bridge still recorded as a
     ///   receipt bridge; otherwise reverts with `ChainNotOpen`. Its receipt cannot land meanwhile, so it is not
-    ///   taken as missing: {closeByHand} decides it from a read of that chain.
+    ///   taken as missing: once the route is closed, {closeByHand} decides it from a read of that chain.
     /// - No receipt for the ticket waiting that can be applied now; otherwise reverts with
     ///   `ApplyWaitingReceiptFirst`: the receipt is already here, and {applyWaitingReceipt} applies it first. A
     ///   waiting receipt that cannot be applied, because its route check fails or the sender's away balance is
@@ -838,8 +843,8 @@ interface ITickets {
     /// `ReceiptWithoutTicket`.
     function cancelHold(bytes32 ticketId, bytes calldata receiver) external;
 
-    /// @dev Closes by hand what waits on an away chain whose receipt route is closed or whose bridge is distrusted for
-    /// good: no receipt can land from it, and its silence cannot tell a dead chain from a lost message. So home
+    /// @dev Closes by hand what waits on an away chain whose receipt route was closed with `closeReceiptRoute`, the
+    /// only way there (a distrusted bridge is not): no receipt can land from it, and its silence cannot tell a dead chain from a lost message. So home
     /// decides from `reading`, the away chain's own state in one final block, never from home's clock.
     ///
     /// When the away token stored a receipt above zero for the half, it is applied as if it had arrived, see
@@ -861,8 +866,8 @@ interface ITickets {
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
     /// - `ticketId` recorded, or a stored receipt above zero read for it; otherwise reverts with `UnknownTicket`.
-    /// - The away chain of the latest half, or of the stored receipt's sender for an id with no record, has no
-    ///   receipt route open; otherwise reverts with `ReceiptRouteNotClosed`.
+    /// - The away chain of the latest half, or of the stored receipt's sender for an id with no record, has its
+    ///   receipt route closed; otherwise reverts with `ReceiptRouteNotClosed`.
     /// - The token not paused, that chain not blocked and no hostile change running on it; otherwise reverts with
     ///   `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
     /// - A stored receipt for `ticketId`, which home applies; otherwise reverts with `ValidationBodyMismatch`: a
@@ -898,8 +903,9 @@ interface ITickets {
     /// @param chainKey The away chain to look up.
     function measuredTimesOf(bytes32 chainKey) external view returns (MeasuredTimes memory);
 
-    /// @dev Whether new asks are paused for the whole token.
-    function areAsksPaused() external view returns (bool);
+    /// @dev Whether new asks are paused for `chainKey`, or for every chain when it is zero.
+    /// @param chainKey The away chain to look up, or zero for every chain.
+    function areAsksPaused(bytes32 chainKey) external view returns (bool);
 
     /// @dev The limits on asks, zero until set, which blocks issuance.
     function askLimits() external view returns (AskLimits memory);

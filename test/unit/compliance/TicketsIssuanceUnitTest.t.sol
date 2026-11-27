@@ -312,7 +312,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     ///         wallet holding nothing has nothing free to ask for.
     function test_requestTransferValidation_RevertWhen_TheMaximumIsZero() public configured {
         vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowSmallestAmount.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowMinimumAmount.selector, 0, 1));
         mc.askToMove(fromSat, toSat, 0, 0, "", _salt());
 
         TokenReservationStub(token).setBridgedBalance(fromSat, 0);

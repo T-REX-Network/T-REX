@@ -59,6 +59,8 @@
 
 pragma solidity 0.8.30;
 
+import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
+
 import { ErrorsLib } from "../../../libraries/ErrorsLib.sol";
 import {
     AccessManagedOwnableBase,
@@ -131,12 +133,15 @@ contract AwayChainVolumeModule is AbstractModuleUpgradeable, AccessManagedOwnabl
 
     /// @dev Sets the limit on one away chain for the calling compliance, driven by its owner through
     ///  `addAndSetModule` or `callModuleFunction`. A new window length also moves the end of the window running now.
-    ///  To lift a limit, set `type(uint256).max`. Emits `VolumeLimitSet`.
+    ///  To lift a limit, set `type(uint256).max`. Emits `VolumeLimitSet`. Home's own key is refused: the limit stands
+    ///  against a hostile away token, and a home wallet's move out has none on its sending side.
     /// @param _chainKey the away chain, keyed as `MessageTypesLib.chainKey` computes it
     /// @param _limitPerWindow the most that may leave the chain in one window
     /// @param _window the length of a window, in seconds; must be positive
     function setVolumeLimit(bytes32 _chainKey, uint256 _limitPerWindow, uint64 _window) external onlyComplianceCall {
         require(_window != 0, ErrorsLib.ZeroDuration());
+        bytes32 homeChainKey = keccak256(InteroperableAddress.formatEvmV1(block.chainid));
+        require(_chainKey != homeChainKey, ErrorsLib.NotAnAwayChain(_chainKey));
 
         VolumeLimit storage limit =
             _getAwayChainVolumeStorage().volumeLimits[msg.sender][getNonce(msg.sender)][_chainKey];

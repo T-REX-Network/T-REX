@@ -128,7 +128,7 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.AsksNotPaused.selector, ErrorsLib.AsksNotPaused.selector);
         assertEq(ITickets.AskLimitReached.selector, ErrorsLib.AskLimitReached.selector);
         assertEq(ITickets.TooManyOpenTickets.selector, ErrorsLib.TooManyOpenTickets.selector);
-        assertEq(ITickets.BelowSmallestAmount.selector, ErrorsLib.BelowSmallestAmount.selector);
+        assertEq(ITickets.BelowMinimumAmount.selector, ErrorsLib.BelowMinimumAmount.selector);
         assertEq(ITickets.RequestAboveBalance.selector, ErrorsLib.RequestAboveBalance.selector);
         assertEq(ITickets.ZeroDuration.selector, ErrorsLib.ZeroDuration.selector);
         assertEq(ITickets.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);

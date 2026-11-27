@@ -218,9 +218,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         vm.prank(backend);
         module.approveValidation(address(boundCompliance), id, 100);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotAwaitingApproval.selector, id, uint8(ITickets.TicketStatus.OnHold)
-            )
+            abi.encodeWithSelector(ErrorsLib.NotWaitingForApproval.selector, id, uint8(ITickets.TicketStatus.OnHold))
         );
         module.finalize(address(boundCompliance), id);
     }
@@ -420,9 +418,9 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
         // An approval module is bound only while asks are paused.
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addAndSetModule(address(module), settings);
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
     }
 

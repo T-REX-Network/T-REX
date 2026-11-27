@@ -212,7 +212,7 @@ contract MoveOutAndBringHomeTest is InteropSuiteTest {
 
     function test_askToMove_reverts_when_theAmountIsBelowTheSmallestAmount() public {
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowSmallestAmount.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowMinimumAmount.selector, 0, 1));
         boundCompliance.askToMove(aliceHome, aliceSat, 0, 0, "", _salt());
     }
 

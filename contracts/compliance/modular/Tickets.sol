@@ -142,8 +142,9 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    function areAsksPaused() public view returns (bool) {
-        return _validationStorage().asksPaused;
+    function areAsksPaused(bytes32 chainKey) public view returns (bool) {
+        if (chainKey == bytes32(0)) return _validationStorage().asksPaused;
+        return _validationStorage().asksPausedOn[chainKey];
     }
 
     /// @inheritdoc ITickets
@@ -195,9 +196,10 @@ abstract contract Tickets is ITickets, ComplianceLedger {
 
     /* ----- Settings ----- */
 
-    function _setAsksPaused(bool paused) internal {
-        _validationStorage().asksPaused = paused;
-        emit EventsLib.AsksPausedSet(paused);
+    function _setAsksPaused(bytes32 chainKey, bool paused) internal {
+        if (chainKey == bytes32(0)) _validationStorage().asksPaused = paused;
+        if (chainKey != bytes32(0)) _validationStorage().asksPausedOn[chainKey] = paused;
+        emit EventsLib.AsksPausedSet(chainKey, paused);
     }
 
     function _setAskLimits(AskLimits calldata limits) internal {

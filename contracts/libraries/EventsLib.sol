@@ -188,8 +188,8 @@ library EventsLib {
     event WaitingTimeSet(bytes32 indexed chainKey, uint64 duration);
     /// @notice The measured times of the away chain `chainKey` were set.
     event MeasuredTimesSet(bytes32 indexed chainKey, ITickets.MeasuredTimes times);
-    /// @notice New asks were paused or resumed for the whole token.
-    event AsksPausedSet(bool paused);
+    /// @notice New asks were paused or resumed for the away chain `chainKey`, or for every chain when it is zero.
+    event AsksPausedSet(bytes32 indexed chainKey, bool paused);
     /// @notice The limits on asks were set.
     event AskLimitsSet(ITickets.AskLimits limits);
     /// @notice The ask limit of one identity was set; zero gives it the token's limit again.

@@ -367,6 +367,7 @@ contract NamespaceFieldsTest is Test {
         validationStorage.uncountedCredit[KEY] = 54;
         validationStorage.uncountedCreditFrom[KEY] = bytes32(uint256(55));
         validationStorage.ticketRouteVolumes[KEY] = TicketLib.TicketRouteVolume({ windowStart: 56, amount: 57 });
+        validationStorage.asksPausedOn[KEY] = true;
 
         // Two uint64 fill bytes 0 to 15 of one slot.
         assertEq(_word(_field(base, 0)), 10 | (11 << 64), "validityWindows");
@@ -402,6 +403,7 @@ contract NamespaceFieldsTest is Test {
         bytes32 volume = _entry(_field(base, 18), KEY);
         assertEq(_word(_field(volume, 0)), 56, "ticketRouteVolumes.windowStart");
         assertEq(_word(_field(volume, 1)), 57, "ticketRouteVolumes.amount");
+        assertEq(_word(_entry(_field(base, 19), KEY)), 1, "asksPausedOn");
     }
 
     function _writeTicket(ITickets.Ticket storage ticket) private {

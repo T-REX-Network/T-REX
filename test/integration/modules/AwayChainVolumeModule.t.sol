@@ -239,13 +239,12 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(ticketId).amountMax, 200);
     }
 
-    /// @notice A limit on home's own key narrows a home wallet's move out.
-    function test_checkTransfer_narrowsAHomeWalletsMoveOut_byTheLimitOnHome() public {
-        _setLimit(_evmChainKey(block.chainid), LIMIT, WINDOW);
+    /// @notice The limit stands against a hostile away token: home's own key takes none.
+    function test_setVolumeLimit_reverts_when_theChainIsHome() public {
+        bytes32 home = _evmChainKey(block.chainid);
 
-        bytes32 ticketId = _askFromAliceHome(200);
-
-        assertEq(boundCompliance.ticketOf(ticketId).amountMax, LIMIT);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NotAnAwayChain.selector, home));
+        _setLimit(home, LIMIT, WINDOW);
     }
 
     /// @notice A bring home leaves Polygon too: what it burned is counted against Polygon when minted at home.

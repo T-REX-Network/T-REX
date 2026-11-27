@@ -123,7 +123,7 @@ library TicketLib {
         ITickets.ValidityWindows validityWindowFloors;
         /// The latest `stopWaitingAt` of any ticket: the compliance is not unbound before it.
         uint64 latestStopWaitingAt;
-        /// New asks refused for the whole token.
+        /// New asks refused for every chain.
         bool asksPaused;
         /// The limits on asks, see {ITickets-setAskLimits}.
         ITickets.AskLimits askLimits;
@@ -142,6 +142,8 @@ library TicketLib {
         /// What the ticket route toward each away chain carried in its current window of one waiting time, held
         /// under the chain's per-window cap, see {ITickets-TicketLimits}.
         mapping(bytes32 chainKey => TicketRouteVolume volume) ticketRouteVolumes;
+        /// New asks refused for one away chain: the chain the first message of the ask goes to.
+        mapping(bytes32 chainKey => bool paused) asksPausedOn;
     }
 
     /// @dev What the ticket route toward one away chain carried in its current window.
@@ -224,6 +226,7 @@ library TicketLib {
         draft.amountMax = requestedMax;
         draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
+        require(!layout().asksPausedOn[_firstChainOf(draft)], ErrorsLib.AsksPaused());
         _requireCallerOwnsTheWallet(draft, from, token, authority);
 
         ticketId = ticketIdOf(
@@ -377,7 +380,7 @@ library TicketLib {
         require(asksSoFar < askLimitOf(store, draft.fromIdentity), ErrorsLib.AskLimitReached(draft.fromIdentity));
         require(
             draft.requestedMax >= limits.smallestAmount,
-            ErrorsLib.BelowSmallestAmount(draft.requestedMax, limits.smallestAmount)
+            ErrorsLib.BelowMinimumAmount(draft.requestedMax, limits.smallestAmount)
         );
     }
 
@@ -560,15 +563,16 @@ library TicketLib {
         ITickets.Ticket storage ticket = store.validations[ticketId];
         require(
             ticket.status == ITickets.TicketStatus.WaitingForApproval,
-            ErrorsLib.ValidationNotAwaitingApproval(ticketId, uint8(ticket.status))
+            ErrorsLib.NotWaitingForApproval(ticketId, uint8(ticket.status))
         );
         require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
         require(block.timestamp < ticket.validUntil, ErrorsLib.ValidationExpired(ticketId, ticket.validUntil));
         _requireNoReceiptWaitsForTheTicket(store, ticketId);
+        bool refused = approvedMax == 0;
+        bool insideTheRange = approvedMax >= ticket.amountMin && approvedMax <= ticket.amountMax;
+        require(refused || insideTheRange, ErrorsLib.EmptyValidationRange(ticket.amountMin, ticket.amountMax));
 
-        bool refusedOutright = approvedMax == 0;
-        bool belowTheMinimum = approvedMax < ticket.amountMin;
-        if (refusedOutright || belowTheMinimum) {
+        if (refused) {
             moveTo(ticket, ITickets.TicketStatus.Cancelled, token);
             emit EventsLib.ValidationApprovalRefused(ticketId);
             return;

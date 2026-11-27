@@ -46,7 +46,6 @@ import { ModularComplianceBaseUnitTest } from "./helpers/ModularComplianceBaseUn
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { MovementKindLib } from "contracts/compliance/modular/MovementKindLib.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
-import { ITREXMessaging } from "contracts/interop/ITREXMessaging.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -114,8 +113,8 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
         // Both away chains have their receipt route open on the token, so a ticket toward them may be cancelled.
-        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (polygon)), abi.encode(true));
-        vm.mockCall(token, abi.encodeCall(ITREXMessaging.isChainOpen, (optimism)), abi.encode(true));
+        TokenReservationStub(token).openReceiptRoute(polygon, makeAddr("polygonReceiptBridge"));
+        TokenReservationStub(token).openReceiptRoute(optimism, makeAddr("optimismReceiptBridge"));
         _bind(fromSat, aliceIdentity);
         _bind(nativeBob, bobIdentity);
         // A settlement to a native wallet resolves its owner again through the registry's native lookup.

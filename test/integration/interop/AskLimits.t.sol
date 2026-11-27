@@ -147,7 +147,7 @@ contract AskLimitsTest is InteropSuiteTest {
         _setLimits(100, 1000, smallestAmount);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowSmallestAmount.selector, askedMax, smallestAmount));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowMinimumAmount.selector, askedMax, smallestAmount));
         boundCompliance.askToMove(aliceSat, charlieSat, 1, askedMax, "", _salt());
 
         bytes32 atTheSmallest = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 1, smallestAmount);
@@ -190,10 +190,10 @@ contract AskLimitsTest is InteropSuiteTest {
         bytes32 unanswered = _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 1, 10);
 
         vm.expectEmit(false, false, false, true, address(boundCompliance));
-        emit EventsLib.AsksPausedSet(true);
+        emit EventsLib.AsksPausedSet(bytes32(0), true);
         vm.prank(deployer);
-        boundCompliance.setAsksPaused(true);
-        assertTrue(boundCompliance.areAsksPaused());
+        boundCompliance.setAsksPaused(bytes32(0), true);
+        assertTrue(boundCompliance.areAsksPaused(bytes32(0)));
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(ErrorsLib.AsksPaused.selector);

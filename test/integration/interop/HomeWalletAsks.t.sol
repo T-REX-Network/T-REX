@@ -91,9 +91,9 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
         // An approval module is bound only while asks are paused.
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addAndSetModule(address(module), settings);
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
     }
 

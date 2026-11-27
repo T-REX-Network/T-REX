@@ -104,6 +104,15 @@ contract TokenReservationStub {
         isChainOpen[chainKey] = open;
     }
 
+    /// @dev The receipt bridge each away chain's receipt route goes through; zero once the route is closed.
+    mapping(bytes32 chainKey => address bridge) public receiptRouteFor;
+
+    /// @dev Opens the receipt route of `chainKey` through `bridge`, as `setReceiptRoute` on the token would.
+    function openReceiptRoute(bytes32 chainKey, address bridge) external {
+        receiptRouteFor[chainKey] = bridge;
+        isChainOpen[chainKey] = true;
+    }
+
     function setHostileChangeEndsAt(bytes32 chainKey, uint64 endsAt) external {
         hostileChangeEndsAt[chainKey] = endsAt;
     }

@@ -107,7 +107,7 @@ All notable changes to this project will be documented in this file.
   lower, or refuses it (`ValidationApprovalRefused`); `discardExpiredValidations` discards an unanswered one
   past its deadline, for anyone, and `statusOf` reads it `Expired` from then on. A settlement for a validation
   never sent (waiting, refused or unanswered) is parked, as one for an id never taken is. Errors
-  `ValidationNotAwaitingApproval`, `NotTheApprovalModule`,
+  `NotWaitingForApproval`, `NotTheApprovalModule`,
   `OneApprovalModuleOnly`. `AsyncApprovalModule` is the `APPROVAL` module: approvers set per compliance answer
   in order on the validation id and can only approve, narrow or refuse (`approveValidation`,
   `refuseValidation`); the last approval marks the request fully approved and anyone issues it with

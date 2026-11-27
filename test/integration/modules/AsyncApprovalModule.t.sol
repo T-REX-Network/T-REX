@@ -135,10 +135,10 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Bound without approvers, a request is refused rather than left to hold its reservation.
     function test_requestTransferValidation_RevertWhen_NoApproverIsSet() public {
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.removeModule(address(module));
         boundCompliance.addModule(address(module));
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
 
         vm.prank(address(aliceIdentity));
@@ -487,9 +487,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         _finalize(id);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidationNotAwaitingApproval.selector, id, uint8(ITickets.TicketStatus.Open)
-            )
+            abi.encodeWithSelector(ErrorsLib.NotWaitingForApproval.selector, id, uint8(ITickets.TicketStatus.Open))
         );
         boundCompliance.answerApproval(id, 150);
     }
@@ -620,7 +618,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     function test_removeModule_reverts_when_aRequestIsWaiting() public {
         bytes32 waiting = _request(10, 150);
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.removeModule(address(module));
         vm.stopPrank();
@@ -638,9 +636,9 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @notice Unbound, requests are issued at once again: the module is the whole switch.
     function test_requestTransferValidation_Success_WhenTheModuleIsRemoved() public {
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.removeModule(address(module));
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
 
         bytes32 id = _request(10, 150);
@@ -740,7 +738,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         address[] memory approvers = new address[](1);
         approvers[0] = backend;
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.removeModule(address(module));
         vm.stopPrank();
         _bind(module, approvers);
@@ -856,9 +854,9 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         settings[0] = abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers));
         // An approval module is bound only while asks are paused, so no ask is taken under the rules of neither.
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addAndSetModule(address(approvalModule), settings);
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
     }
 

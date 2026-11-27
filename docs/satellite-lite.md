@@ -67,7 +67,8 @@ other chain, and blocks that chain.
    side: a ticket route, set with `setTicketRoute` to a ticket bridge, that carries tickets out ahead of finality and
    nothing else, and the receipt route, set with `setReceiptRoute` to a receipt bridge, that carries money messages out
    and is the only one receipts are taken from. The token takes deliveries from receipt bridges only,
-   so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`), and it reads the receipt
+   so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`, OZ's `WrongRoute`: the message stays
+   deliverable through a receipt bridge), and it reads the receipt
    bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
    one that admits less than full finality (`ReceiptBridgeNotFullFinality`). Each half is pinned to the receipt route
    and the peer it left through (`pinOf`), and its receipt is taken from that pair or the current one, so a ticket

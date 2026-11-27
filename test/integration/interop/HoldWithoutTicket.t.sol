@@ -190,7 +190,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         module.approveValidation(address(boundCompliance), ticketId, FOUR);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ErrorsLib.ValidationNotAwaitingApproval.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
+                ErrorsLib.NotWaitingForApproval.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
             )
         );
         module.finalize(address(boundCompliance), ticketId);
@@ -402,9 +402,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "booked on hold");
         // Money on hold keeps the module set as it is; only the owner's forced removal takes the module out.
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.forceRemoveModule(address(module));
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
         _unblockPolygon();
 

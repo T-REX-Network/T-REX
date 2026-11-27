@@ -6,6 +6,7 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
+import { EventsLib } from "contracts/libraries/EventsLib.sol";
 
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
@@ -44,6 +45,24 @@ contract ReceiversChainTest is HoldsSuiteTest {
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, optimism, endsAt));
         boundCompliance.askToMove(aliceSat, bobOptimismSat, FOUR, FOUR, "", _salt());
+    }
+
+    /// @notice Asks pause per chain: pausing Polygon refuses asks whose first message goes there, and leaves the
+    ///         others; zero pauses every chain.
+    function test_askToMove_reverts_onlyOnThePausedChain() public {
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AsksPausedSet(optimism, true);
+        vm.prank(deployer);
+        boundCompliance.setAsksPaused(optimism, true);
+        assertTrue(boundCompliance.areAsksPaused(optimism), "optimism paused");
+        assertFalse(boundCompliance.areAsksPaused(bytes32(0)), "not every chain");
+        _requestValidation(address(aliceIdentity), aliceSat, bobSat, FOUR, FOUR);
+
+        vm.prank(deployer);
+        boundCompliance.setAsksPaused(polygon, true);
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(ErrorsLib.AsksPaused.selector);
+        boundCompliance.askToMove(aliceSat, bobSat, FOUR, FOUR, "", _salt());
     }
 
     /* ----- The first send of an approved ticket ----- */

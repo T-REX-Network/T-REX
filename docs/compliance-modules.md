@@ -185,8 +185,9 @@ Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, b
 lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
 since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
 first send with `sendTicket(ticketId, to, spender)` before the deadline, and that send checks the token
-and the chain again, as either may have been stopped while the request waited. An answer below the requested
-minimum is a refusal, which releases the reservation and ends the validation `Cancelled`. A request nobody answered,
+and the chain again, as either may have been stopped while the request waited. A zero answer is a refusal,
+which releases the reservation and ends the validation `Cancelled`; any other answer must lie inside
+`[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered,
 or an approved ticket nobody sent, is discarded past its deadline with `cancelTickets`, by anyone, since nothing was
 sent for it. A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
 unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
@@ -197,7 +198,7 @@ Because the request reserves while it waits, two waiting requests cannot jointly
 ledger: the second one sees the first one's pending amount, as it would see an issued validation's.
 
 An `APPROVAL` module is bound, removed or filed again only while asks are paused for the whole token
-(`setAsksPaused`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
+(`setAsksPaused(0, true)`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
 change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. Like every
 module change, it also waits until no ticket holds a reservation (`TicketsStillReserved`); only
 `forceRemoveModule` skips that wait. Unbinding the module turns new requests back into immediate issuances; the

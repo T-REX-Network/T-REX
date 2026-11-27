@@ -58,7 +58,7 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         bytes32 ticketId = _askOneTicket();
         assertFalse(boundCompliance.ticketOf(ticketId).waitedForApproval);
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
 
         vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.addModule(address(approvalModule));
@@ -129,7 +129,7 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         boundCompliance.addModule(address(approvalModule));
 
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addModule(address(approvalModule));
         vm.stopPrank();
         assertTrue(boundCompliance.isModuleBound(address(approvalModule)));
@@ -143,7 +143,7 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         boundCompliance.removeModule(address(approvalModule));
 
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.removeModule(address(approvalModule));
         vm.stopPrank();
         assertFalse(boundCompliance.isModuleBound(address(approvalModule)));
@@ -157,7 +157,7 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         boundCompliance.forceRemoveModule(address(approvalModule));
 
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.forceRemoveModule(address(approvalModule));
         vm.stopPrank();
         assertFalse(boundCompliance.isModuleBound(address(approvalModule)));
@@ -171,7 +171,7 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         boundCompliance.resyncModuleTypes(address(approvalModule));
 
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.resyncModuleTypes(address(approvalModule));
         vm.stopPrank();
         assertTrue(boundCompliance.isModuleBound(address(approvalModule)));
@@ -185,9 +185,9 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
 
     function _bindTheApprovalModule() private {
         vm.startPrank(deployer);
-        boundCompliance.setAsksPaused(true);
+        boundCompliance.setAsksPaused(bytes32(0), true);
         boundCompliance.addModule(address(approvalModule));
-        boundCompliance.setAsksPaused(false);
+        boundCompliance.setAsksPaused(bytes32(0), false);
         vm.stopPrank();
     }
 

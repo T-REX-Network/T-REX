@@ -270,8 +270,8 @@ contract ModularCompliance is
     }
 
     /// @inheritdoc ITickets
-    function setAsksPaused(bool paused) external restricted {
-        _setAsksPaused(paused);
+    function setAsksPaused(bytes32 chainKey, bool paused) external restricted {
+        _setAsksPaused(chainKey, paused);
     }
 
     /// @inheritdoc ITickets

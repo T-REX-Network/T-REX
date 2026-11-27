@@ -132,7 +132,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
 
         if (requestedMax == 0) {
             vm.prank(aliceIdentity);
-            vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowSmallestAmount.selector, 0, 1));
+            vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BelowMinimumAmount.selector, 0, 1));
             mc.askToMove(from, to, requestedMin, requestedMax, "", _salt());
             return;
         }

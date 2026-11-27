@@ -731,7 +731,8 @@ library ReceiptLib {
 
     /// @dev A ticket is not cancelled on home's clock while the away chain it was sent to cannot deliver a receipt:
     ///  its receipt route is closed, or its bridge distrusted. The away token may have executed it already, and its
-    ///  silence proves nothing; {closeByHand} decides it from a read of that chain instead.
+    ///  silence proves nothing. Once the route is closed, {closeByHand} decides it from a read of that chain; under a
+    ///  distrusted bridge, the route is closed or set again first.
     function _requireReceiptRouteOpen(address token, bytes32 chainKey) private view {
         require(ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ChainNotOpen(chainKey));
     }
@@ -852,7 +853,8 @@ library ReceiptLib {
 
         if (recorded) chainKey = _chainOfTheLatestHalf(store.validations[ticketId]);
         if (!recorded) chainKey = _chainKeyOf(reading.storedReceipt.from);
-        require(!ITREXMessaging(token).isChainOpen(chainKey), ErrorsLib.ReceiptRouteNotClosed(chainKey));
+        bool routeClosed = ITREXMessaging(token).receiptRouteFor(chainKey) == address(0);
+        require(routeClosed, ErrorsLib.ReceiptRouteNotClosed(chainKey));
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(chainKey);
         TicketLib.requireNoHostileChange(token, chainKey);

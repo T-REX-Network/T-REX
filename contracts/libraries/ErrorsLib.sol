@@ -241,7 +241,7 @@ library ErrorsLib {
     /// @dev Both wallets are home wallets: that is a plain transfer, not a move between chains.
     error NotACrossChainMove();
     /// @dev Only a validation stored `WaitingForApproval` can be answered; `status` is the one found instead.
-    error ValidationNotAwaitingApproval(bytes32 ticketId, uint8 status);
+    error NotWaitingForApproval(bytes32 ticketId, uint8 status);
     /// @dev Only the bound `APPROVAL` module answers a validation awaiting approval.
     error NotTheApprovalModule(address caller);
     /// @dev A ticket can be sent again while it is stored `Open`; `status` is the `TicketStatus` found instead.
@@ -259,6 +259,8 @@ library ErrorsLib {
     error NoWaitingReceipt(bytes32 halfKey);
     /// @dev A waiting receipt is refused by hand only while its away chain is blocked.
     error AwayChainNotBlocked(bytes32 chainKey);
+    /// @dev `chainKey` is home's own chain, where a setting made for away chains does not apply.
+    error NotAnAwayChain(bytes32 chainKey);
     /// @dev A receipt `chainKey` sent for this ticket waits here: it is applied first, so that the ticket is not
     ///  cancelled over a receipt this chain already holds.
     error ApplyWaitingReceiptFirst(bytes32 ticketId, bytes32 chainKey);
@@ -285,8 +287,8 @@ library ErrorsLib {
     /// @dev The block read from the closed away chain is at `awayClockTime` on that chain's clock, before `validUntil`:
     ///  the half or the ticket of `ticketId` could still be executed there, so close by hand does not decide yet.
     error AwayClockBeforeValidUntil(bytes32 ticketId, uint64 awayClockTime, uint64 validUntil);
-    /// @dev Close by hand is only for an away chain whose receipt route is closed or whose bridge is distrusted:
-    ///  `chainKey` still delivers receipts.
+    /// @dev Close by hand is only for an away chain whose receipt route was closed with `closeReceiptRoute`:
+    ///  `chainKey` still has a receipt route.
     error ReceiptRouteNotClosed(bytes32 chainKey);
     /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
     error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
@@ -305,7 +307,7 @@ library ErrorsLib {
     /// @dev The identity already has as many tickets waiting for approval or open as it may.
     error TooManyOpenTickets(address identity);
     /// @dev The asked maximum is below the smallest amount one may ask to move.
-    error BelowSmallestAmount(uint256 requestedMax, uint256 smallestAmount);
+    error BelowMinimumAmount(uint256 requestedMax, uint256 smallestAmount);
     /// @dev The asked maximum is above what the sending wallet has free: the id is built from the asked maximum, so it
     ///  is refused rather than narrowed.
     error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);

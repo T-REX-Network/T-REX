@@ -11,7 +11,7 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
-/// @dev Close by hand: an away chain whose receipt route is closed, or whose bridge is distrusted, delivers no
+/// @dev Close by hand: an away chain whose receipt route is closed delivers no
 ///      receipt, and its silence cannot tell a dead chain from a lost message. Home decides from a read of that
 ///      chain's own state: a stored receipt is applied as if it had arrived; without one, the away chain's own clock
 ///      must be past every valid until the half or the ticket can carry there.
@@ -134,15 +134,21 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertHomeAgreesWithPolygon();
     }
 
-    /// @notice The receipt route stays open but its bridge is distrusted: no receipt can land, so the chain is read.
-    function test_closeByHand_appliesTheStoredReceipt_whenTheReceiptBridgeIsDistrusted() public {
+    /// @notice Distrusting the route's bridge does not open close by hand: only closing the receipt route does.
+    function test_closeByHand_reverts_when_theReceiptBridgeIsOnlyDistrusted() public {
         bytes32 ticketId = _executedTicketWhoseReceiptIsLost(FOUR);
         trustedGatewayRegistry.distrustBridge(address(polygonGateway));
-        assertFalse(token.isChainOpen(polygon), "a distrusted bridge closes the chain");
+        assertFalse(token.isChainOpen(polygon), "a distrusted bridge carries nothing");
+        MessageTypesLib.ReceiptMessage memory stored = polygonLite.storedReceipt(ticketId, 0);
 
-        _closeByHand(ticketId, bobSat, _readingWith(polygonLite.storedReceipt(ticketId, 0)));
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ReceiptRouteNotClosed.selector, polygon));
+        boundCompliance.closeByHand(ticketId, bobSat, _readingWith(stored));
 
-        _assertStatus(ticketId, ITickets.TicketStatus.Done, "applied");
+        _closeEvmChain(token, POLYGON);
+        _closeByHand(ticketId, bobSat, _readingWith(stored));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "applied once the route is closed");
         assertEq(token.awayBalanceOf(bobSat), FOUR);
     }
 
