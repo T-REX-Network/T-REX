@@ -49,10 +49,12 @@ import { Utils } from "../unit/helpers/Utils.sol";
 ///  checked by the storage-layout tests named there.
 contract DomainsTest is Test {
 
+    /// @dev The one namespace that is not ours: OpenZeppelin's ERC3643Upgradeable uses it, so the swap
+    ///  reads live token state in place.
     function test_tokenDomain() public pure {
         assertEq(
-            Utils.erc7201("erc3643.storage.ERC3643Token"),
-            0x1c6ea0581535d63a38daa138246885c0e308b5f6335af4548c056841c5c18f00
+            Utils.erc7201("openzeppelin.storage.ERC3643"),
+            0x7e536efc6dd2d0823d680b1aa49ca7a3b2331bcd18b4356feafc451a8239fe00
         );
     }
 
@@ -123,7 +125,7 @@ contract DomainsTest is Test {
     }
 
     /// @dev The namespaces the cross-chain layer adds on top of the suite. Both follow the same
-    ///  lowercase `erc3643.storage.` rule as everything above.
+    ///  lowercase `erc3643.storage.` rule as every namespace above except the token's.
     function test_transferValidationNamespace() public pure {
         assertEq(
             Utils.erc7201("erc3643.storage.TransferValidation"),

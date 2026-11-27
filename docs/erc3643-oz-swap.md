@@ -24,9 +24,10 @@ Second, identity bindings are sticky, see below.
 3. Run `forge test --match-path "test/standard/*"` against the new base. This suite exercises the
    standard surface only, so it is the regression net that turns the swap into a diff.
 4. Run the full suite. Failures here are T-REX behavior that the new base changed.
-5. Apply the storage migration for any contract whose namespace string differs (see the table). The
-   base sections of `test/standard/NamespaceFields.t.sol` stop compiling at the swap, since they name the
-   local base structs; rewrite them against OpenZeppelin's structs once the migration is decided.
+5. Re-check OpenZeppelin's released struct against the table below. `ERC3643Token` already uses
+   OpenZeppelin's namespace and field order, so the token needs no storage migration as long as the
+   released struct still matches. The `test_ERC3643Token` section of `test/standard/NamespaceFields.t.sol`
+   stops compiling at the swap, since it names the local base struct; point it at OpenZeppelin's struct.
 
 ## Namespace status
 
@@ -36,7 +37,7 @@ live state, removes the problem entirely.
 
 | Contract | Namespace today | OpenZeppelin's | Status |
 |---|---|---|---|
-| `ERC3643Token` | `erc3643.storage.ERC3643Token` | `openzeppelin.storage.ERC3643` (proposed, slot TBD) | Provisional. Migration needed at swap unless adopted first. |
+| `ERC3643Token` | `openzeppelin.storage.ERC3643` | `openzeppelin.storage.ERC3643`, slot `0x7e536efc6dd2d0823d680b1aa49ca7a3b2331bcd18b4356feafc451a8239fe00` | Adopted (#237). Same fields in the same order: `frozen`, `frozenTokens`, `identityRegistry`, `compliance`, `onchainId`. No migration at swap. |
 | `ERC3643IdentityRegistry` | `erc3643.storage.IdentityRegistry` | none published | Provisional. |
 | `ERC3643IdentityRegistryStorage` | `erc3643.storage.IdentityRegistryStorage` | none published | Provisional. |
 | `ERC3643TrustedIssuersRegistry` | `erc3643.storage.TrustedIssuersRegistry` | none published | Provisional. |
@@ -62,7 +63,7 @@ reasoning executable for the new layout.
 
 | Contract | Before | After |
 |---|---|---|
-| Token | `token.storage.main` | `erc3643.storage.ERC3643Token` for standard state, `erc3643.storage.TREXToken` for `decimals`; name and symbol move to the ERC-20 base |
+| Token | `token.storage.main` | `openzeppelin.storage.ERC3643` for standard state (first `erc3643.storage.ERC3643Token`, renamed by #237), `erc3643.storage.TREXToken` for `decimals`; name and symbol move to the ERC-20 base |
 | IdentityRegistryStorage | `ERC3643.storage.IdentityRegistryStorage` | `erc3643.storage.IdentityRegistryStorage` |
 | TREXRegistry | `erc3643.storage.TREXRegistry` | `erc3643.storage.TREXEligibility` |
 | ModularCompliance | `ERC3643.storage.ModularCompliance` | `erc3643.storage.TREXCompliance` |
@@ -145,8 +146,8 @@ Two things still differ, neither a behavior change:
    panic on under-freeze in `_unfreezePartialTokens`; ours revert with named errors. Both are
    overridable upstream, so this stays a T-REX override rather than an upstream request.
 2. **Storage field names.** Upstream's struct uses `_frozen`, `_frozenTokens`, `_identityRegistry`,
-   `_compliance` and `_onchainID`, all private, so the namespace-migration procedure above still
-   applies at the swap.
+   `_compliance` and `_onchainID`, all private. Field names do not affect storage, and the namespace
+   string now matches upstream, so this needs no migration at the swap.
 
 Upstream also documents a deliberate ERC-173 incompatibility (`transferOwnership(address(0))` is not
 accepted), so anything needing that surface layers its own.
@@ -159,12 +160,16 @@ adopt that ordering**, either when #70 is fixed or at the swap.
 ## Upstream status
 
 openzeppelin-contracts#5838 was closed in August 2025 in favour of the ERC-3643 Association's own
-implementation, reopened in July 2026, and last merged with master in September 2026. It ships the token
-base and the interfaces only. There is no upstream implementation for the identity registry, the identity
-registry storage, the trusted issuers registry, the claim topics registry, or the compliance; those are
+implementation, reopened in July 2026, and merged on 2026-11-23 (`b6f58277c`). The contract now lives at
+`contracts/token/ERC3643/ERC3643.sol` on master. It is not in a release yet (v5.7.0 does not ship it),
+and it requires `pragma solidity ^0.8.31` while this repo pins 0.8.30, so the swap also needs a
+compiler bump, which moves every CREATE2 implementation address and calls for a new salt. Re-check the
+struct when it ships. It ships the token base and the interfaces only. There is no upstream
+implementation for the identity registry, the identity registry storage, the trusted issuers registry,
+the claim topics registry, or the compliance; those are
 expected in `openzeppelin-community-contracts`, if anywhere. Until then the five non-token bases have
 nothing to swap to, and their namespace strings stay provisional.
 
 As of commit `55f35f91d` that PR is aligned with this layer 2: the contract is abstract, authorization
 goes through an abstract `_checkAdmin()` hook, and the behaviors listed under divergences above match.
-It ships no ERC-3643 tests yet, so the standard suite here stays the regression net for the swap.
+The standard suite here stays the regression net for the swap.
