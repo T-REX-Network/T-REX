@@ -475,7 +475,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     function _askForTheReceipt(bytes32 ticketId) private {
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         vm.warp(issued.validUntil + issued.waitingTime);
-        boundCompliance.sendTicket(ticketId, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(ticketId, bobOnPolygon, "");
     }
 
     /// @dev Past the waiting time of the last ask for the receipt: a cancel is due.

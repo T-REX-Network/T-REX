@@ -653,7 +653,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.OnHold))
         );
-        boundCompliance.sendTicket(id, polygon, bobOnB, "");
+        boundCompliance.sendTicket(id, bobOnB, "");
         assertEq(token.onHoldOf(id), held, "the hold stands");
         assertEq(token.awayBalanceOf(aliceOnA), 0, "nothing given back to the sender");
 

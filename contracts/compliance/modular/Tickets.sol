@@ -118,8 +118,8 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     /// @dev Not `restricted`: anyone makes the first send of an approved ticket, and anyone asks for a receipt at the
     ///  times the ticket's clock gives, see {TicketLib-sendTicket}. The reservation, the id and the route are those of
     ///  the ask.
-    function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external {
-        TicketLib.sendTicket(ticketId, chainKey, to, spender, address(_boundToken()));
+    function sendTicket(bytes32 ticketId, bytes calldata to, bytes calldata spender) external {
+        TicketLib.sendTicket(ticketId, to, spender, address(_boundToken()));
     }
 
     /// @inheritdoc ITickets

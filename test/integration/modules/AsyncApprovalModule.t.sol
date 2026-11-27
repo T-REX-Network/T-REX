@@ -194,7 +194,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
         assertEq(gateway.queueLength(), 0, "the answer sends nothing");
         vm.prank(makeAddr("anyone"));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
         assertEq(uint8(issued.status), uint8(ITickets.TicketStatus.Open));
@@ -323,11 +323,11 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open), "opened");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         assertEq(gateway.queueLength(), 1, "sent once the block is lifted");
     }
 
@@ -342,12 +342,12 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         module.finalize(address(boundCompliance), id);
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open), "opened");
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         assertEq(gateway.queueLength(), 0, "nothing sent");
 
         vm.prank(agent);
         token.unpause();
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         assertEq(gateway.queueLength(), 1);
     }
 
@@ -504,7 +504,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
             )
         );
         vm.prank(address(aliceIdentity));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     // ==== With the other rules ====
@@ -590,7 +590,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(gateway.queueLength(), 0, "opened, not sent");
-        boundCompliance.sendTicket(id, polygon, aliceOther, "");
+        boundCompliance.sendTicket(id, aliceOther, "");
         assertEq(gateway.queueLength(), 1, "sent by anyone");
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 0, "nobody was asked");
     }
@@ -885,7 +885,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
     /// @dev The module's answer opens the ticket and sends nothing: anyone makes the first send.
     function _finalize(bytes32 ticketId) private {
         module.finalize(address(boundCompliance), ticketId);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {

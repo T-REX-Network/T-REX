@@ -671,7 +671,8 @@ interface ITickets {
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
     /// - A move sent nowhere, `WaitingForApproval` or opened by the approver and never sent, may be cancelled by
     ///   anyone once its `validUntil` passed, since nothing was sent for it; otherwise reverts with `CancelNotDue`.
-    ///   Of the rules below, only the token's stop, the block of its away chain and a hostile change apply to it.
+    ///   Of the rules below, only the token's stop, the block of its away chain, a hostile change and, for an away
+    ///   sender, the open route of its away chain apply to it: a copy from a dropped home block may be held there.
     /// - Each other id must be a move stored `Open`; otherwise reverts with `TicketNotCancellable`. A bring home is
     ///   never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
     /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` more than one waiting time past
@@ -699,9 +700,9 @@ interface ITickets {
     /// keep; it is read off `TicketWaitingForApproval` or `TicketWritten`, like `spender`, and both must be the ones
     /// the ticket was asked with; otherwise reverts with `ValidationBodyMismatch`.
     ///
-    /// The first send of a ticket the approver opened: before its `validUntil`, otherwise `ValidationExpired`;
-    /// `chainKey` the chain its first message goes to, the sender's, or the receiver's for a home `from`, otherwise
-    /// `ChainNotPartOfValidation`; the token not paused and that chain open as at a request (`TokenPaused`,
+    /// The first send of a ticket the approver opened, toward the chain its first message goes to, read from the
+    /// record: the sender's, or the receiver's for a home `from`. Before its `validUntil`, otherwise
+    /// `ValidationExpired`; the token not paused and that chain open as at a request (`TokenPaused`,
     /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a receiver's other away chain as at a
     /// request (`AwayChainBlocked`, `HostileChangeNotOver`, `ChainNotOpen`); no receipt waiting for the ticket, otherwise
     /// `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove` does with no approval module, or, for a home
@@ -710,20 +711,20 @@ interface ITickets {
     ///
     /// Otherwise an ask for the receipt of an open ticket: sends the ticket again, byte for byte, through the bridge
     /// the first send pinned. The away token answers a later copy with the receipt it stored, a zero receipt when the
-    /// ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, at fixed times: the first
-    /// at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), each next
-    /// one waiting time later.
+    /// ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, one per waiting time: the
+    /// first at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), each
+    /// next one also at least one waiting time after the last send. The ask goes to the sender's chain, read from the
+    /// record.
     ///
     /// Requirements of an ask:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - `chainKey` must be the sender's chain; otherwise reverts with `ChainNotPartOfValidation`.
     /// - It must be a move stored `Open`; otherwise reverts with `ValidationNotResendable`. A bring home is sent
     ///   again with `sendSecondHalf`.
     /// - Fewer than `MAX_RECEIPT_ASKS` asks standing; otherwise reverts with `NoAsksLeft`.
     /// - `block.timestamp` at or after the next ask's time; otherwise reverts with `SendNotDue`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
-    /// - `chainKey` must not be blocked; otherwise reverts with `AwayChainBlocked`.
-    /// - No hostile change may run on `chainKey`; otherwise reverts with `HostileChangeNotOver`.
+    /// - The sender's chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
+    /// - No hostile change may run on the sender's chain; otherwise reverts with `HostileChangeNotOver`.
     /// - A receiver on another away chain: that chain not blocked, with no hostile change running, and open on the
     ///   token; otherwise reverts with `AwayChainBlocked`, `HostileChangeNotOver` or `ChainNotOpen`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
@@ -734,10 +735,9 @@ interface ITickets {
     ///
     /// Emits `ReceiptAsked`, then the token's `ProtocolMessageSent`.
     /// @param ticketId The ticket sent again.
-    /// @param chainKey The sender's away chain, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.
-    function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender) external;
+    function sendTicket(bytes32 ticketId, bytes calldata to, bytes calldata spender) external;
 
     /// @dev Sends the owed second half of a move, or sends its latest half again, for anyone. The money of the move is
     /// on hold at home, and the half mints it to `wallet` on its away chain: the receiver's wallet, or the sender's on
@@ -844,7 +844,7 @@ interface ITickets {
     /// When the away token stored a receipt above zero for the half, it is applied as if it had arrived, see
     /// {IReceiptHandler-receiveReceipt}, and nothing is returned; a stored receipt for an id home has no record of is
     /// booked on hold. Otherwise, for:
-    /// - an open move: it is cancelled once that chain's clock is past the latest valid until its copies can carry:
+    /// - an open move, or one waiting for approval: it is cancelled once that chain's clock is past the latest valid until its copies can carry:
     ///   home's own plus the chain's reorg slot shift, the one a still open answer reported, and the stored copy's;
     /// - an open bring home: it ends `Done` with nothing moved once that chain's clock is past its half's valid until;
     /// - money on hold whose second half goes to the receiver: once that chain's clock is past the half's valid until,

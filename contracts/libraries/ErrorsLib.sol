@@ -248,8 +248,6 @@ library ErrorsLib {
     error ValidationNotResendable(bytes32 ticketId, uint8 status);
     /// @dev The approver answered at or after `validUntil`, past which no away token may execute.
     error ValidationExpired(bytes32 ticketId, uint64 deadline);
-    /// @dev `chainKey` is not the sender's chain, the only one a ticket goes to.
-    error ChainNotPartOfValidation(bytes32 ticketId, bytes32 chainKey);
     /// @dev The supplied `to` or `spender` is not the one the ticket was asked with: the ticket recorded under this
     ///  id keeps the key of the first and the second itself.
     error ValidationBodyMismatch(bytes32 ticketId);

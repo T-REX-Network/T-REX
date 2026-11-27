@@ -208,7 +208,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
         vm.warp(ticket.validUntil + ticket.waitingTime);
         vm.prank(makeAddr("anyone"));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         polygonGateway.relay(_last(polygonGateway));
         assertEq(polygonLite.balanceOf(bobSat), 50, "nothing executed twice");
         polygonGateway.relay(_last(polygonGateway));
@@ -227,7 +227,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
         vm.warp(ticket.validUntil + ticket.waitingTime);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         polygonGateway.relay(_last(polygonGateway));
 

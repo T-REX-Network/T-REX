@@ -81,7 +81,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         emit EventsLib.TicketWritten(
             ticketId, aliceSat, bobSat, "", 1, 1, 2, validUntil, TicketLib.askBlockHashOf(1, validUntil), salt
         );
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     /// @notice The answer sends nothing, so it needs neither a running token, nor an open chain, nor the end of a
@@ -119,7 +119,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.HalfPinned(MessageTypesLib.halfKeyOf(ticketId, 0), polygon, address(receiptBridge));
         vm.prank(stranger);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
 
         ITickets.Ticket memory sent = boundCompliance.ticketOf(ticketId);
         assertEq(sent.askBlockHash, sendBlocksAskBlockHash);
@@ -138,11 +138,11 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         assertEq(waiting.validUntil, askedAt + VALIDITY_WINDOW, "the receipt route's window");
 
         _approve(ticketId, 50);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(receiptBridge.queueLength(), 1, "the first send on the receipt bridge");
 
         vm.warp(waiting.validUntil + POLYGON_WINDOW);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(receiptBridge.queueLength(), 2, "the ask on the receipt bridge");
         assertEq(ticketBridge.queueLength(), 0, "never on the ticket bridge");
     }
@@ -154,14 +154,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.warp(validUntil);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, ticketId, validUntil));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
-    }
-
-    function test_sendTicket_reverts_when_theFirstSendNamesAnotherChain() public {
-        bytes32 ticketId = _askAndApprove(bobSat, 50);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotPartOfValidation.selector, ticketId, optimism));
-        boundCompliance.sendTicket(ticketId, optimism, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     function test_sendTicket_reverts_when_theTokenIsStoppedAtTheFirstSend() public {
@@ -170,7 +163,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         token.pause();
 
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     function test_sendTicket_reverts_when_theChainIsBlockedAtTheFirstSend() public {
@@ -179,7 +172,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         boundCompliance.blockAwayChain(polygon);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     function test_sendTicket_reverts_when_aHostileChangeRunsAtTheFirstSend() public {
@@ -189,7 +182,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         uint64 endsAt = token.hostileChangeEndsAt(polygon);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     /// @notice The envelopes are checked first, before the token's stop: a wrong receiver or spender is named as such.
@@ -200,10 +193,10 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         token.pause();
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, ticketId));
-        boundCompliance.sendTicket(ticketId, polygon, charlieSat, "");
+        boundCompliance.sendTicket(ticketId, charlieSat, "");
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, ticketId));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, charlieSat);
+        boundCompliance.sendTicket(ticketId, bobSat, charlieSat);
     }
 
     /// @notice A receipt that waits for a ticket home never sent answers no copy of it: the first send is refused,
@@ -219,7 +212,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         boundCompliance.unblockAwayChain(polygon);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, ticketId, polygon));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
 
         boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(ticketId, 0), receipt);
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.OnHold));
@@ -229,7 +222,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
                 ErrorsLib.ValidationNotResendable.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
             )
         );
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     /// @notice An approved ticket's first send counts toward the latest valid until sent to its chain: the per-ticket
@@ -237,7 +230,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     ///         echo a maximum above the new one.
     function test_setTicketLimits_reverts_when_theCapIsLoweredBeforeAnApprovedTicketsValidUntil() public {
         bytes32 ticketId = _askAndApprove(bobSat, 50);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
         uint256 lowerCap = 10;
 
@@ -310,7 +303,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         _approve(ticketId, homeAmount);
         assertEq(token.balanceOf(alice), homeAmount, "the answer burns nothing");
 
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
 
         assertEq(token.balanceOf(alice), 0, "burned at the first send");
         assertEq(token.onHoldOf(ticketId), homeAmount);
@@ -341,7 +334,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         bytes memory aliceHome = InteroperableAddress.formatEvmV1(block.chainid, alice);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, 0, homeAmount));
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
     /* ----- Receipts on another ask block hash ----- */
@@ -351,7 +344,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     function test_receiveReceipt_blocksTheChain_whenAnApprovalBoundTicketComesBackOnAnotherBlock() public {
         bytes32 ticketId = _ask(bobSat, 1, 2);
         _approve(ticketId, 1);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         uint256 index = receiptBridge.queueLength();
         _liteSettles(receiptBridge, token, _receiptUnderACopyHomeNeverSent(ticketId, bobSat, 2));
 
@@ -372,7 +365,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     {
         bytes32 ticketId = _ask(bobOnOptimism, 1, 2);
         _approve(ticketId, 1);
-        boundCompliance.sendTicket(ticketId, polygon, bobOnOptimism, "");
+        boundCompliance.sendTicket(ticketId, bobOnOptimism, "");
         uint256 index = receiptBridge.queueLength();
         _liteSettles(receiptBridge, token, _receiptUnderACopyHomeNeverSent(ticketId, bobOnOptimism, 2));
 
@@ -441,7 +434,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
                 ErrorsLib.ValidationNotResendable.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
             )
         );
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         _assertTheHoldIsCancelledOnceHomeStopsWaiting(ticketId);
     }
 
@@ -503,7 +496,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.prank(address(aliceIdentity));
         bytes32 ticketId = boundCompliance.askToMove(aliceSat, bobSat, 1, 50, "", salt);
         _approve(ticketId, 50);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         return boundCompliance.ticketOf(ticketId).askBlockHash;
     }
 

@@ -217,8 +217,8 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         bytes32 second = mc.askToMove(fromSat, toSat, 5, 10, "", _salt());
         assertEq(mc.pendingInOf(bobId), 100, "both reserved");
         vm.warp(FIRST_ASK_DUE_AT);
-        mc.sendTicket(first, polygon, toSat, "");
-        mc.sendTicket(second, polygon, toSat, "");
+        mc.sendTicket(first, toSat, "");
+        mc.sendTicket(second, toSat, "");
         vm.warp(FIRST_ASK_DUE_AT + POLYGON_WINDOW + 1);
 
         bytes32[] memory ids = new bytes32[](2);
@@ -279,7 +279,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
     function test_cancelTickets_reverts_when_theAskIsStillInsideItsWaitingTime() public {
         bytes32 id = _issue();
         vm.warp(FIRST_ASK_DUE_AT);
-        mc.sendTicket(id, polygon, toSat, "");
+        mc.sendTicket(id, toSat, "");
         uint64 dueAt = FIRST_ASK_DUE_AT + POLYGON_WINDOW;
 
         vm.warp(dueAt);
@@ -341,7 +341,7 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
     /// @dev Asks for the receipt of `id` at its first due time, then lets one waiting time pass with no answer.
     function _askAndLetTheAskGoUnanswered(bytes32 id) private {
         vm.warp(FIRST_ASK_DUE_AT);
-        mc.sendTicket(id, polygon, toSat, "");
+        mc.sendTicket(id, toSat, "");
         vm.warp(FIRST_ASK_DUE_AT + POLYGON_WINDOW + 1);
     }
 

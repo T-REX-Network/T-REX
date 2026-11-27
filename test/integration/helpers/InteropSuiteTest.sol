@@ -188,7 +188,7 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
         uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
         if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(ticketId, ticket.fromChainKey, to, spender);
+        boundCompliance.sendTicket(ticketId, to, spender);
         vm.warp(block.timestamp + ticket.waitingTime + 1);
     }
 

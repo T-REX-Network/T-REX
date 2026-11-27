@@ -552,7 +552,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         bytes32 ticketId = ticketIds[index];
         bytes memory receiverWallet = satellites[ticketReceiver[index]];
         if (ticketToHome[index]) receiverWallet = _homeWalletOf(ticketReceiver[index]);
-        try boundCompliance.sendTicket(ticketId, polygon, receiverWallet, "") { } catch { }
+        try boundCompliance.sendTicket(ticketId, receiverWallet, "") { } catch { }
     }
 
     function _cancel(bytes32 ticketId) internal {

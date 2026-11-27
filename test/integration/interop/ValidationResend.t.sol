@@ -92,7 +92,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.ReceiptAsked(id, 1);
         vm.prank(stranger);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(polygonGateway.queuedMessage(1).payload, polygonGateway.queuedMessage(0).payload);
@@ -106,7 +106,7 @@ contract ValidationResendTest is InteropSuiteTest {
     /// @notice The receipt that answers the ask settles the ticket like the original would.
     function test_sendTicket_succeeds_andTheReceiptSettles() public {
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 50));
         polygonGateway.relay(index);
@@ -119,19 +119,19 @@ contract ValidationResendTest is InteropSuiteTest {
     /// @notice The asks come at fixed times, one waiting time apart, three at most.
     function test_sendTicket_reverts_afterThreeAsks() public {
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.warp(firstAskDueAt + POLYGON_WINDOW - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt + POLYGON_WINDOW));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(firstAskDueAt + POLYGON_WINDOW);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.warp(firstAskDueAt + 2 * POLYGON_WINDOW);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(firstAskDueAt + 3 * POLYGON_WINDOW);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.NoAsksLeft.selector, id));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     /// @notice A spender travels with the object, so it is part of what must be supplied again.
@@ -142,9 +142,9 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.warp(firstAskDueAt);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, withSpender));
-        boundCompliance.sendTicket(withSpender, polygon, bobSat, "");
+        boundCompliance.sendTicket(withSpender, bobSat, "");
 
-        boundCompliance.sendTicket(withSpender, polygon, bobSat, spender);
+        boundCompliance.sendTicket(withSpender, bobSat, spender);
         assertEq(_decodeQueuedValidation(polygonGateway, 2).spender, spender);
     }
 
@@ -152,7 +152,7 @@ contract ValidationResendTest is InteropSuiteTest {
 
     function test_sendTicket_reverts_when_theIdWasNeverIssued() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, bytes32(uint256(999))));
-        boundCompliance.sendTicket(bytes32(uint256(999)), polygon, bobSat, "");
+        boundCompliance.sendTicket(bytes32(uint256(999)), bobSat, "");
     }
 
     function test_sendTicket_reverts_when_theReceiverDiffersFromTheAskedOne() public {
@@ -160,14 +160,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.warp(firstAskDueAt);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, id));
-        boundCompliance.sendTicket(id, polygon, other, "");
-    }
-
-    function test_sendTicket_reverts_when_theChainIsNotPartOfTheTicket() public {
-        vm.warp(firstAskDueAt);
-
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotPartOfValidation.selector, id, optimism));
-        boundCompliance.sendTicket(id, optimism, bobSat, "");
+        boundCompliance.sendTicket(id, other, "");
     }
 
     /// @notice Before valid until plus one waiting time an ask could cross the receipt: it is not due.
@@ -175,7 +168,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.warp(firstAskDueAt - 1);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     function test_sendTicket_reverts_when_alreadySettled() public {
@@ -186,7 +179,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.Done))
         );
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     /// @notice A blocked away chain's receipts wait unapplied; an ask sent now could only add to what cannot be
@@ -197,7 +190,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.warp(firstAskDueAt);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         assertEq(polygonGateway.queueLength(), 1);
     }
 
@@ -210,7 +203,7 @@ contract ValidationResendTest is InteropSuiteTest {
         token.setPeer(polygon, newPeer);
         vm.warp(firstAskDueAt);
 
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(polygonGateway.queuedMessage(1).recipient, formerPeer, "the pinned peer, not the new one");
@@ -223,7 +216,7 @@ contract ValidationResendTest is InteropSuiteTest {
         vm.warp(firstAskDueAt);
 
         vm.expectRevert(ErrorsLib.TokenPaused.selector);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 1, "only the first send went out");
     }
@@ -235,7 +228,7 @@ contract ValidationResendTest is InteropSuiteTest {
         _openEvmChain(token, POLYGON, address(replacement));
         vm.warp(firstAskDueAt);
 
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(polygonGateway.queueLength(), 2);
         assertEq(replacement.queueLength(), 0);

@@ -46,7 +46,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
         uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
         if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     /* ----- askToMove ----- */

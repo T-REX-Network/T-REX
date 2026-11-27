@@ -172,7 +172,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     function test_cancelTickets_reverts_when_theAskIsStillInsideItsWaitingTime() public {
         uint64 askedAt = uint64(issuedAt) + VALIDITY_WINDOW + POLYGON_WINDOW;
         vm.warp(askedAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(askedAt + POLYGON_WINDOW);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, askedAt + POLYGON_WINDOW));
@@ -185,7 +185,7 @@ contract ValidationDiscardTest is InteropSuiteTest {
     function test_cancelTickets_reverts_when_theAwayChainIsBlocked_thenWhileItsReceiptWaits() public {
         uint64 askedAt = uint64(issuedAt) + VALIDITY_WINDOW + POLYGON_WINDOW;
         vm.warp(askedAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
         MessageTypesLib.ReceiptMessage memory receipt = _settlement(id, aliceSat, bobSat, 40);

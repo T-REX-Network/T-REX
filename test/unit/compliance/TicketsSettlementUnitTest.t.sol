@@ -486,7 +486,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     function _discard(bytes32 id) private {
         uint64 firstAskDueAt = mc.ticketOf(id).validUntil + POLYGON_WINDOW;
         vm.warp(firstAskDueAt);
-        mc.sendTicket(id, polygon, toSat, "");
+        mc.sendTicket(id, toSat, "");
         vm.warp(firstAskDueAt + POLYGON_WINDOW + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;

@@ -222,7 +222,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
         vm.warp(ticket.validUntil + ticket.waitingTime);
 
         vm.prank(address(aliceIdentity));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(ticketBridge.queueLength(), 2);
         assertEq(ticketBridge.queuedMessage(1).payload, ticketBridge.queuedMessage(0).payload);

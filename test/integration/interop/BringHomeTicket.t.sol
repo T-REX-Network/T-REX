@@ -343,7 +343,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.ValidationNotResendable.selector, id, uint8(ITickets.TicketStatus.Open))
         );
-        boundCompliance.sendTicket(id, polygon, aliceHome, "");
+        boundCompliance.sendTicket(id, aliceHome, "");
     }
 
     /// @notice The bring home was pinned to a peer the chain replaced as planned. At its due time the same half goes

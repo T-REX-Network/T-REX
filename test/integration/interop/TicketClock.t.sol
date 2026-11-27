@@ -53,41 +53,34 @@ contract TicketClockTest is InteropSuiteTest {
         vm.warp(firstAskDueAt - 1);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(firstAskDueAt);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.ReceiptAsked(id, 1);
         vm.prank(stranger);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         assertEq(boundCompliance.ticketOf(id).asksForReceipt, 1);
         assertEq(boundCompliance.ticketOf(id).lastSentAt, firstAskDueAt);
     }
 
-    /// @notice Each next ask is due one waiting time after the previous due time, never counted from a late ask: the
-    ///         second at valid until plus two waiting times, the third at three.
-    function test_sendTicket_asksAtFixedTimes_whenTheFirstAskComesLate() public {
-        uint64 secondAskDueAt = validUntil + 2 * POLYGON_WINDOW;
-        uint64 thirdAskDueAt = validUntil + 3 * POLYGON_WINDOW;
-        uint64 lateFirstAsk = firstAskDueAt + 30 minutes;
+    /// @notice One ask per waiting time: each next ask is due a waiting time after the last send, so a late caller
+    ///         cannot send two asks in one block.
+    function test_sendTicket_reverts_when_aLateCallerAsksTwiceInOneBlock() public {
+        uint64 lateFirstAsk = validUntil + 3 * POLYGON_WINDOW;
+        uint64 secondAskDueAt = lateFirstAsk + POLYGON_WINDOW;
 
         vm.warp(lateFirstAsk);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
-        vm.warp(secondAskDueAt - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, secondAskDueAt));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
-        vm.warp(secondAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
-        vm.warp(thirdAskDueAt - 1);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, thirdAskDueAt));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
-        vm.warp(thirdAskDueAt);
+        vm.warp(secondAskDueAt);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptAsked(id, 3);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        emit EventsLib.ReceiptAsked(id, 2);
+        boundCompliance.sendTicket(id, bobSat, "");
     }
 
     /* ----- The cancel after an unanswered ask ----- */
@@ -97,7 +90,7 @@ contract TicketClockTest is InteropSuiteTest {
         uint64 askedAt = firstAskDueAt;
         uint64 cancelDueAt = askedAt + POLYGON_WINDOW;
         vm.warp(askedAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(cancelDueAt);
         vm.prank(stranger);
@@ -125,7 +118,7 @@ contract TicketClockTest is InteropSuiteTest {
 
         uint64 askedAt = ticket.validUntil + POLYGON_WINDOW;
         vm.warp(askedAt);
-        boundCompliance.sendTicket(crossChainId, polygon, bobOnOptimism, "");
+        boundCompliance.sendTicket(crossChainId, bobOnOptimism, "");
 
         uint64 cancelableAt = askedAt + POLYGON_WINDOW + 1;
         assertLt(cancelableAt, askedAt + OPTIMISM_WINDOW, "before the receiver's chain's waiting time is over");
@@ -144,7 +137,7 @@ contract TicketClockTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).waitingTime, POLYGON_WINDOW, "the ticket keeps its own");
 
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.warp(firstAskDueAt + POLYGON_WINDOW + 1);
         boundCompliance.cancelTickets(_ids(id));
 
@@ -155,7 +148,7 @@ contract TicketClockTest is InteropSuiteTest {
     ///         block of the unblock while that receipt can be applied: the receipt goes first, never the cancel.
     function test_cancelTickets_cannotBeatTheWaitingReceipt_afterTheAwayChainIsUnblocked() public {
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
         MessageTypesLib.ReceiptMessage memory receipt = _settlement(id, aliceSat, bobSat, 40);
@@ -183,7 +176,7 @@ contract TicketClockTest is InteropSuiteTest {
         uint64 seenValidUntil = validUntil + 10;
         uint64 nextAskDueAt = seenValidUntil + POLYGON_WINDOW;
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         uint256 index = _queueStillOpen(keccak256("a copy a home reorg dropped"), seenValidUntil);
 
@@ -195,14 +188,14 @@ contract TicketClockTest is InteropSuiteTest {
         assertEq(ticket.asksForReceipt, 0, "the ask is given back");
         assertEq(ticket.seenValidUntil, seenValidUntil);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, nextAskDueAt));
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         vm.warp(firstAskDueAt + POLYGON_WINDOW + 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, nextAskDueAt + POLYGON_WINDOW));
         boundCompliance.cancelTickets(_ids(id));
 
         uint64 newAskAt = uint64(block.timestamp);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
         vm.warp(newAskAt + POLYGON_WINDOW + 1);
         boundCompliance.cancelTickets(_ids(id));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
@@ -235,7 +228,7 @@ contract TicketClockTest is InteropSuiteTest {
         _setDeliveryAndLead(measuredDelivery, measuredLead);
         uint64 beyondTheCap = validUntil + measuredDelivery + measuredLead + 1;
         vm.warp(firstAskDueAt);
-        boundCompliance.sendTicket(id, polygon, bobSat, "");
+        boundCompliance.sendTicket(id, bobSat, "");
 
         uint256 index = _queueStillOpen(keccak256("a copy a home reorg dropped"), beyondTheCap);
 

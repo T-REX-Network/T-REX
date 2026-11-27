@@ -586,19 +586,17 @@ library TicketLib {
     ///  or an ask for the receipt of a ticket that left. Either way the caller supplies the two envelopes again, which
     ///  must be the ones it was asked with, and the ticket travels the route chosen at its ask.
     /// @param token the token the compliance is bound to
-    function sendTicket(bytes32 ticketId, bytes32 chainKey, bytes calldata to, bytes calldata spender, address token)
-        external
-    {
+    function sendTicket(bytes32 ticketId, bytes calldata to, bytes calldata spender, address token) external {
         ValidationStorage storage store = layout();
         require(isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
         ITickets.Ticket storage ticket = store.validations[ticketId];
         _requireTheAskedEnvelopes(ticket, ticketId, to, spender);
         bool approvedAndNotSent = ticket.status == ITickets.TicketStatus.Open && neverSent(ticket);
         if (approvedAndNotSent) {
-            _sendTheApprovedTicket(store, ticket, ticketId, chainKey, to, token);
+            _sendTheApprovedTicket(store, ticket, ticketId, to, token);
             return;
         }
-        _askForTheReceipt(ticket, ticketId, chainKey, to, spender, token);
+        _askForTheReceipt(ticket, ticketId, to, spender, token);
     }
 
     /// @dev The first send of a ticket the approver opened, before its valid until, toward the chain its first
@@ -609,15 +607,13 @@ library TicketLib {
         ValidationStorage storage store,
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
-        bytes32 chainKey,
         bytes calldata to,
         address token
     ) private {
         require(block.timestamp < ticket.validUntil, ErrorsLib.ValidationExpired(ticketId, ticket.validUntil));
         (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
-        bytes32 firstChainKey = ticket.fromChainKey;
-        if (fromHome) firstChainKey = ticket.toChainKey;
-        require(chainKey == firstChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
+        bytes32 chainKey = ticket.fromChainKey;
+        if (fromHome) chainKey = ticket.toChainKey;
         requireTokenRunning(token);
         _openChainWindow(store, token, chainKey);
         _requireTheReceiversChainOpen(token, chainKey, to);
@@ -647,18 +643,18 @@ library TicketLib {
     }
 
     /// @dev Asks the away token for the ticket's receipt: the ticket rebuilt from its record and the two envelopes,
-    ///  sent byte for byte, ask block hash included. At the fixed times {nextAskDueAt} gives, at most
-    ///  `MAX_RECEIPT_ASKS` times. A blocked `chainKey` refuses an ask as it refuses an ask to move, and so do a hostile
+    ///  sent byte for byte, ask block hash included. At most one ask per waiting time, see
+    ///  {_requireReceiptCanBeAsked}, and at most `MAX_RECEIPT_ASKS` times. A blocked sender's chain refuses an ask as it refuses an ask to move, and so do a hostile
     ///  change running on it, see {requireNoHostileChange}, and the token's own pause, see {requireTokenRunning}.
     function _askForTheReceipt(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
-        bytes32 chainKey,
         bytes calldata to,
         bytes calldata spender,
         address token
     ) private {
-        _requireReceiptCanBeAsked(ticket, ticketId, chainKey);
+        bytes32 chainKey = ticket.fromChainKey;
+        _requireReceiptCanBeAsked(ticket, ticketId);
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
         requireNoHostileChange(token, chainKey);
@@ -704,27 +700,21 @@ library TicketLib {
         require(waiting.bodyHash == bytes32(0), ErrorsLib.ApplyWaitingReceiptFirst(ticketId, waiting.chainKey));
     }
 
-    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}. A bring home has no ticket to send:
-    ///  its half is asked for with {SecondHalfLib-sendSecondHalf}.
-    function _requireReceiptCanBeAsked(ITickets.Ticket storage ticket, bytes32 ticketId, bytes32 chainKey)
-        private
-        view
-    {
-        require(chainKey == ticket.fromChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
+    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}. The first ask once the receipt is
+    ///  overdue, at {waitingEndsAtOf}; each next one also a waiting time after the last send, so a late caller cannot
+    ///  send two asks at once. A bring home has no ticket to send: its half is asked for with
+    ///  {SecondHalfLib-sendSecondHalf}.
+    function _requireReceiptCanBeAsked(ITickets.Ticket storage ticket, bytes32 ticketId) private view {
         ITickets.TicketStatus status = ticket.status;
         require(status == ITickets.TicketStatus.Open, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
         bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
         require(aMove, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
         require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
-        uint64 dueAt = nextAskDueAt(ticket);
+        uint64 dueAt = waitingEndsAtOf(ticket);
+        bool askedBefore = ticket.asksForReceipt != 0;
+        uint64 oneWaitingTimeAfterTheLastSend = ticket.lastSentAt + ticket.waitingTime;
+        if (askedBefore && oneWaitingTimeAfterTheLastSend > dueAt) dueAt = oneWaitingTimeAfterTheLastSend;
         require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
-    }
-
-    /// @dev When the next ask for the receipt is due: the first at {waitingEndsAtOf}, each next one waiting time
-    ///  later. Fixed times, not counted from the previous ask, so a late ask does not push the next ones back.
-    function nextAskDueAt(ITickets.Ticket storage ticket) internal view returns (uint64) {
-        uint64 asksStanding = ticket.asksForReceipt;
-        return waitingEndsAtOf(ticket) + asksStanding * ticket.waitingTime;
     }
 
     /// @dev The later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time: from then on the receipt

@@ -746,13 +746,34 @@ contract CloseByHandTest is HoldsSuiteTest {
         boundCompliance.closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
     }
 
-    function test_closeByHand_reverts_when_theTicketWaitsForApproval() public {
+    /// @notice A ticket waiting for approval on a closed route is not cancelled on home's clock: a copy from a home
+    ///         block a reorg dropped may be held there. Close by hand reads that chain and cancels it once the away
+    ///         clock is past every valid until a copy can carry.
+    function test_closeByHand_cancelsATicketWaitingForApproval_onTheAwayClock() public {
         _bindApprovalModule(approver);
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, FOUR, FOUR);
         _closeEvmChain(token, POLYGON);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        uint64 latestValidUntil = ticket.validUntil + REORG_SLOT_SHIFT;
+        vm.warp(latestValidUntil);
 
-        _expectNotCancellable(ticketId, ITickets.TicketStatus.WaitingForApproval);
-        boundCompliance.closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        boundCompliance.cancelTickets(_ids(ticketId));
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.AwayClockBeforeValidUntil.selector, ticketId, latestValidUntil - 1, latestValidUntil
+            )
+        );
+        boundCompliance.closeByHand(ticketId, bobSat, _reading(latestValidUntil - 1));
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.TicketCancelled(ticketId);
+        _closeByHand(ticketId, bobSat, _reading(latestValidUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled from the read");
+        assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
     }
 
     /// @notice Money going back to a sender whose own chain is the closed one waits for that chain.
@@ -780,6 +801,11 @@ contract CloseByHandTest is HoldsSuiteTest {
     }
 
     /* ----- Helpers ----- */
+
+    function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {
+        ids = new bytes32[](1);
+        ids[0] = ticketId;
+    }
 
     function _closeByHand(bytes32 ticketId, bytes memory receiver, ITickets.AwayChainReading memory reading) private {
         vm.prank(deployer);

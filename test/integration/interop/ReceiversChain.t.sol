@@ -54,7 +54,7 @@ contract ReceiversChainTest is HoldsSuiteTest {
         boundCompliance.blockAwayChain(optimism);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
-        boundCompliance.sendTicket(ticketId, polygon, bobOptimismSat, "");
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
     }
 
     function test_sendTicket_reverts_when_theReceiversAwayChainIsClosedAtTheFirstSend() public {
@@ -62,7 +62,7 @@ contract ReceiversChainTest is HoldsSuiteTest {
         _closeEvmChain(token, OPTIMISM);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, optimism));
-        boundCompliance.sendTicket(ticketId, polygon, bobOptimismSat, "");
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
     }
 
     /* ----- An ask for the receipt ----- */
@@ -75,7 +75,7 @@ contract ReceiversChainTest is HoldsSuiteTest {
         boundCompliance.blockAwayChain(optimism);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
-        boundCompliance.sendTicket(ticketId, polygon, bobOptimismSat, "");
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
     }
 
     /// @dev Alice on Polygon asks to move 4 to Bob on Optimism, and the approver opens the ticket. Not sent yet.

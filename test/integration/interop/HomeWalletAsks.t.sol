@@ -108,7 +108,7 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         _approve(id, MOVED);
         vm.expectEmit(true, true, false, true, address(token));
         emit IERC20.Transfer(alice, address(0), MOVED);
-        boundCompliance.sendTicket(id, optimism, bobOnB, "");
+        boundCompliance.sendTicket(id, bobOnB, "");
 
         _assertStatus(id, ITickets.TicketStatus.OnHold);
         assertEq(token.onHoldOf(id), MOVED);
@@ -136,7 +136,7 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, atHome - spent, MOVED)
         );
-        boundCompliance.sendTicket(id, optimism, bobOnB, "");
+        boundCompliance.sendTicket(id, bobOnB, "");
 
         _assertStatus(id, ITickets.TicketStatus.Open);
     }
@@ -154,7 +154,7 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         _approve(id, MOVED);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, freeAtTheSend, MOVED));
-        boundCompliance.sendTicket(id, optimism, bobOnB, "");
+        boundCompliance.sendTicket(id, bobOnB, "");
 
         _assertStatus(id, ITickets.TicketStatus.Open);
         assertEq(token.balanceOf(alice), atHome, "nothing burned");
@@ -173,7 +173,7 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         boundCompliance.bringHome(aliceOnA, 1, alice, _salt());
 
         _approve(id, ALICE_ON_A);
-        boundCompliance.sendTicket(id, polygon, bobOnA, "");
+        boundCompliance.sendTicket(id, bobOnA, "");
         _aSendsTheTicketsReceipt(id, bobOnA, ALICE_ON_A);
 
         _assertStatus(id, ITickets.TicketStatus.Done);

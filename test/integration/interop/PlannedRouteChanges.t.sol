@@ -193,7 +193,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         ERC7786GatewayMock nextBridge = _changeRoute();
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         vm.warp(issued.validUntil + issued.waitingTime);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(nextBridge.queueLength(), 0, "the ask went out on the former pair");
         _relayAll(polygonBridge);
 
@@ -249,7 +249,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
         vm.warp(acceptedUntil + 1);
         uint256 askIndex = polygonBridge.queueLength();
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(polygonBridge.queuedMessage(askIndex).recipient, nextPeerEnvelope, "the late ask goes to the peer now");
 
         vm.warp(block.timestamp + POLYGON_WINDOW + 1);
@@ -391,7 +391,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
         vm.warp(issued.validUntil + issued.waitingTime);
         uint256 askIndex = polygonBridge.queueLength();
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(polygonBridge.queuedMessage(askIndex).recipient, liteEnvelope, "the ask goes to the former peer");
         _relayAll(polygonBridge);
 
@@ -407,7 +407,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
         vm.warp(acceptedUntil);
         uint256 askIndex = polygonBridge.queueLength();
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(polygonBridge.queuedMessage(askIndex).recipient, nextPeerEnvelope, "the ask goes to the peer now");
         (address pinnedBridge, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(ticketId, 0));
         assertEq(pinnedBridge, address(polygonBridge), "the pin is not rewritten");
@@ -429,7 +429,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         uint256 formerQueueLength = polygonBridge.queueLength();
 
         vm.warp(issued.validUntil + issued.waitingTime);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
 
         assertEq(polygonBridge.queueLength(), formerQueueLength, "nothing went through the distrusted bridge");
         assertEq(nextBridge.queueLength(), 1);
@@ -498,7 +498,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         bytes32 ticketId = _ask(10, 50);
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         vm.warp(issued.validUntil + issued.waitingTime);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         MessageTypesLib.ReceiptMessage memory receipt = _formerPairReceiptWaitingUnderABlock(ticketId, 40);
 
         vm.warp(acceptedUntil);

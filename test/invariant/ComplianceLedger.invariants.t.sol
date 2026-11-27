@@ -266,7 +266,7 @@ contract ComplianceLedgerInvariants is StdInvariant, InteropSuiteTest {
         (, bytes memory to) = _walletsOf(validation);
         uint64 askDueAt = validation.validUntil + (validation.asksForReceipt + 1) * validation.waitingTime;
         if (block.timestamp < askDueAt) vm.warp(askDueAt);
-        boundCompliance.sendTicket(id, validation.fromChainKey, to, "");
+        boundCompliance.sendTicket(id, to, "");
         vm.warp(block.timestamp + validation.waitingTime + 1);
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = id;

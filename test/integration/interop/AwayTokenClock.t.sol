@@ -76,7 +76,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
         assertEq(token.reservedOf(aliceSat), 50, "the reservation stands");
 
         vm.prank(stranger);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         _relayAll();
 
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
@@ -93,7 +93,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
         uint64 askedAt = ticket.validUntil + POLYGON_WINDOW;
         vm.warp(askedAt);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         polygonGateway.relay(_last());
 
         vm.warp(askedAt + POLYGON_WINDOW + 1);

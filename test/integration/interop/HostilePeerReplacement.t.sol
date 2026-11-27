@@ -119,7 +119,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         vm.expectRevert(frozen);
         boundCompliance.askToMove(aliceOnPolygon, bobOnPolygon, 10, 50, "", salt);
         vm.expectRevert(frozen);
-        boundCompliance.sendTicket(ticketToAskFor, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(ticketToAskFor, bobOnPolygon, "");
         vm.prank(anyone);
         vm.expectRevert(frozen);
         boundCompliance.cancelTickets(_ids(ticketToCancel));
@@ -129,7 +129,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
 
         vm.warp(endsAt);
         _ask(10, 50);
-        boundCompliance.sendTicket(ticketToAskFor, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(ticketToAskFor, bobOnPolygon, "");
         vm.prank(anyone);
         boundCompliance.cancelTickets(_ids(ticketToCancel));
         assertEq(uint8(boundCompliance.statusOf(ticketToCancel)), uint8(ITickets.TicketStatus.Cancelled));
@@ -149,7 +149,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         _approve(approval, approvedInTheFreeze);
         assertEq(uint8(boundCompliance.statusOf(approvedInTheFreeze)), uint8(ITickets.TicketStatus.Open), "approved");
         vm.expectRevert(frozen);
-        boundCompliance.sendTicket(approvedInTheFreeze, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(approvedInTheFreeze, bobOnPolygon, "");
         vm.prank(anyone);
         vm.expectRevert(frozen);
         boundCompliance.cancelTickets(_ids(waitingInTheFreeze));
@@ -157,7 +157,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         vm.warp(endsAt);
         bytes32 approvedAfterTheFreeze = _ask(10, 50);
         _approve(approval, approvedAfterTheFreeze);
-        boundCompliance.sendTicket(approvedAfterTheFreeze, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(approvedAfterTheFreeze, bobOnPolygon, "");
         assertEq(_pinnedBridgeOf(approvedAfterTheFreeze), address(polygonBridge), "sent");
     }
 
@@ -249,11 +249,11 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
 
         vm.warp(issued.validUntil + issued.waitingTime);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
-        boundCompliance.sendTicket(ticketId, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(ticketId, bobOnPolygon, "");
 
         vm.warp(endsAt);
         uint256 askIndex = polygonBridge.queueLength();
-        boundCompliance.sendTicket(ticketId, polygon, bobOnPolygon, "");
+        boundCompliance.sendTicket(ticketId, bobOnPolygon, "");
         assertEq(polygonBridge.queuedMessage(askIndex).recipient, replacementPeerEnvelope, "to the new peer");
         (, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(ticketId, 0));
         assertEq(pinnedPeerKey, keccak256(replacedPeerEnvelope), "the pin is kept");

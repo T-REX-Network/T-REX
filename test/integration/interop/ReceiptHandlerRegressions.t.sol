@@ -109,7 +109,7 @@ contract ReceiptHandlerRegressionsTest is InteropSuiteTest {
 
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         vm.warp(issued.validUntil + issued.waitingTime);
-        boundCompliance.sendTicket(ticketId, polygon, bobSat, "");
+        boundCompliance.sendTicket(ticketId, bobSat, "");
         _closeEvmChain(token, POLYGON);
         vm.warp(block.timestamp + issued.waitingTime + 1);
 

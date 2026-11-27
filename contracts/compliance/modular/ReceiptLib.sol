@@ -705,8 +705,12 @@ library ReceiptLib {
             ITickets.Ticket storage ticket = store.validations[ticketId];
             TicketLib.requireTicketCanBeDecided(token, ticket);
             // Nothing was sent for a move waiting for approval, or opened by the approver and never sent: anyone may
-            // cancel it once its deadline passed, and the reservation comes back.
+            // cancel it once its deadline passed, and the reservation comes back. A copy from a home block a reorg
+            // dropped may still be held by the sender's away chain, so on a closed route only a read of that chain
+            // decides it, see {closeByHand}.
             if (TicketLib.neverSent(ticket)) {
+                (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+                if (!fromHome) _requireReceiptRouteOpen(token, ticket.fromChainKey);
                 TicketLib.discardUnanswered(ticketId, token);
                 continue;
             }
@@ -855,7 +859,7 @@ library ReceiptLib {
     }
 
     /// @dev No receipt in the read. A receipt waiting at home for the latest half says otherwise, so it is read again
-    ///  instead. Then an open move is cancelled here, money on hold with no ticket is {HoldLib}'s, and any other
+    ///  instead. Then an open move, or one waiting for approval, is cancelled here, money on hold with no ticket is {HoldLib}'s, and any other
     ///  half {SecondHalfLib}'s.
     /// @return returnedAmount what goes back to the sender
     function _closeOnTheAwayClock(
@@ -872,8 +876,10 @@ library ReceiptLib {
         require(!aReceiptWaits, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, chainKey));
         require(WalletKeyLib.canonicalKey(receiver) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
 
-        bool anOpenMove = ticket.status == ITickets.TicketStatus.Open && ticket.kind == ITickets.TicketKind.MOVE;
-        if (anOpenMove) {
+        bool openOrWaiting =
+            ticket.status == ITickets.TicketStatus.Open || ticket.status == ITickets.TicketStatus.WaitingForApproval;
+        bool aMoveNotDecided = openOrWaiting && ticket.kind == ITickets.TicketKind.MOVE;
+        if (aMoveNotDecided) {
             _cancelOnTheClosedRoute(store, ticket, ticketId, reading, token);
             return 0;
         }
@@ -884,7 +890,7 @@ library ReceiptLib {
         return SecondHalfLib.closeHalfByHand(ticketId, reading.awayClockTime, token);
     }
 
-    /// @dev An open move on a closed route is cancelled once the away chain's clock in the read is past every valid
+    /// @dev An open move, or one waiting for approval, on a closed route is cancelled once the away chain's clock in the read is past every valid
     ///  until a copy of the ticket can carry there: home's own, moved by up to the chain's reorg slot shift for a copy
     ///  from a home block a reorg dropped that may still be on its way, the one a still open answer reported, and the
     ///  stored copy's.

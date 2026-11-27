@@ -184,7 +184,7 @@ chain: the receipt route's validity window is sized off chain to cover it.
 Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
 lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
 since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
-first send with `sendTicket(ticketId, chainKey, to, spender)` before the deadline, and that send checks the token
+first send with `sendTicket(ticketId, to, spender)` before the deadline, and that send checks the token
 and the chain again, as either may have been stopped while the request waited. An answer below the requested
 minimum is a refusal, which releases the reservation and ends the validation `Cancelled`. A request nobody answered,
 or an approved ticket nobody sent, is discarded past its deadline with `cancelTickets`, by anyone, since nothing was
