@@ -299,10 +299,10 @@ library ReceiptLib {
     }
 
     /// @dev A first-half receipt that no ticket home sent answers is bad when another body came for the id, when its
-    ///  sender is not on the chain it came from, when an expired answer still moved something, or, for a ticket home
-    ///  wrote, when it names other wallets. With no ticket to compare it to, a receipt is held to the chain that holds
-    ///  its sender: no other away chain can move that sender's tokens. A sender that is not a well formed wallet is on
-    ///  no chain, so it is refused too, not reverted.
+    ///  sender is not on the chain it came from, when its receiver is not a well formed wallet, when an expired answer
+    ///  still moved something, or, for a ticket home wrote, when it names other wallets. With no ticket to compare it
+    ///  to, a receipt is held to the chain that holds its sender: no other away chain can move that sender's tokens.
+    ///  A malformed wallet is refused here, not reverted: nothing may revert the delivery once it is admitted.
     function _isBadReceiptWithoutTicket(
         TicketLib.ValidationStorage storage store,
         bytes32 halfKey,
@@ -316,8 +316,10 @@ library ReceiptLib {
             WalletKeyLib.tryParse(receipt.from);
         bool fromTheSendersChain =
             fromIsAWallet && MessageTypesLib.chainKey(fromChainType, fromChainReference) == originChainKey;
+        (bool toIsAWallet,,,) = WalletKeyLib.tryParse(receipt.to);
         bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
-        if (anotherBodyApplied || anotherBodyWaiting || !fromTheSendersChain || expiredYetMoved) return true;
+        bool namesItsWallets = fromTheSendersChain && toIsAWallet;
+        if (anotherBodyApplied || anotherBodyWaiting || !namesItsWallets || expiredYetMoved) return true;
 
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
         if (!TicketLib.isRecorded(store, receipt.ticketId)) return false;

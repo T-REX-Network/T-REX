@@ -465,6 +465,8 @@ interface ITickets {
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - A home `from` not frozen; otherwise `FrozenWallet`.
     /// - The chain the first message goes to open on the token; otherwise the token reverts with `ChainNotOpen`.
+    /// - For a receiver on another away chain, that chain too not blocked, with no hostile change running, and open
+    ///   on the token; otherwise `AwayChainBlocked`, `HostileChangeNotOver` or `ChainNotOpen`.
     ///
     /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`. For a home `from`: the token's
     /// `HeldInTransit` and `Transfer`, `SecondHalfSent`, then the token's `HalfPinned` and `ProtocolMessageSent`.
@@ -699,7 +701,8 @@ interface ITickets {
     /// The first send of a ticket the approver opened: before its `validUntil`, otherwise `ValidationExpired`;
     /// `chainKey` the chain its first message goes to, the sender's, or the receiver's for a home `from`, otherwise
     /// `ChainNotPartOfValidation`; the token not paused and that chain open as at a request (`TokenPaused`,
-    /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`); no receipt waiting for the ticket, otherwise
+    /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a receiver's other away chain as at a
+    /// request (`AwayChainBlocked`, `HostileChangeNotOver`, `ChainNotOpen`); no receipt waiting for the ticket, otherwise
     /// `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove` does with no approval module, or, for a home
     /// `from`, burns onto hold and sends the `MOVE_OUT`; its maximum must still fit in the wallet's unfrozen balance,
     /// as at the ask, otherwise `RequestAboveBalance`.
@@ -720,6 +723,8 @@ interface ITickets {
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - `chainKey` must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - No hostile change may run on `chainKey`; otherwise reverts with `HostileChangeNotOver`.
+    /// - A receiver on another away chain: that chain not blocked, with no hostile change running, and open on the
+    ///   token; otherwise reverts with `AwayChainBlocked`, `HostileChangeNotOver` or `ChainNotOpen`.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
     ///
@@ -847,6 +852,8 @@ interface ITickets {
     ///   applied as the move inside that chain it was, never minted to the sender, after the carried part of an
     ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit. Each
     ///   move counts for the identity its receiver has at the close, not the one read when the receipt was booked.
+    ///   The rules are asked again about each move; one they refuse is announced with `MoveBreachedRule`, never
+    ///   refused, since the away token already made it.
     /// Money going back to a sender whose own chain is the closed one is not closed by hand: it waits for that chain.
     ///
     /// Requirements:

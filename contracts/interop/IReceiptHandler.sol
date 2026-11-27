@@ -88,7 +88,8 @@ interface IReceiptHandler {
     ///   and no chain is blocked.
     /// - A first-half receipt that no ticket home sent answers: an id home has no record of, or a move home wrote and
     ///   never sent, waiting for approval or cancelled before it left. It is a bad receipt when another body came for
-    ///   the id, when its sender is not on the chain that sent it, when an expired answer moved something, or, for a
+    ///   the id, when its sender is not on the chain that sent it, when its receiver is not a well formed wallet, when
+    ///   an expired answer moved something, or, for a
     ///   ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
     ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
     ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt, or one from a

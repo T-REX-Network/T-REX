@@ -256,17 +256,6 @@ contract ValidationIssuanceTest is InteropSuiteTest {
         assertEq(polygonGateway.queueLength(), 0);
     }
 
-    /// @notice The receiver's chain is not asked at the ask: with its route closed the ticket still goes to the
-    ///         sender's chain, and home decides at the first half's receipt whether the second half can go.
-    function test_askToMove_sendsTheTicket_whenTheReceiversChainHasNoRoute() public {
-        _closeEvmChain(token, OPTIMISM);
-
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobOptimism, 10, 90);
-
-        assertEq(polygonGateway.queueLength(), 1);
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
-    }
-
     function test_requestTransferValidation_Success_WhenARouteSwitchPinsTheNewGatewayForNewIdsOnly() public {
         bytes32 first = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 40);
         ERC7786GatewayMock replacement = _newReceiptBridge(POLYGON);

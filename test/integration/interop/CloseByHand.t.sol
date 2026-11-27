@@ -472,6 +472,45 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertPositionsAreTheSupply();
     }
 
+    /// @notice The rules refuse the receiver at the close: the move inside the closed chain already happened there,
+    ///         so it is announced as a broken rule and applied all the same.
+    function test_closeByHand_announcesABrokenRule_andStillAppliesTheMove() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        _closeEvmChain(token, POLYGON);
+        uint64 stopWaitingAt = boundCompliance.ticketOf(ticketId).stopWaitingAt;
+        vm.warp(stopWaitingAt);
+        rules.setAllow(false);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.MoveBreachedRule(ticketId, polygon, FOUR);
+        _closeByHand(ticketId, bobSat, _reading(stopWaitingAt));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move is applied");
+        assertEq(token.awayBalanceOf(bobSat), FOUR, "bob is counted");
+        assertEq(boundCompliance.positionOf(address(bobIdentity)), FOUR, "bob's position");
+        _assertHomeAgreesWithPolygon();
+    }
+
+    /// @notice The same for the earlier move a hold carries: it is announced under the earlier hold's id and applied.
+    function test_closeByHand_announcesABrokenRule_forTheCarriedPart_andStillAppliesIt() public {
+        (bytes32 aliceId, bytes32 bobId) = _bookTwoRelatedDroppedAsks();
+        _closeEvmChain(token, POLYGON);
+        vm.warp(boundCompliance.ticketOf(bobId).stopWaitingAt);
+        rules.setAllow(false);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.MoveBreachedRule(aliceId, polygon, TWO);
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.MoveBreachedRule(bobId, polygon, TWO);
+        _closeByHand(bobId, charlieSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(aliceId, ITickets.TicketStatus.Done, "the carried part is applied");
+        _assertStatus(bobId, ITickets.TicketStatus.Done, "then bob's move");
+        assertEq(token.awayBalanceOf(charlieSat), TWO, "charlie is counted");
+        _assertPositionsAreTheSupply();
+    }
+
     /// @notice The receiver was linked to no identity when the receipt was booked, and to Bob's by the close: the move
     ///         is applied to the identity the receiver has now, as a move inside one chain would be.
     function test_closeByHand_appliesTheMoveToTheReceiversIdentityOfNow() public {

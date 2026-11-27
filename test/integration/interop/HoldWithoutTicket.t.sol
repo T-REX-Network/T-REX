@@ -144,6 +144,17 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
     }
 
+    /// @notice A receiver written with a trailing byte names no wallet: the receipt is refused and the chain that
+    ///         sent it is blocked, the delivery does not revert.
+    function test_receiveReceipt_blocksTheChain_whenAReceiptWithNoTicketNamesAReceiverWithATrailingByte() public {
+        _assertAMalformedReceiverIsRefused(keccak256("an id with a padded receiver"), FOUR);
+    }
+
+    /// @notice The same for a zero receipt: it would otherwise end the id, and it reverted the delivery instead.
+    function test_receiveReceipt_blocksTheChain_whenAZeroReceiptWithNoTicketNamesAReceiverWithATrailingByte() public {
+        _assertAMalformedReceiverIsRefused(keccak256("a zero receipt with a padded receiver"), 0);
+    }
+
     function test_receiveReceipt_putsTheReceiptOnHold_whenTheTicketNeverLeft() public {
         _bindApprovalModule(approver);
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
@@ -922,6 +933,24 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 gasUsed = gasBefore - gasleft();
 
         emit log_named_uint("gas to deliver and book a receipt with no ticket", gasUsed);
+    }
+
+    function _assertAMalformedReceiverIsRefused(bytes32 inventedId, uint256 amount) private {
+        bytes memory paddedReceiver = bytes.concat(bobSat, hex"00");
+        MessageTypesLib.ReceiptMessage memory receipt =
+            _receiptWithNoTicket(inventedId, aliceSat, paddedReceiver, amount);
+        uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptRefused(inventedId, polygon, amount, receipt.askBlockHash);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.AwayChainBlockSet(polygon, true);
+        polygonGateway.relay(index);
+
+        assertEq(boundCompliance.ticketOf(inventedId).fromIdentity, address(0), "nothing booked");
+        assertEq(token.onHoldOf(inventedId), 0, "nothing on hold");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice's tokens never moved");
+        assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
     }
 
 }

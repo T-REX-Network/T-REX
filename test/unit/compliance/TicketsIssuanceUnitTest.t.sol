@@ -242,6 +242,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         public
         configured
     {
+        TokenReservationStub(token).setChainOpen(optimism, true);
         vm.prank(aliceIdentity);
         bytes32 id = mc.askToMove(fromSat, toOptimism, 10, 90, "", _salt());
 

@@ -734,6 +734,9 @@ library HoldLib {
         earlierHold.moved -= carried;
         ComplianceLedgerLib.releasePendingTotal(carried);
         if (earlierHold.moved == 0) TicketLib.moveTo(earlierHold, ITickets.TicketStatus.Done, token);
+        if (_breaksARuleNow(move, carried)) {
+            emit EventsLib.MoveBreachedRule(earlierHoldId, earlierHold.fromChainKey, carried);
+        }
         ComplianceLedgerLib.movePosition(move.fromIdentity, move.toIdentity, move.fromWallet, move.toWallet, carried);
 
         // Interactions
@@ -779,6 +782,7 @@ library HoldLib {
             ticket.shortCancel = true;
             emit EventsLib.CancelHoldShort(ticketId, ticket.moved);
         }
+        if (_breaksARuleNow(move, applied)) emit EventsLib.MoveBreachedRule(ticketId, ticket.fromChainKey, applied);
         ComplianceLedgerLib.movePosition(move.fromIdentity, move.toIdentity, move.fromWallet, move.toWallet, applied);
 
         // Interactions
@@ -788,6 +792,14 @@ library HoldLib {
     }
 
     /* ----- Private ----- */
+
+    /// @dev Whether the rules would refuse `amount` now, asked once the hold released it so they judge the state the
+    ///  move lands on. Announced, never refused: the away token already made the move. A move between two wallets of
+    ///  one identity moves no position, so no distribution rule applies to it.
+    function _breaksARuleNow(IModule.TransferContext memory move, uint256 amount) private view returns (bool) {
+        if (ComplianceLedgerLib.isRelocation(move.fromIdentity, move.toIdentity)) return false;
+        return amount > ModuleSetLib.callCheckTransfer(move);
+    }
 
     /// @dev The identity a wallet resolves to, zero when none.
     function _identityOf(bytes calldata wallet, address token) private view returns (address) {

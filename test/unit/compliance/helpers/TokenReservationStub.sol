@@ -97,6 +97,13 @@ contract TokenReservationStub {
     bytes32 public lastReceiptRouteChainKey;
     bytes32 public lastReceiptRouteHalfKey;
 
+    /// @dev Whether each away chain has an open receipt route; a test opens the chains a move involves.
+    mapping(bytes32 chainKey => bool) public isChainOpen;
+
+    function setChainOpen(bytes32 chainKey, bool open) external {
+        isChainOpen[chainKey] = open;
+    }
+
     function setHostileChangeEndsAt(bytes32 chainKey, uint64 endsAt) external {
         hostileChangeEndsAt[chainKey] = endsAt;
     }

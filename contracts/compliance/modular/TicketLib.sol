@@ -243,6 +243,7 @@ library TicketLib {
 
         _requireWithinAskLimits(draft);
         draft.waitingTime = _openTheFirstChain(token, _firstChainOf(draft));
+        _requireTheReceiversChainOpen(token, _firstChainOf(draft), to);
         _narrowAmountRange(draft, from, to, spender, token);
         _requireSpenderAllowed(draft, to, spender);
         _chooseTheRoute(draft, token);
@@ -619,6 +620,7 @@ library TicketLib {
         require(chainKey == firstChainKey, ErrorsLib.ChainNotPartOfValidation(ticketId, chainKey));
         requireTokenRunning(token);
         _openChainWindow(store, token, chainKey);
+        _requireTheReceiversChainOpen(token, chainKey, to);
         _requireNoReceiptWaitsForTheTicket(store, ticketId);
 
         if (fromHome) {
@@ -660,6 +662,7 @@ library TicketLib {
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
         requireNoHostileChange(token, chainKey);
+        _requireTheReceiversChainOpen(token, chainKey, to);
 
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
@@ -737,6 +740,19 @@ library TicketLib {
     function _openTheFirstChain(address token, bytes32 firstChainKey) private view returns (uint64 window) {
         requireTokenRunning(token);
         window = _openChainWindow(layout(), token, firstChainKey);
+    }
+
+    /// @dev A move from one away chain to another involves the receiver's chain too: like the first chain, it must not
+    ///  be blocked, have no hostile change running, and keep an open receipt route, or its second half could not
+    ///  leave. A receiver at home or on the first chain adds no chain.
+    function _requireTheReceiversChainOpen(address token, bytes32 firstChainKey, bytes calldata to) private view {
+        (bool toHome,) = WalletKeyLib.isReferenceChain(to);
+        bytes32 toChainKey = _chainKeyOf(to);
+        bool toAnotherAwayChain = !toHome && toChainKey != firstChainKey;
+        if (!toAnotherAwayChain) return;
+        requireAwayChainNotBlocked(toChainKey);
+        requireNoHostileChange(token, toChainKey);
+        require(ITREXMessaging(token).isChainOpen(toChainKey), ErrorsLib.ChainNotOpen(toChainKey));
     }
 
     /// @dev The waiting time of a chain a ticket may go to: not blocked, no hostile change running, and a window
