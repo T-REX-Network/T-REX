@@ -559,7 +559,7 @@ library HoldLib {
     }
 
     /// @dev The receiver's uncounted credit from this money on hold becomes counted, and a later hold that carried part
-    ///  of it no longer carries: that part is its sender's own money now.
+    ///  of it no longer carries: that part is its sender's own money now, reserved in the later hold from here on.
     /// @return carriedByTheLaterHold the part the later hold carried, which goes on its hold
     function _endTheCarry(ITickets.Ticket storage ticket, address token)
         private
@@ -573,6 +573,7 @@ library HoldLib {
         if (laterHoldId == bytes32(0)) return carriedByTheLaterHold;
         laterHold.carriedFrom = bytes32(0);
         laterHold.carriedAmount = 0;
+        ComplianceLedgerLib.layout().pendingTotal += carriedByTheLaterHold;
         ticket.carriedBy = bytes32(0);
     }
 
@@ -654,7 +655,7 @@ library HoldLib {
         // Effects
         if (creditBack != 0) _giveTheCarriedCreditBack(ticket, creditBack, token);
         ticket.moved -= returned;
-        ComplianceLedgerLib.releasePendingTotal(returned);
+        ComplianceLedgerLib.releasePendingTotal(ownBack);
         bool nothingLeftOnHold = ticket.moved == 0;
         if (nothingLeftOnHold) TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
         if (!nothingLeftOnHold) {
@@ -741,8 +742,8 @@ library HoldLib {
         ticket.carriedFrom = bytes32(0);
         ticket.carriedAmount = 0;
         earlierHold.carriedBy = bytes32(0);
+        // The carried part leaves the earlier hold's reservation for this hold's, so the total does not move.
         earlierHold.moved -= carried;
-        ComplianceLedgerLib.releasePendingTotal(carried);
         if (earlierHold.moved == 0) TicketLib.moveTo(earlierHold, ITickets.TicketStatus.Done, token);
         if (_breaksARuleNow(move, carried)) {
             emit EventsLib.MoveBreachedRule(earlierHoldId, earlierHold.fromChainKey, carried);

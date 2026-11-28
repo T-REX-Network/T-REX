@@ -1065,9 +1065,9 @@ library TicketLib {
     ///  - `WaitingForApproval`, `Open`: the ask's `amountMax`, reserved in the ledger's total, against both
     ///    identities unless both wallets are one identity's, and against the sender's away wallet on the token. An
     ///    open bring home is one identity's two wallets, so it holds its amount in the total and on its away wallet;
-    ///  - `OnHold`: `moved`, reserved in the ledger's total, against the receiver's identity when the money goes
-    ///    to the receiver and the two wallets are not one identity's, and as on hold forward from the chain it left
-    ///    when it goes to the receiver. Written by {reserveTheHold} once the destination is known, since the rules
+    ///  - `OnHold`: `moved`, reserved in the ledger's total less what it carries of an earlier hold, against the
+    ///    receiver's identity when the money goes to the receiver and the two wallets are not one identity's, and as
+    ///    on hold forward from the chain it left when it goes to the receiver. Written by {reserveTheHold} once the destination is known, since the rules
     ///    judge the receiver between the ask's release and this write;
     ///  - `Cancelled`, `Done`: nothing.
     ///  The first two rows also count as one of the sender's identity's open tickets, see {ITickets-AskLimits}.
@@ -1087,7 +1087,7 @@ library TicketLib {
     /// @dev Writes the `OnHold` row of {moveTo}'s table, once `secondHalfToKey` names where the money goes.
     function reserveTheHold(ITickets.Ticket storage ticket) internal {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
-        ledger.pendingTotal += ticket.moved;
+        ledger.pendingTotal += _ownOnHold(ticket);
         if (_holdGoesForward(ticket)) ledger.onHoldForward[ticket.fromChainKey] += ticket.moved;
         if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] += ticket.moved;
     }
@@ -1105,9 +1105,15 @@ library TicketLib {
     /// @dev Gives back the `OnHold` row of {moveTo}'s table.
     function _releaseTheHold(ITickets.Ticket storage ticket) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
-        ledger.pendingTotal -= ticket.moved;
+        ledger.pendingTotal -= _ownOnHold(ticket);
         if (_holdGoesForward(ticket)) ledger.onHoldForward[ticket.fromChainKey] -= ticket.moved;
         if (_holdReservesForTheReceiver(ticket)) ledger.pendingIn[ticket.toIdentity] -= ticket.moved;
+    }
+
+    /// @dev The money on hold that is the hold's own: what it carries of an earlier hold's credit stays reserved in
+    ///  that earlier hold and is not held a second time, until it becomes this hold's own.
+    function _ownOnHold(ITickets.Ticket storage ticket) private view returns (uint256) {
+        return ticket.moved - ticket.carriedAmount;
     }
 
     /// @dev Whether the money on hold of a ticket goes on to its receiver. Money on hold with no ticket goes to

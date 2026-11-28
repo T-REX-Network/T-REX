@@ -11,6 +11,7 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
+import { Utils } from "test/unit/helpers/Utils.sol";
 
 /// @dev A receipt no ticket home sent answers: an id home has no record of, after a home reorg dropped the ask, or a
 ///      ticket home wrote and never sent. Home blocks nobody for it: the amount goes on hold under the sender with no
@@ -642,6 +643,29 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(charlieSat)), 0);
         _assertHomeAgreesWithPolygon();
         _assertPositionsAreTheSupply();
+    }
+
+    /// @notice The carried part is not held a second time: two holds on one wallet's credit reserve in the ledger's
+    ///         total only the money actually on hold, and the carried part joins the later hold's reservation when it
+    ///         becomes its own.
+    function test_receiveReceipt_reservesOnlyTheMoneyOnHold_whenALaterHoldCarriesTheCredit() public {
+        (bytes32 aliceId, bytes32 bobId) = _bookTwoRelatedDroppedAsks();
+        assertEq(boundCompliance.ticketOf(bobId).carriedAmount, TWO, "bob's hold carries alice's credit");
+        assertEq(token.totalOnHold(), TWO, "only alice's hold holds tokens");
+        assertEq(_reservedTotal(), token.totalOnHold(), "the reserved total is the money on hold");
+
+        _askAgain(aliceSat, bobSat, TWO, _lastAliceSalt);
+
+        _assertStatus(aliceId, ITickets.TicketStatus.Done, "alice's hold is taken");
+        assertEq(token.onHoldOf(bobId), TWO, "the carried part is bob's own now");
+        assertEq(_reservedTotal(), token.totalOnHold(), "and reserved in bob's hold");
+    }
+
+    /// @dev The ledger's reserved total, read from its `erc3643.storage.ComplianceLedger` namespace: it has no view.
+    function _reservedTotal() private view returns (uint256) {
+        bytes32 base = Utils.erc7201("erc3643.storage.ComplianceLedger");
+        uint256 pendingTotalField = 5;
+        return uint256(vm.load(address(boundCompliance), bytes32(uint256(base) + pendingTotalField)));
     }
 
     /// @notice Taking the earlier hold adds the carried part to the later hold: the one path by which money on hold
