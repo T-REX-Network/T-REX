@@ -895,10 +895,10 @@ library ReceiptLib {
         TicketLib.requireTokenRunning(token);
     }
 
-    /// @dev No receipt in the read. A receipt waiting at home for the latest half says otherwise, so it is read again
-    ///  instead. Then an open move, or one waiting for approval, is cancelled here, whether its chain is blocked or
-    ///  not. Money on hold with no ticket is {HoldLib}'s, and any other half {SecondHalfLib}'s, while neither the
-    ///  half's chain nor the sender's is blocked.
+    /// @dev No receipt in the read, so the away chain's own clock decides. A receipt waiting at home on the closed
+    ///  route can never be applied there, so it does not hold the close. An open move, or one waiting for approval, is
+    ///  cancelled here, whether its chain is blocked or not. Money on hold with no ticket is {HoldLib}'s, and any
+    ///  other half {SecondHalfLib}'s, while neither the half's chain nor the sender's is blocked.
     /// @return returnedAmount what goes back to the sender
     function _closeOnTheAwayClock(
         bytes32 ticketId,
@@ -909,9 +909,6 @@ library ReceiptLib {
     ) private returns (uint256 returnedAmount) {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         ITickets.Ticket storage ticket = store.validations[ticketId];
-        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, ticket.half);
-        bool aReceiptWaits = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
-        require(!aReceiptWaits, ErrorsLib.ApplyWaitingReceiptFirst(ticketId, chainKey));
         require(WalletKeyLib.canonicalKey(receiver) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
 
         bool openOrWaiting =

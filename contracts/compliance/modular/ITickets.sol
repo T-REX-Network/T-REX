@@ -894,9 +894,8 @@ interface ITickets {
     /// - A stored receipt for `ticketId`, which home applies, with that chain not blocked; otherwise reverts with
     ///   `ValidationBodyMismatch` (a receipt home would refuse as bad, or keep waiting, is never taken from a read) or
     ///   `AwayChainBlocked`.
-    /// With no stored receipt:
-    /// - No receipt waiting under the latest half; otherwise reverts with `ApplyWaitingReceiptFirst`: the read and
-    ///   home disagree, and the receipt read again applies it.
+    /// With no stored receipt, the away chain's own clock decides; a receipt waiting at home on the closed route can
+    /// never be applied, so it does not hold the close:
     /// - `receiver` with the key of the ticket's receiver; otherwise reverts with `ValidationBodyMismatch`.
     /// - One of the cases above; otherwise reverts with `TicketNotCancellable`.
     /// - For an open move or one waiting for approval, no hostile change running on its chain; otherwise reverts with

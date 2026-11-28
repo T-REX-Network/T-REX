@@ -79,9 +79,9 @@ contract CloseByHandTest is HoldsSuiteTest {
         );
     }
 
-    /// @notice A receipt that waits at home under the half says the read is wrong when it reads nothing: the read
-    ///         again, with that receipt, applies it.
-    function test_closeByHand_appliesAWaitingReceiptInsteadOfReturning() public {
+    /// @notice A receipt above zero that waits at home under the half is also stored on the away chain, so the read
+    ///         of that chain carries it, and close by hand applies it: nothing is returned.
+    function test_closeByHand_appliesTheStoredReceipt_whileItAlsoWaitsAtHome() public {
         bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(EIGHT);
         uint8 half = boundCompliance.ticketOf(ticketId).half;
         vm.prank(agent);
@@ -92,11 +92,6 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.prank(agent);
         boundCompliance.unblockAwayChain(optimism);
         _closeEvmChain(token, OPTIMISM);
-        uint64 pastTheHalf = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
-
-        vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, ticketId, optimism));
-        boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(pastTheHalf));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.WaitingReceiptApplied(halfKey, optimism);
@@ -109,6 +104,35 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "applied, nothing returned");
         assertEq(token.awayBalanceOf(bobOptimismSat), EIGHT);
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - EIGHT);
+    }
+
+    /// @notice Optimism answers the move out with zero once it expired, and that answer waits at home under a block.
+    ///         Optimism's route is then closed, so the answer can never be applied: it does not hold the close, and
+    ///         past the half's valid until on optimism's clock the money goes back to alice.
+    function test_closeByHand_returns_whileAZeroAnswerWaitsOnTheClosedRoute() public {
+        bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(EIGHT);
+        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, held.half);
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(optimism);
+        vm.warp(held.secondHalfValidUntil);
+        _relayAll(optimismGateway); // the move out expired unexecuted; optimism's zero answer waits under the block
+        assertTrue(boundCompliance.waitingReceiptOf(halfKey).bodyHash != bytes32(0), "the zero answer waits");
+        assertEq(boundCompliance.waitingReceiptOf(halfKey).amount, 0, "it answers zero");
+        vm.prank(agent);
+        boundCompliance.unblockAwayChain(optimism);
+        _closeEvmChain(token, OPTIMISM);
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(ticketId, EIGHT, uint64(block.number), held.secondHalfValidUntil);
+        _closeByHand(ticketId, bobOptimismSat, _reading(held.secondHalfValidUntil));
+
+        ITickets.Ticket memory returning = boundCompliance.ticketOf(ticketId);
+        assertEq(returning.secondHalfToKey, WalletKeyLib.canonicalKey(aliceSat), "the money goes back to alice");
+        _relayAll(polygonGateway);
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned to alice on polygon");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice has her 8 back");
+        assertEq(token.awayBalanceOf(bobOptimismSat), 0, "bob was never minted anything");
     }
 
     function test_closeByHand_recordsAStoredReceiptForAnIdWithNoRecord() public {
