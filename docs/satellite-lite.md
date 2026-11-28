@@ -405,8 +405,9 @@ on the bridge and peer that brought it, so one from a bridge distrusted meanwhil
   wallets and relies on this.
 - **Gateway fees.** The token forwards no value to the gateway, so only gateway adapters that require no value from
   the sender are supported in this release.
-- **Permanent loss of a trusted gateway or peer** with instructions or validations outstanding needs a separately
-  reviewed migration procedure; it is not covered here.
+- **A chain that cannot be read.** A lost bridge or away token is handled by closing the receipt route and closing by
+  hand (see "When a half is never answered"). A chain that is really dead, with no RPC and no final block, cannot be
+  read, and what it holds then stays a human decision.
 - **A home wallet unlinked or no longer verified after a bring home was written:** what the away token burned goes
   back to the away wallet by a `MOVE_OUT`; the agent brings it home again to a wallet of the identity. An identity
   deleted while a satellite position is outstanding is re-registered first.
