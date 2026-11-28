@@ -881,7 +881,9 @@ interface ITickets {
     ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit. Each
     ///   move counts for the identity its receiver has at the close, not the one read when the receipt was booked.
     ///   The rules are asked again about each move; one they refuse is announced with `MoveBreachedRule`, never
-    ///   refused, since the away token already made it.
+    ///   refused, since the away token already made it. Once its cancel's bring home burned some of it, and the move
+    ///   out of that part back to the sender is past its valid until on that chain's clock, or never left: only what
+    ///   burned is minted to the sender's identity contract, and the rest stays on hold, short.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

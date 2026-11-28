@@ -942,6 +942,99 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertPositionsAreTheSupply();
     }
 
+    /// @notice Money moved inside polygon is cancelled: the bring home burns all 4 from bob, and the move out of
+    ///         those 4 back to alice is out to polygon when its route closes. Past that half's valid until on
+    ///         polygon's clock it can no longer mint there, so the 4 are minted to alice's identity contract.
+    function test_closeByHand_mintsWhatTheCancelBurnedToTheSendersIdentityContract_whenItsReturnIsOut() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _cancelHold(ticketId, bobSat);
+        _relayNext(polygonGateway); // polygon burns 4 from bob
+        _relayNext(polygonGateway); // its receipt lands; the move out of 4 back to alice is queued, undelivered
+        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
+        assertEq(held.secondHalfToKey, WalletKeyLib.canonicalKey(aliceSat), "the return to alice is out");
+        _closeEvmChain(token, POLYGON);
+        uint64 returnValidUntil = held.secondHalfValidUntil;
+        uint256 supplyBefore = token.totalSupply();
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.AwayClockBeforeValidUntil.selector, ticketId, returnValidUntil - 1, returnValidUntil
+            )
+        );
+        boundCompliance.closeByHand(ticketId, bobSat, _reading(returnValidUntil - 1));
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(ticketId, FOUR, uint64(block.number), returnValidUntil);
+        _closeByHand(ticketId, bobSat, _reading(returnValidUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        assertEq(token.onHoldOf(ticketId), 0, "nothing left on hold");
+        assertEq(token.totalOnHold(), 0, "nothing on hold at all");
+        assertEq(token.totalSupply(), supplyBefore, "the supply does not move");
+        _assertPositionsAreTheSupply();
+    }
+
+    /// @notice The cancel burned 1 of 2 from bob, who had spent the other 1 on polygon: only the 1 that burned is
+    ///         minted to alice's identity contract, and the other stays on hold, short, until what bob still holds as
+    ///         uncounted credit is applied as the move inside polygon it was.
+    function test_closeByHand_mintsOnlyWhatTheCancelBurned_andKeepsTheRestOnHold() public {
+        (bytes32 aliceId,) = _bookAliceAndLetBobSpend(1);
+        vm.warp(boundCompliance.ticketOf(aliceId).stopWaitingAt);
+        _cancelHold(aliceId, bobSat);
+        _relayNext(polygonGateway); // polygon burns the 1 bob still holds
+        _relayNext(polygonGateway); // its receipt lands; the move out of 1 back to alice is queued, undelivered
+        _closeEvmChain(token, POLYGON);
+        uint64 returnValidUntil = boundCompliance.ticketOf(aliceId).secondHalfValidUntil;
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(aliceId, 1, uint64(block.number), returnValidUntil);
+        _closeByHand(aliceId, bobSat, _reading(returnValidUntil));
+
+        _assertStatus(aliceId, ITickets.TicketStatus.OnHold, "the rest stays on hold");
+        assertEq(token.onHoldOf(aliceId), 1, "1 left on hold");
+        assertEq(token.balanceOf(address(aliceIdentity)), 1, "only what burned is minted to alice's identity contract");
+
+        _closeByHand(aliceId, bobSat, _reading(returnValidUntil));
+
+        _assertStatus(aliceId, ITickets.TicketStatus.Done, "the rest applied inside polygon");
+        assertEq(token.awayBalanceOf(bobSat), 1, "bob is counted what he still held");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
+        assertEq(token.balanceOf(address(aliceIdentity)), 1, "nothing more minted to alice");
+    }
+
+    /// @notice Polygon dies before the bring home's receipt lands. Close by hand applies the stored receipt, and the
+    ///         move out back to alice cannot leave on the closed route: it stays owed, never sent. A second close by
+    ///         hand, with nothing stored, mints what burned to alice's identity contract.
+    function test_closeByHand_mintsWhatTheCancelBurned_whenItsReturnCouldNeverLeave() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _cancelHold(ticketId, bobSat);
+        _relayNext(polygonGateway); // polygon burns 4 from bob
+        polygonGateway.drop(polygonGateway.queueLength() - 1); // its receipt is lost
+        _closeEvmChain(token, POLYGON);
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, boundCompliance.ticketOf(ticketId).half);
+        _closeByHand(
+            ticketId,
+            bobSat,
+            _readingWith(polygonLite.storedReceipt(uint8(MessageTypesLib.Message.BRING_HOME), halfKey))
+        );
+        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
+        assertTrue(held.secondHalfOwed, "the return to alice never left");
+        assertEq(held.secondHalfToKey, WalletKeyLib.canonicalKey(aliceSat), "it goes to alice");
+
+        _closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        assertEq(token.totalOnHold(), 0, "nothing on hold");
+        _assertPositionsAreTheSupply();
+    }
+
     /* ----- Helpers ----- */
 
     function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {
