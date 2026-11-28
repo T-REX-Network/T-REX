@@ -593,9 +593,8 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         assertEq(module.requestOf(address(boundCompliance), id).amountMax, 0, "nobody was asked");
     }
 
-    /// @notice The approver list does not change while a request waits: what was approved so far was approved under
-    ///         the list in place, and a module setting changes only while nothing is reserved.
-    function test_setApprovers_reverts_when_aRequestIsWaiting() public {
+    /// @notice The approver list changes while a request waits: a change of approvers is a setting like any other.
+    function test_setApprovers_changesTheList_whileARequestIsWaiting() public {
         _setApprovers(backend, riskDesk);
         bytes32 id = _request(10, 150);
         _approve(backend, id, 150);
@@ -603,34 +602,28 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         address[] memory approvers = new address[](1);
         approvers[0] = riskDesk;
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.callModuleFunction(
             abi.encodeCall(AsyncApprovalModule.setApprovers, (approvers)), address(module)
         );
 
-        vm.warp(block.timestamp + VALIDITY_WINDOW);
-        boundCompliance.cancelTickets(_ids(id));
-        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
+        assertEq(module.approversOf(address(boundCompliance)).length, 1, "the new list");
+        assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.WaitingForApproval));
     }
 
-    /// @notice The module is not removed while a request waits for it: the rules a ticket was asked under stay
-    ///         bound until it ends. Once the request is cancelled past its deadline, with asks paused, it goes.
-    function test_removeModule_reverts_when_aRequestIsWaiting() public {
+    /// @notice The module is removed while a request waits for it, with asks paused: the request keeps waiting
+    ///         and is cancelled past its deadline.
+    function test_removeModule_removes_whileARequestIsWaiting() public {
         bytes32 waiting = _request(10, 150);
         vm.startPrank(deployer);
         boundCompliance.setAsksPaused(bytes32(0), true);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.removeModule(address(module));
         vm.stopPrank();
 
+        assertFalse(boundCompliance.isModuleBound(address(module)));
         assertEq(uint8(boundCompliance.statusOf(waiting)), uint8(ITickets.TicketStatus.WaitingForApproval));
         vm.warp(block.timestamp + VALIDITY_WINDOW);
         boundCompliance.cancelTickets(_ids(waiting));
         assertEq(uint8(boundCompliance.statusOf(waiting)), uint8(ITickets.TicketStatus.Cancelled));
-
-        vm.prank(deployer);
-        boundCompliance.removeModule(address(module));
-        assertFalse(boundCompliance.isModuleBound(address(module)));
     }
 
     /// @notice Unbound, requests are issued at once again: the module is the whole switch.

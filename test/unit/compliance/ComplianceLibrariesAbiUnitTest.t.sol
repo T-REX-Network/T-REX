@@ -133,7 +133,6 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.ZeroDuration.selector, ErrorsLib.ZeroDuration.selector);
         assertEq(ITickets.ChainNotOpen.selector, ErrorsLib.ChainNotOpen.selector);
         assertEq(ITickets.UnknownTicket.selector, ErrorsLib.UnknownTicket.selector);
-        assertEq(ITickets.PerTicketCapLoweredTooEarly.selector, ErrorsLib.PerTicketCapLoweredTooEarly.selector);
         assertEq(
             ITickets.NonCanonicalInteroperableAddress.selector, ErrorsLib.NonCanonicalInteroperableAddress.selector
         );

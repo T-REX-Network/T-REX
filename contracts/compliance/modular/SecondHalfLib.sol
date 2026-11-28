@@ -443,7 +443,7 @@ library SecondHalfLib {
         ticket.status = ITickets.TicketStatus.Open;
         ticket.written = true;
         ticket.secondHalfToKey = ticket.fromKey;
-        ticket.relocation = !ComplianceLedgerLib.reservePending(identity, identity, amount);
+        ticket.relocation = !ComplianceLedgerLib.reservePending(identity, identity, chainKey, amount);
 
         if (ticket.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = ticket.stopWaitingAt;
         store.identityAsks[identity].openTickets += 1;

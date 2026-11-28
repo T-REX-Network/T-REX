@@ -92,6 +92,8 @@ library ComplianceLedgerLib {
         /// The money on hold that left each chain and goes on to its receiver: it left that chain already, but is
         /// told done only once the receiver's chain answers.
         mapping(bytes32 chainKey => uint256 amount) onHoldForward;
+        /// What open tickets reserve out of each chain, at `amountMax`: the tickets that may still leave it.
+        mapping(bytes32 chainKey => uint256 amount) reservedFrom;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.ComplianceLedger")) - 1)) & ~bytes32(uint256(0xff));
@@ -102,14 +104,16 @@ library ComplianceLedgerLib {
     ///  total counts every validation, since the token holds a reservation for each until the compliance closes
     ///  it. The identities' rows count only when ownership really moves: relocating tokens between two wallets of
     ///  one identity never eats that identity's own room.
+    ///  The chain the ticket leaves counts it too, so a limit on what leaves a chain sees every ticket open there.
     /// @return identitiesReserved whether the identities' rows were written, which the caller records on the
     ///  validation
-    function reservePending(address fromIdentity, address toIdentity, uint256 amountMax)
+    function reservePending(address fromIdentity, address toIdentity, bytes32 fromChainKey, uint256 amountMax)
         internal
         returns (bool identitiesReserved)
     {
         Ledger storage ledger = layout();
         ledger.pendingTotal += amountMax;
+        ledger.reservedFrom[fromChainKey] += amountMax;
         if (isRelocation(fromIdentity, toIdentity)) return false;
         ledger.pendingOut[fromIdentity] += amountMax;
         ledger.pendingIn[toIdentity] += amountMax;

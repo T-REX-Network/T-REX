@@ -112,6 +112,11 @@ abstract contract ComplianceLedger is IComplianceLedger {
     }
 
     /// @inheritdoc IComplianceLedger
+    function reservedFromOf(bytes32 chainKey) external view returns (uint256) {
+        return _ledger().reservedFrom[chainKey];
+    }
+
+    /// @inheritdoc IComplianceLedger
     function ownerOf(address wallet) external view returns (address) {
         return _ledger().ownerOf[wallet];
     }

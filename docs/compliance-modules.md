@@ -256,16 +256,16 @@ make leave in a window, per compliance:
   `type(uint256).max`. A chain with no limit set is neither limited nor counted.
 - `checkTransfer` reads the chain the money leaves from `data` and answers the room left on it in the current window,
   less the money on hold forward from it (`onHoldForwardOf(chainKey)` on the compliance: money that left the chain
-  toward a receiver on another chain, not done yet): the ask is narrowed to it, and refused once nothing is left. So is home's decision for a second half: a move whose
+  toward a receiver on another chain, not done yet) and less what the tickets open there reserve
+  (`reservedFromOf(chainKey)`, at their `amountMax`): the ask is narrowed to it, and refused once nothing is left. So is home's decision for a second half: a move whose
   chain is full by then goes back to its sender. A native movement carries no chain and is never limited.
 - `afterTransfer` counts a move once, when it is done, on the chain it left. A window starts at the first move counted
   after the last window ended, and the next window opens the chain again.
 
 Limits, stated plainly:
 
-- **Open tickets do not count.** Only finished moves and money on hold forward count. Tickets open at the same time
-  each see the same room, so one window can carry the limit plus what was open when it filled. The ask limits per
-  identity bound how many can be open.
+- **Open tickets count at their maximum.** Tickets open at the same time share one room, so what is open, on hold
+  forward and done in a window never passes the limit, a relocation aside.
 - **A relocation is counted but never narrowed.** The rules are not asked about a move between one identity's own
   wallets, so it passes whatever the room, and fills the room of the moves after it.
 - **Counting starts at binding,** and for a chain at its first limit. An unbind discards the limits and the counts.

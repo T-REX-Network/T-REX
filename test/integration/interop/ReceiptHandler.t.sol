@@ -456,23 +456,15 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketLimitsOf(optimism).perTicketCap, TICKET_CAP, "per away chain");
     }
 
-    /// @notice A ticket sent under the higher cap may still be executed until its valid until, and its honest
-    ///         receipt would then pass the lower cap: the cap is lowered only once that time has come. Raising it is
-    ///         never held back.
-    function test_setTicketLimits_reverts_when_theCapIsLoweredBeforeTheLastTicketIsPastValidUntil() public {
+    /// @notice The per-ticket cap is lowered at once, even while a ticket sent under the higher cap may still be
+    ///         executed: waiting for that ticket's valid until is the operator's step, not a check.
+    function test_setTicketLimits_lowersTheCapAtOnce_whileATicketSentUnderTheHigherCapIsOpen() public {
         _setPerTicketCap(polygon, 50);
         bytes32 ticketId = _ask(aliceOnPolygon, bobOnPolygon, 10, 50);
-        uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
 
-        vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PerTicketCapLoweredTooEarly.selector, polygon, validUntil));
-        boundCompliance.setTicketLimits(polygon, 40, 40);
-
-        _setPerTicketCap(polygon, 60);
-        _setPerTicketCap(optimism, 0);
-
-        vm.warp(validUntil);
         _setPerTicketCap(polygon, 40);
+
         assertEq(boundCompliance.ticketLimitsOf(polygon).perTicketCap, 40);
     }
 

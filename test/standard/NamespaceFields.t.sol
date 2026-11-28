@@ -319,6 +319,7 @@ contract NamespaceFieldsTest is Test {
         ledger.ownerOf[ALICE] = BOB;
         ledger.pendingTotal = 14;
         ledger.onHoldForward[KEY] = 15;
+        ledger.reservedFrom[KEY] = 16;
 
         assertEq(_word(_entry(_field(base, 0), _key(ALICE))), 11, "position");
         assertEq(_word(_entry(_field(base, 1), _key(ALICE))), 12, "pendingIn");
@@ -326,6 +327,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_field(base, 4), _key(ALICE))), uint256(uint160(BOB)), "ownerOf");
         assertEq(_word(_field(base, 5)), 14, "pendingTotal");
         assertEq(_word(_entry(_field(base, 6), KEY)), 15, "onHoldForward");
+        assertEq(_word(_entry(_field(base, 7), KEY)), 16, "reservedFrom");
     }
 
     function test_TransferValidation() public {
@@ -347,7 +349,6 @@ contract NamespaceFieldsTest is Test {
         waiting.arrivedAt = 41;
         validationStorage.receiptHashes[KEY] = bytes32(uint256(35));
         validationStorage.ticketLimits[KEY] = ITickets.TicketLimits({ perTicketCap: 36, perWindowCap: 37 });
-        validationStorage.latestValidUntilSent[KEY] = 38;
         validationStorage.blockedAwayChains[KEY] = true;
         validationStorage.measuredTimes[KEY] =
             ITickets.MeasuredTimes({ clockLead: 3, fullFinalityDelivery: 5, reorgSlotShift: 6 });
@@ -381,23 +382,22 @@ contract NamespaceFieldsTest is Test {
         bytes32 limits = _entry(_field(base, 5), KEY);
         assertEq(_word(_field(limits, 0)), 36, "ticketLimits.perTicketCap");
         assertEq(_word(_field(limits, 1)), 37, "ticketLimits.perWindowCap");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 38, "latestValidUntilSent");
-        assertEq(_word(_entry(_field(base, 7), KEY)), 1, "blockedAwayChains");
-        bytes32 times = _entry(_field(base, 8), KEY);
+        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "blockedAwayChains");
+        bytes32 times = _entry(_field(base, 7), KEY);
         assertEq(_word(_field(times, 0)), 3 | (5 << 64) | (6 << 128), "measuredTimes");
         // latestStopWaitingAt fills bytes 0 to 7, asksPaused byte 8.
-        assertEq(_word(_field(base, 9)), 44 | (1 << 64), "latestStopWaitingAt and asksPaused");
-        assertEq(_word(_field(base, 10)), 45 | (46 << 32) | (47 << 64), "askLimits, the three counts");
-        assertEq(_word(_field(base, 11)), 48, "askLimits.smallestAmount");
-        assertEq(_word(_entry(_field(base, 12), _key(ALICE))), 49, "askLimitOverrides");
-        assertEq(_word(_entry(_field(base, 13), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
-        assertEq(_word(_entry(_field(base, 14), KEY)), 53, "openBringHome");
-        assertEq(_word(_entry(_field(base, 15), KEY)), 54, "uncountedCredit");
-        assertEq(_word(_entry(_field(base, 16), KEY)), 55, "uncountedCreditFrom");
-        bytes32 volume = _entry(_field(base, 17), KEY);
+        assertEq(_word(_field(base, 8)), 44 | (1 << 64), "latestStopWaitingAt and asksPaused");
+        assertEq(_word(_field(base, 9)), 45 | (46 << 32) | (47 << 64), "askLimits, the three counts");
+        assertEq(_word(_field(base, 10)), 48, "askLimits.smallestAmount");
+        assertEq(_word(_entry(_field(base, 11), _key(ALICE))), 49, "askLimitOverrides");
+        assertEq(_word(_entry(_field(base, 12), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
+        assertEq(_word(_entry(_field(base, 13), KEY)), 53, "openBringHome");
+        assertEq(_word(_entry(_field(base, 14), KEY)), 54, "uncountedCredit");
+        assertEq(_word(_entry(_field(base, 15), KEY)), 55, "uncountedCreditFrom");
+        bytes32 volume = _entry(_field(base, 16), KEY);
         assertEq(_word(_field(volume, 0)), 56, "ticketRouteVolumes.windowStart");
         assertEq(_word(_field(volume, 1)), 57, "ticketRouteVolumes.amount");
-        assertEq(_word(_entry(_field(base, 18), KEY)), 1, "asksPausedOn");
+        assertEq(_word(_entry(_field(base, 17), KEY)), 1, "asksPausedOn");
     }
 
     function _writeTicket(ITickets.Ticket storage ticket) private {

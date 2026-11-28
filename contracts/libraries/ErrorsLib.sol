@@ -311,9 +311,6 @@ library ErrorsLib {
     /// @dev The asked maximum is above what the sending wallet has free: the id is built from the asked maximum, so it
     ///  is refused rather than narrowed.
     error RequestAboveBalance(bytes wallet, uint256 free, uint256 requestedMax);
-    /// @dev The per-ticket cap toward `chainKey` is lowered while a ticket sent under the higher cap may still be
-    ///  executed: an honest receipt of it would then block that away chain. Allowed from `allowedAt`.
-    error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error AwayChainBlocked(bytes32 chainKey);

@@ -9,10 +9,10 @@ import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 
-/// @dev The modules never change under a reserved ticket: the rules that judged its ask and the trackers told of its
-///      move stay the ones it was asked under. Whether a ticket waits for an approver is written at its ask, so an
-///      approval module is bound, removed or filed again only while asks are paused for the whole token. A forced
-///      removal of another module stays open as the repair for a module that reverts everywhere.
+/// @dev The modules change under a reserved ticket like any setting: only the unbind of the compliance waits for the
+///      tickets. Whether a ticket waits for an approver is written at its ask, so an approval module is bound,
+///      removed or filed again only while asks are paused for the whole token, and a ticket already written keeps
+///      what was written for it.
 contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
 
     uint256 internal constant ALICE_AWAY_BALANCE = 1000;
@@ -50,33 +50,33 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         token.unpause();
     }
 
-    /* ----- No change while a ticket is reserved ----- */
+    /* ----- A change while a ticket is reserved ----- */
 
-    /// @notice One open ticket, asked with no approval module: binding any module is refused, an approval module
-    ///         included, so the ticket stays one that never waited for approval.
-    function test_addModule_reverts_when_ticketsAreStillReserved() public {
+    /// @notice One open ticket, asked with no approval module: an approval module binds while asks are paused, and
+    ///         the ticket stays one that never waited for approval, as written at its ask.
+    function test_addModule_bindsAnApprovalModule_whileATicketIsReserved() public {
         bytes32 ticketId = _askOneTicket();
         assertFalse(boundCompliance.ticketOf(ticketId).waitedForApproval);
         vm.startPrank(deployer);
         boundCompliance.setAsksPaused(bytes32(0), true);
 
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.addModule(address(approvalModule));
         vm.stopPrank();
 
-        assertFalse(boundCompliance.isModuleBound(address(approvalModule)));
+        assertTrue(boundCompliance.isModuleBound(address(approvalModule)));
         assertFalse(boundCompliance.ticketOf(ticketId).waitedForApproval, "as written at the ask");
     }
 
-    function test_removeModule_reverts_when_ticketsAreStillReserved() public {
+    function test_removeModule_removes_whileATicketIsReserved() public {
         _askOneTicket();
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.removeModule(address(capRule));
+
+        assertFalse(boundCompliance.isModuleBound(address(capRule)));
     }
 
-    function test_addAndSetModule_reverts_when_ticketsAreStillReserved() public {
+    function test_addAndSetModule_binds_whileATicketIsReserved() public {
         _askOneTicket();
         CappedRecipientModule another = CappedRecipientModule(
             address(
@@ -87,28 +87,28 @@ contract ModuleChangesUnderTicketsTest is InteropSuiteTest {
         settings[0] = abi.encodeCall(CappedRecipientModule.setCap, (CAP));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.addAndSetModule(address(another), settings);
+
+        assertTrue(boundCompliance.isModuleBound(address(another)));
     }
 
-    function test_callModuleFunction_reverts_when_ticketsAreStillReserved() public {
+    function test_callModuleFunction_changesASetting_whileATicketIsReserved() public {
         _askOneTicket();
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.callModuleFunction(abi.encodeCall(CappedRecipientModule.setCap, (CAP)), address(capRule));
     }
 
-    function test_resyncModuleTypes_reverts_when_ticketsAreStillReserved() public {
+    function test_resyncModuleTypes_files_whileATicketIsReserved() public {
         _askOneTicket();
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
         boundCompliance.resyncModuleTypes(address(capRule));
+
+        assertTrue(boundCompliance.isModuleBound(address(capRule)));
     }
 
-    /// @notice The forced removal of a module that is not an approval module stays open under an open ticket: it
-    ///         is the repair for a module that reverts on every receipt.
+    /// @notice The forced removal stays the named repair for a module that reverts on every receipt.
     function test_forceRemoveModule_succeeds_when_ticketsAreStillReserved() public {
         bytes32 ticketId = _askOneTicket();
 

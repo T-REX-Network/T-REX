@@ -65,8 +65,8 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
 
     /* ----- The room on one chain ----- */
 
-    /// @notice 70 left Polygon in the window: an ask from Polygon for [10, 50] is narrowed to the 30 left, and one
-    ///         for [40, 50] has no room left in its range.
+    /// @notice 70 left Polygon in the window: an ask from Polygon for [10, 50] is narrowed to the 30 left, and, with
+    ///         that ticket open, one for [40, 50] finds no room left.
     function test_checkTransfer_narrowsTheTicket_whenTheAwayChainIsNearItsVolumeLimit() public {
         uint256 alreadyLeft = 70;
         uint256 roomLeft = LIMIT - alreadyLeft;
@@ -76,7 +76,7 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(narrowed).amountMax, roomLeft);
 
         vm.prank(address(aliceIdentity));
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 40, roomLeft));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 40, 0));
         boundCompliance.askToMove(aliceSat, bobSat, 40, 50, "", _salt());
     }
 
@@ -160,12 +160,12 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
 
     /* ----- The second half and the receipt ----- */
 
-    /// @notice Another move from Polygon finishes between an ask toward Optimism and its first-half receipt, and
-    ///         fills Polygon: home's decision for the second half finds no room, and the money goes back to the
-    ///         sender, never minted to the receiver.
+    /// @notice A relocation from Polygon, issued whatever the room, finishes between an ask toward Optimism and its
+    ///         first-half receipt, and fills Polygon: home's decision for the second half finds no room, and the
+    ///         money goes back to the sender, never minted to the receiver.
     function test_checkTransfer_sendsTheMoneyBack_whenTheChainFilledBeforeTheSecondHalf() public {
         bytes32 toOptimism = _askFromPolygon(bobOnOptimism, 10, 50);
-        _moveInsidePolygon(LIMIT);
+        _relocateInsidePolygon(LIMIT);
 
         polygonBridge.relay(_liteSettles(polygonBridge, token, _settlement(toOptimism, aliceSat, bobOnOptimism, 50)));
 
@@ -176,11 +176,10 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
     }
 
     /// @notice Money home put on hold toward a receiver on Optimism has left Polygon before its second half is done:
-    ///         it takes room at once, so a second forward in the same window finds only what is left and goes back.
-    function test_checkTransfer_countsTheMoneyOnHoldForward_whenTwoForwardsComeInOneWindow() public {
+    ///         it takes room at once, so the next ask from Polygon in the same window is narrowed to what is left.
+    function test_checkTransfer_countsTheMoneyOnHoldForward() public {
         uint256 eachMove = 60;
         bytes32 firstForward = _askFromPolygon(bobOnOptimism, eachMove, eachMove);
-        bytes32 secondForward = _askFromPolygon(bobOnOptimism, eachMove, eachMove);
 
         polygonBridge.relay(
             _liteSettles(polygonBridge, token, _settlement(firstForward, aliceSat, bobOnOptimism, eachMove))
@@ -189,12 +188,24 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
         assertEq(first.secondHalfToKey, first.toKey, "the first goes on to the receiver");
         assertEq(_roomOn(polygon), LIMIT - eachMove, "it took room while on hold");
 
-        polygonBridge.relay(
-            _liteSettles(polygonBridge, token, _settlement(secondForward, aliceSat, bobOnOptimism, eachMove))
-        );
-        ITickets.Ticket memory second = boundCompliance.ticketOf(secondForward);
-        assertEq(second.secondHalfToKey, second.fromKey, "the second finds no room and goes back to the sender");
-        assertEq(_roomOn(polygon), LIMIT - eachMove, "money on hold back to the sender takes no room");
+        bytes32 nextAsk = _askFromPolygon(bobOnOptimism, 10, eachMove);
+        assertEq(boundCompliance.ticketOf(nextAsk).amountMax, LIMIT - eachMove, "narrowed to what is left");
+    }
+
+    /// @notice Two asks open at once share one room: the second sees what the first reserves, so the open tickets
+    ///         of a chain never carry more than its limit.
+    function test_checkTransfer_countsTheOpenTickets_ofTheChain() public {
+        uint256 firstAmount = 60;
+        bytes32 first = _askFromPolygon(bobSat, firstAmount, firstAmount);
+        assertEq(boundCompliance.reservedFromOf(polygon), firstAmount, "the first reserves out of Polygon");
+        assertEq(_roomOn(polygon), LIMIT - firstAmount);
+
+        bytes32 second = _askFromPolygon(bobSat, 10, firstAmount);
+        assertEq(boundCompliance.ticketOf(second).amountMax, LIMIT - firstAmount, "narrowed by the open ticket");
+
+        polygonBridge.relay(_liteSettles(polygonBridge, token, _settlement(first, aliceSat, bobSat, firstAmount)));
+        assertEq(boundCompliance.reservedFromOf(polygon), LIMIT - firstAmount, "the done ticket gave its share back");
+        assertEq(_roomOn(polygon), 0, "done and still open, the limit is reached");
     }
 
     /// @notice A move inside Polygon whose receipt finds no room left is applied all the same, since the tokens
@@ -202,14 +213,14 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
     function test_afterTransfer_countsAMoveInsideTheChain_thatBreachedTheLimitAtItsReceipt() public {
         uint256 lateMove = 50;
         bytes32 ticketId = _askFromPolygon(bobSat, 10, lateMove);
-        _moveInsidePolygon(LIMIT);
+        _relocateInsidePolygon(LIMIT);
         uint256 index = _liteSettles(polygonBridge, token, _settlement(ticketId, aliceSat, bobSat, lateMove));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.MoveBreachedRule(ticketId, polygon, lateMove);
         polygonBridge.relay(index);
 
-        assertEq(token.awayBalanceOf(bobSat), LIMIT + lateMove, "applied");
+        assertEq(token.awayBalanceOf(bobSat), lateMove, "applied");
         _setLimit(polygon, 2 * LIMIT, WINDOW);
         assertEq(_roomOn(polygon), 2 * LIMIT - LIMIT - lateMove, "and counted");
     }
@@ -291,15 +302,14 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
         volumeRule.setVolumeLimit(optimism, LIMIT, WINDOW);
     }
 
-    /// @notice A limit is set only while nothing is reserved: the rules a ticket was asked under stay until it ends.
-    function test_setVolumeLimit_reverts_when_aTicketIsOpen() public {
-        _askFromPolygon(bobSat, 10, 50);
+    /// @notice A limit is set while a ticket is open, and that ticket's reservation counts against the new one.
+    function test_setVolumeLimit_setsTheLimit_whileATicketIsOpen() public {
+        uint256 openAmount = 50;
+        _askFromPolygon(bobSat, 10, openAmount);
 
-        vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
-        boundCompliance.callModuleFunction(
-            abi.encodeCall(AwayChainVolumeModule.setVolumeLimit, (polygon, LIMIT, WINDOW)), address(volumeRule)
-        );
+        _setLimit(polygon, 2 * LIMIT, WINDOW);
+
+        assertEq(_roomOn(polygon), 2 * LIMIT - openAmount);
     }
 
     /// @notice An unbind discards the limits and the counts: a rebind starts with none.
@@ -359,6 +369,15 @@ contract AwayChainVolumeModuleTest is InteropSuiteTest {
     function _moveInsidePolygon(uint256 amount) private {
         bytes32 ticketId = _askFromPolygon(bobSat, amount, amount);
         polygonBridge.relay(_liteSettles(polygonBridge, token, _settlement(ticketId, aliceSat, bobSat, amount)));
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
+    }
+
+    /// @dev Alice relocates `amount` between her own wallets inside Polygon, issued whatever the room, and the away
+    ///  token's receipt lands: done, and counted.
+    function _relocateInsidePolygon(uint256 amount) private {
+        bytes memory aliceOther = _linkSatelliteWallet(aliceIdentity, POLYGON, makeAccount("aliceRelocatesTo"));
+        bytes32 ticketId = _askFromPolygon(aliceOther, amount, amount);
+        polygonBridge.relay(_liteSettles(polygonBridge, token, _settlement(ticketId, aliceSat, aliceOther, amount)));
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
     }
 

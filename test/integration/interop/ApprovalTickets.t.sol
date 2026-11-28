@@ -274,26 +274,6 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
-    /// @notice An approved ticket's first send counts toward the latest valid until sent to its chain: the per-ticket
-    ///         cap is lowered only once that valid until passed, or an honest copy sent under the higher cap would
-    ///         echo a maximum above the new one.
-    function test_setTicketLimits_reverts_when_theCapIsLoweredBeforeAnApprovedTicketsValidUntil() public {
-        bytes32 ticketId = _askAndApprove(bobSat, 50);
-        boundCompliance.sendTicket(ticketId, bobSat, "");
-        uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
-        uint256 lowerCap = 10;
-
-        vm.warp(validUntil - 1);
-        vm.prank(deployer);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PerTicketCapLoweredTooEarly.selector, polygon, validUntil));
-        boundCompliance.setTicketLimits(polygon, lowerCap, lowerCap);
-
-        vm.warp(validUntil);
-        vm.prank(deployer);
-        boundCompliance.setTicketLimits(polygon, lowerCap, lowerCap);
-        assertEq(boundCompliance.ticketLimitsOf(polygon).perTicketCap, lowerCap);
-    }
-
     /* ----- Cancel of a ticket never sent ----- */
 
     /// @notice Once the approver answered, a ticket nobody sent is not cancelled at its valid until: a reorg that

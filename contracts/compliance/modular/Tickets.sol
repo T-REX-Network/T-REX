@@ -214,13 +214,7 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     function _setTicketLimits(bytes32 chainKey, uint256 perTicketCap, uint256 perWindowCap) internal {
-        TicketLib.ValidationStorage storage store = _validationStorage();
-        TicketLimits storage limits = store.ticketLimits[chainKey];
-        bool lowersThePerTicketCap = perTicketCap < limits.perTicketCap;
-        if (lowersThePerTicketCap) {
-            uint64 allowedAt = store.latestValidUntilSent[chainKey];
-            require(block.timestamp >= allowedAt, ErrorsLib.PerTicketCapLoweredTooEarly(chainKey, allowedAt));
-        }
+        TicketLimits storage limits = _validationStorage().ticketLimits[chainKey];
         limits.perTicketCap = perTicketCap;
         limits.perWindowCap = perWindowCap;
         emit EventsLib.TicketLimitsSet(chainKey, perTicketCap, perWindowCap);

@@ -64,7 +64,7 @@ All notable changes to this project will be documented in this file.
     `erc3643.storage.TransferValidation` (the compliance) is rewritten from its first slot: `defaultValidityWindow`,
     `reconciliationWindows`, `issuancePaused`, `awaitedTerms`, `parkedLegs` and `reportedLegs` are gone,
     `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
-    `waitingReceipts`, `receiptHashes`, `ticketLimits`, `latestValidUntilSent`, `blockedAwayChains`,
+    `waitingReceipts`, `receiptHashes`, `ticketLimits`, `blockedAwayChains`,
     `measuredTimes`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
     `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
     `erc3643.storage.TREXMessaging` (the token) keeps every field at its slot and appends the new ones: `routes`
@@ -75,8 +75,9 @@ All notable changes to this project will be documented in this file.
     `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
     `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
     `lastRecallId`, `openRecall`, `settledProofs`, `lastDelegationId` and `delegations` from slot 6. The new
-    `erc3643.storage.AwayChainVolumeModule` belongs to a new module. `ComplianceLedger`, `TREXCompliance`,
-    `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are
+    `erc3643.storage.AwayChainVolumeModule` belongs to a new module. `erc3643.storage.ComplianceLedger` keeps its
+    fields and appends `onHoldForward` and `reservedFrom` at its end; `IComplianceLedger` gains `onHoldForwardOf`
+    and `reservedFromOf`, so its interface id changes. `TREXCompliance`, `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are
     unchanged.
 
 ### Added

@@ -80,8 +80,8 @@ import { IModule } from "./IModule.sol";
 ///
 /// The chain comes from the context's `data`, see {IModule-TransferContext}. A move is counted once, when the
 /// compliance tells it done. Money home put on hold toward a receiver on another chain already left its chain, so
-/// the room also leaves out what the compliance holds forward from it until that move is done. Tickets still open
-/// are not counted, so asks open at the same time each see the same room. A chain with no limit set is not limited
+/// the room also leaves out what the compliance holds forward from it until that move is done, and what the tickets
+/// still open there reserve, so asks open at the same time share one room. A chain with no limit set is not limited
 /// and not counted. Settings and counts are keyed by the bind nonce, so an unbind discards them.
 contract AwayChainVolumeModule is AbstractModuleUpgradeable, AccessManagedOwnableUpgradeable {
 
@@ -158,7 +158,8 @@ contract AwayChainVolumeModule is AbstractModuleUpgradeable, AccessManagedOwnabl
     }
 
     /// @inheritdoc IModule
-    /// @dev The room left on the chain the money leaves in its current window, less what is on hold forward from it.
+    /// @dev The room left on the chain the money leaves in its current window, less what is on hold forward from it
+    ///  and what its open tickets reserve.
     ///  No limit on a native movement, which carries no chain, nor on a chain with no limit set.
     function checkTransfer(TransferContext calldata ctx) external view override returns (uint256) {
         if (ctx.data.length == 0) return type(uint256).max;
@@ -172,8 +173,10 @@ contract AwayChainVolumeModule is AbstractModuleUpgradeable, AccessManagedOwnabl
         Volume storage volume = store.volumes[ctx.compliance][nonce][fromChainKey];
         uint256 doneInTheWindow = volume.amount;
         if (_windowIsOver(volume, limit.window)) doneInTheWindow = 0;
-        uint256 onHoldForward = IComplianceLedger(ctx.compliance).onHoldForwardOf(fromChainKey);
-        uint256 left = doneInTheWindow + onHoldForward;
+        IComplianceLedger ledger = IComplianceLedger(ctx.compliance);
+        uint256 onHoldForward = ledger.onHoldForwardOf(fromChainKey);
+        uint256 reservedByOpenTickets = ledger.reservedFromOf(fromChainKey);
+        uint256 left = doneInTheWindow + onHoldForward + reservedByOpenTickets;
         if (left >= limit.limitPerWindow) return 0;
         return limit.limitPerWindow - left;
     }

@@ -111,9 +111,6 @@ library TicketLib {
         mapping(bytes32 halfKey => bytes32 receiptHash) receiptHashes;
         /// The caps on tickets toward each away chain.
         mapping(bytes32 chainKey => ITickets.TicketLimits limits) ticketLimits;
-        /// The latest `validUntil` of a ticket sent toward each away chain: the per-ticket cap is lowered only
-        /// once it has passed.
-        mapping(bytes32 chainKey => uint64 validUntil) latestValidUntilSent;
         /// Away chains blocked by the pauser or by a bad receipt: no ticket goes to them, none of their tickets is
         /// cancelled, and their receipts wait.
         mapping(bytes32 chainKey => bool blocked) blockedAwayChains;
@@ -551,7 +548,7 @@ library TicketLib {
                 askBlockHash: draft.askBlockHash
             })
         );
-        _dispatch(token, ticketId, draft.fromChainKey, draft.validUntil, body);
+        _dispatch(token, ticketId, draft.fromChainKey, body);
     }
 
     /// @dev Answers a ticket awaiting approval, see {ITickets-answerApproval}. No rule runs again: every rule
@@ -651,7 +648,7 @@ library TicketLib {
                 askBlockHash: ticket.askBlockHash
             })
         );
-        _dispatch(token, ticketId, chainKey, ticket.validUntil, body);
+        _dispatch(token, ticketId, chainKey, body);
     }
 
     /// @dev Sends a ticket that left again: the ticket rebuilt from its record and the two envelopes, byte for byte,
@@ -971,7 +968,9 @@ library TicketLib {
         stored.status = ITickets.TicketStatus.Open;
         stored.written = true;
         // `reservePending` returns whether it reserved against the identities; it does not on a relocation.
-        stored.relocation = !ComplianceLedgerLib.reservePending(draft.fromIdentity, draft.toIdentity, draft.amountMax);
+        stored.relocation = !ComplianceLedgerLib.reservePending(
+            draft.fromIdentity, draft.toIdentity, draft.fromChainKey, draft.amountMax
+        );
 
         ValidationStorage storage store = layout();
         if (stored.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = stored.stopWaitingAt;
@@ -1009,17 +1008,10 @@ library TicketLib {
 
     /// @dev Sends a written ticket to the sender's away chain on the route chosen at its ask. When that chain already
     ///  answered an ask mined again after a reorg, the away token answers this copy with the receipt it stored. The
-    ///  token is the wire's only author: it pins the half and refuses a closed chain. As the compliance's DELEGATECALL target, this library
-    ///  reaches the token with the compliance as the caller. The latest valid until sent toward the chain is kept for
-    ///  the cap setter, see {ITickets-setTicketLimits}.
-    function _dispatch(address token, bytes32 ticketId, bytes32 fromChainKey, uint64 validUntil, bytes memory body)
-        private
-    {
-        ValidationStorage storage store = layout();
-        if (validUntil > store.latestValidUntilSent[fromChainKey]) {
-            store.latestValidUntilSent[fromChainKey] = validUntil;
-        }
-        ITickets.Ticket storage ticket = store.validations[ticketId];
+    ///  token is the wire's only author: it pins the half and refuses a closed chain. As the compliance's DELEGATECALL
+    ///  target, this library reaches the token with the compliance as the caller.
+    function _dispatch(address token, bytes32 ticketId, bytes32 fromChainKey, bytes memory body) private {
+        ITickets.Ticket storage ticket = layout().validations[ticketId];
         ticket.lastSentAt = uint64(block.timestamp);
         _sendOnItsRoute(token, ticket.onReceiptRoute, ticketId, fromChainKey, body);
     }
@@ -1154,12 +1146,13 @@ library TicketLib {
         return status == ITickets.TicketStatus.WaitingForApproval || status == ITickets.TicketStatus.Open;
     }
 
-    /// @dev Gives back `amount` of what a ticket reserved: in the ledger's total, against the identities unless both
+    /// @dev Gives back `amount` of what a ticket reserved: in the ledger's total and its chain's, against the identities unless both
     ///  wallets are one identity's, and against the sending away wallet on the token. {moveTo} gives back a whole
     ///  row; an approver's narrowing gives back part of it. A home wallet reserved nothing on the token.
     function _release(ITickets.Ticket storage ticket, uint256 amount, address token) private {
         ComplianceLedgerLib.Ledger storage ledger = ComplianceLedgerLib.layout();
         ledger.pendingTotal -= amount;
+        ledger.reservedFrom[ticket.fromChainKey] -= amount;
         if (!ticket.relocation) {
             ledger.pendingOut[ticket.fromIdentity] -= amount;
             ledger.pendingIn[ticket.toIdentity] -= amount;

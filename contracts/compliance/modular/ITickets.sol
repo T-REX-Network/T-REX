@@ -157,7 +157,6 @@ interface ITickets {
     error ZeroDuration();
     error ChainNotOpen(bytes32 chainKey);
     error UnknownTicket(bytes32 ticketId);
-    error PerTicketCapLoweredTooEarly(bytes32 chainKey, uint64 allowedAt);
     error NonCanonicalInteroperableAddress(bytes envelope);
     error InteroperableAddressEmptyReferenceAndAddress();
     error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value);
@@ -634,11 +633,10 @@ interface ITickets {
     function refuseWaitingReceipt(bytes32 halfKey) external;
 
     /// @dev Sets the caps on tickets toward the away chain `chainKey`. A receipt on older terms whose `seenMax` is
-    /// above the per-ticket cap blocks that away chain. Raising a cap takes effect at once. Lowering the per-ticket
-    /// cap waits until the latest valid until of a ticket sent toward the chain has passed: an honest copy sent under
-    /// the higher cap would otherwise echo a `seenMax` above the new one and block an honest chain. Every new ticket
-    /// pushes that time forward, so in practice the cap is lowered while asks are paused (`setAsksPaused`), once
-    /// the longest validity window has passed since the pause. The per-window cap is read at each ask: a ticket that would take the ticket
+    /// above the per-ticket cap blocks that away chain. A change takes effect at once. An honest copy sent under a
+    /// higher per-ticket cap would echo a `seenMax` above a lowered one and block an honest chain, so the operator
+    /// lowers it only once every ticket sent under the old cap has expired. The per-window cap is read at each ask: a
+    /// ticket that would take the ticket
     /// route above it in the current window of one waiting time travels the receipt route. The cap is shared by every
     /// holder: one identity can fill it, within its own ask limits, and the others then travel the receipt route,
     /// slower but never refused, until the window ends. A cap of zero sends every ticket toward the chain on the
@@ -646,8 +644,6 @@ interface ITickets {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - A lower per-ticket cap only from the latest valid until sent toward `chainKey`; otherwise reverts with
-    ///   `PerTicketCapLoweredTooEarly`.
     ///
     /// Emits `TicketLimitsSet`.
     /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.
