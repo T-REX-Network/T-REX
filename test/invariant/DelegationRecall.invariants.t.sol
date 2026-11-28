@@ -100,11 +100,14 @@ contract MoveCountingTracker is RecordingModule {
 ///   DR-7  no balance or amount on hold below zero: the totals are the sums of their parts, and no wallet has more
 ///         reserved than its away balance
 ///   DR-8  the away chain holds no more than home counts away
-///   DR-9  every away balance equals home's record plus what is provably in flight
-///   DR-10 a total owned falls only through its own requests
+///   DR-9  every away balance equals home's record, its uncounted credit and what is provably in flight
+///   DR-10 a total owned falls only through its own requests, by at most what they asked for (`requestedMax`)
 ///   DR-11 the trackers are told about each move between chains once
 ///   DR-12 once nothing is left to deliver, every ticket, move out and bring home ends Done or Cancelled
-///   DR-13 once nothing is left to deliver, nothing is reserved and nothing is on hold
+///   DR-13 once nothing is left to deliver, nothing is reserved, nothing is on hold, nothing waits, nothing is
+///         promised, and every away balance is exactly what the away token holds, with no uncounted credit
+///   DR-14 home never cancels a ticket the away token executed when at most one message of that ticket was lost or
+///         late
 contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     uint256 internal constant ACTORS = 3;
@@ -157,15 +160,30 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     bytes public lastRevertReason;
     /// @dev Set once a fault a step injected did not take effect.
     bool public anInjectedFaultDidNotHappen;
+    /// @dev What the `transfer` step sends; its sender's total owned may fall by that much.
+    uint256 internal transferAmount;
+    /// @dev The tickets the away token executed, and how many of each ticket's messages were lost or late.
+    mapping(bytes32 ticketId => bool executed) internal executedOnTheAwayToken;
+    mapping(bytes32 ticketId => uint256 count) internal faultsOf;
+    /// @dev Set once home cancelled a ticket the away token executed, with at most one fault on that ticket.
+    bool public executedTicketCancelledWithinOneFault;
 
-    /// @dev Checks DR-10 around a step: an identity whose total owned fell must have a request of its own that moved in
-    ///  the step, or be the sender of the step's home transfer.
+    /// @dev Where each request stands, in the order of the arrays that hold their ids.
+    struct RequestStatuses {
+        ITickets.TicketStatus[] tickets;
+        ITickets.TicketStatus[] moveOuts;
+        ITickets.TicketStatus[] bringHomes;
+    }
+
+    /// @dev Checks DR-10 around a step: what an identity's total owned fell by is covered by the `requestedMax` of its
+    ///  own requests that moved in the step, and by the step's home transfer when it is the sender.
     modifier positionsFallOnlyThroughOwnRequests() {
         uint256[] memory positionsBefore = _positions();
-        bytes32[] memory requestsBefore = _requestStatuses();
+        RequestStatuses memory requestsBefore = _requestStatuses();
         _;
         _checkPositionsFell(positionsBefore, requestsBefore);
         transferringActor = 0;
+        transferAmount = 0;
     }
 
     function setUp() public virtual override {
@@ -253,6 +271,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         address from = actors[fromActor];
         amount = bound(amount, 0, token.balanceOf(from));
         transferringActor = fromActor + 1;
+        transferAmount = amount;
         vm.prank(from);
         try token.transfer(actors[toSeed % ACTORS], amount) { } catch { }
     }
@@ -319,6 +338,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         address executor = satelliteSigners[ticketSender[index]];
         vm.prank(executor);
         try lite.execute(ticketId, amount) {
+            executedOnTheAwayToken[ticketId] = true;
             _afterTheAwayTokenExecuted(ticketId, amount, executor);
         } catch { }
     }
@@ -379,6 +399,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         if (gateway.queuedMessage(index).deliveries != 0) return;
         gateway.drop(index);
         if (!gateway.queuedMessage(index).dropped) anInjectedFaultDidNotHappen = true;
+        faultsOf[_ticketIdOfQueued(index)]++;
     }
 
     /* ----- Invariants ----- */
@@ -465,13 +486,18 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function invariant_DR9_eachAwayBalanceIsHomesRecordPlusWhatIsInFlight() public view {
         for (uint256 i = 0; i < ACTORS; i++) {
             uint256 awayTokenSide = lite.balanceOf(satellites[i]) + _leftNotApplied(i);
-            uint256 homeSide = token.awayBalanceOf(satellites[i]) + _arrivedNotApplied(i);
+            uint256 uncountedCredit = token.uncountedCreditOf(keccak256(satellites[i]));
+            uint256 homeSide = token.awayBalanceOf(satellites[i]) + uncountedCredit + _arrivedNotApplied(i);
             assertEq(awayTokenSide, homeSide, "away balance against home's record plus what is in flight");
         }
     }
 
     function invariant_DR10_aTotalOwnedFallsOnlyThroughItsOwnRequests() public view {
-        assertFalse(positionFellWithoutItsRequest, "a total owned fell without its own request");
+        assertFalse(positionFellWithoutItsRequest, "a total owned fell by more than its own requests asked for");
+    }
+
+    function invariant_DR14_noExecutedTicketIsCancelledWithinOneFault() public view {
+        assertFalse(executedTicketCancelledWithinOneFault, "home cancelled an executed ticket with at most one fault");
     }
 
     function invariant_DR11_theTrackersAreToldAboutEachMoveOnce() public view {
@@ -526,6 +552,8 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             assertEq(token.reservedOf(satellites[i]), 0, "nothing reserved");
         }
         assertEq(token.totalOnHold(), 0, "nothing on hold");
+        _assertTheLedgerSettled();
+        invariant_DR14_noExecutedTicketIsCancelledWithinOneFault();
         invariant_noDeliveryReverts();
     }
 
@@ -559,7 +587,22 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function _cancel(bytes32 ticketId) internal {
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = ticketId;
-        try boundCompliance.cancelTickets(ids) { } catch { }
+        try boundCompliance.cancelTickets(ids) {
+            bool withinOneFault = faultsOf[ticketId] <= 1;
+            if (executedOnTheAwayToken[ticketId] && withinOneFault) executedTicketCancelledWithinOneFault = true;
+        } catch { }
+    }
+
+    /// @dev The ticket a queued message belongs to: every body starts with its ticket id.
+    function _ticketIdOfQueued(uint256 index) internal view returns (bytes32) {
+        bytes memory payload = gateway.queuedMessage(index).payload;
+        (MessageTypesLib.Message messageType, bytes memory body) = MessageTypesLib.decode(payload);
+        if (messageType == MessageTypesLib.Message.TICKET) return MessageTypesLib.decodeValidation(body).ticketId;
+        if (messageType == MessageTypesLib.Message.MOVE_OUT) {
+            return MessageTypesLib.decodeMintInstruction(body).ticketId;
+        }
+        if (messageType == MessageTypesLib.Message.BRING_HOME) return MessageTypesLib.decodeBringHome(body).ticketId;
+        return MessageTypesLib.decodeSettlement(body).ticketId;
     }
 
     /// @dev Sends the stored receipt of one half of `ticketId` again; a half never answered sends nothing.
@@ -638,6 +681,32 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             boundCompliance.closeByHand(ticketId, satellites[moveOutActor[i]], reading);
             _openEvmChain(token, POLYGON, address(gateway));
             closedByHand[ticketId] = true;
+        }
+    }
+
+    /// @dev L2 and L3 once everything ended: every away balance is what the away token holds, no wallet carries
+    ///  uncounted credit, no receipt waits and no identity is promised anything.
+    function _assertTheLedgerSettled() internal view {
+        for (uint256 i = 0; i < ACTORS; i++) {
+            assertEq(
+                token.awayBalanceOf(satellites[i]), lite.balanceOf(satellites[i]), "away balance is the away token's"
+            );
+            assertEq(token.uncountedCreditOf(keccak256(satellites[i])), 0, "no uncounted credit");
+            assertEq(ledger.pendingInOf(address(identities[i])), 0, "nothing promised in");
+            assertEq(ledger.pendingOutOf(address(identities[i])), 0, "nothing promised out");
+        }
+        _assertNoReceiptWaits(ticketIds);
+        _assertNoReceiptWaits(moveOutIds);
+        _assertNoReceiptWaits(bringHomeIds);
+    }
+
+    function _assertNoReceiptWaits(bytes32[] storage ids) internal view {
+        for (uint256 i = 1; i < ids.length; i++) {
+            uint8 latestHalf = boundCompliance.ticketOf(ids[i]).half;
+            for (uint8 half = 0; half <= latestHalf; half++) {
+                bytes32 halfKey = MessageTypesLib.halfKeyOf(ids[i], half);
+                assertEq(boundCompliance.waitingReceiptOf(halfKey).bodyHash, bytes32(0), "no receipt waits");
+            }
         }
     }
 
@@ -840,32 +909,51 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         }
     }
 
-    /// @dev For each actor, a fingerprint of where its own requests stand: the tickets it sent, its move outs and its
-    ///  bring homes.
-    function _requestStatuses() internal view returns (bytes32[] memory statuses) {
-        statuses = new bytes32[](ACTORS);
-        for (uint256 i = 1; i < ticketIds.length; i++) {
-            uint256 sender = ticketSender[i];
-            statuses[sender] = keccak256(abi.encode(statuses[sender], boundCompliance.ticketOf(ticketIds[i]).status));
-        }
-        for (uint256 i = 1; i < moveOutIds.length; i++) {
-            uint256 actor = moveOutActor[i];
-            statuses[actor] = keccak256(abi.encode(statuses[actor], boundCompliance.ticketOf(moveOutIds[i]).status));
-        }
-        for (uint256 i = 1; i < bringHomeIds.length; i++) {
-            uint256 actor = bringHomeActor[i];
-            statuses[actor] = keccak256(abi.encode(statuses[actor], boundCompliance.ticketOf(bringHomeIds[i]).status));
+    /// @dev Where every request stands: the tickets, the move outs and the bring homes.
+    function _requestStatuses() internal view returns (RequestStatuses memory statuses) {
+        statuses.tickets = _statusesOf(ticketIds);
+        statuses.moveOuts = _statusesOf(moveOutIds);
+        statuses.bringHomes = _statusesOf(bringHomeIds);
+    }
+
+    function _statusesOf(bytes32[] storage ids) internal view returns (ITickets.TicketStatus[] memory statuses) {
+        statuses = new ITickets.TicketStatus[](ids.length);
+        for (uint256 i = 1; i < ids.length; i++) {
+            statuses[i] = boundCompliance.ticketOf(ids[i]).status;
         }
     }
 
-    function _checkPositionsFell(uint256[] memory positionsBefore, bytes32[] memory requestsBefore) internal {
+    function _checkPositionsFell(uint256[] memory positionsBefore, RequestStatuses memory requestsBefore) internal {
         uint256[] memory positionsAfter = _positions();
-        bytes32[] memory requestsAfter = _requestStatuses();
+        RequestStatuses memory requestsAfter = _requestStatuses();
+        uint256[] memory allowedFall = new uint256[](ACTORS);
+        _addWhatMovedRequestsAsked(allowedFall, ticketIds, ticketSender, requestsBefore.tickets, requestsAfter.tickets);
+        _addWhatMovedRequestsAsked(
+            allowedFall, moveOutIds, moveOutActor, requestsBefore.moveOuts, requestsAfter.moveOuts
+        );
+        _addWhatMovedRequestsAsked(
+            allowedFall, bringHomeIds, bringHomeActor, requestsBefore.bringHomes, requestsAfter.bringHomes
+        );
+        if (transferringActor != 0) allowedFall[transferringActor - 1] += transferAmount;
         for (uint256 i = 0; i < ACTORS; i++) {
-            bool fell = positionsAfter[i] < positionsBefore[i];
-            bool ownRequestMoved = requestsAfter[i] != requestsBefore[i];
-            bool ownTransfer = transferringActor == i + 1;
-            if (fell && !ownRequestMoved && !ownTransfer) positionFellWithoutItsRequest = true;
+            if (positionsAfter[i] >= positionsBefore[i]) continue;
+            uint256 fall = positionsBefore[i] - positionsAfter[i];
+            if (fall > allowedFall[i]) positionFellWithoutItsRequest = true;
+        }
+    }
+
+    /// @dev Adds to each actor's allowed fall the `requestedMax` of its requests that are new or moved in the step.
+    function _addWhatMovedRequestsAsked(
+        uint256[] memory allowedFall,
+        bytes32[] storage ids,
+        uint256[] storage owners,
+        ITickets.TicketStatus[] memory statusesBefore,
+        ITickets.TicketStatus[] memory statusesAfter
+    ) internal view {
+        for (uint256 i = 1; i < ids.length; i++) {
+            bool isNew = i >= statusesBefore.length;
+            bool moved = isNew || statusesBefore[i] != statusesAfter[i];
+            if (moved) allowedFall[owners[i]] += boundCompliance.ticketOf(ids[i]).requestedMax;
         }
     }
 

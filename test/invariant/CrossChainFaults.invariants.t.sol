@@ -218,6 +218,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
     /// @notice Lets time pass with messages in flight: up to ten minutes or up to seven days, half the time each.
     function delay(uint256 secondsSeed) external journaled {
         faults.delays++;
+        _countEveryMessageInFlightLate();
         uint256 longestDelay = MAX_DELAY;
         if (secondsSeed % 2 == 0) longestDelay = MAX_SHORT_DELAY;
         vm.warp(block.timestamp + bound(secondsSeed, 1, longestDelay));
@@ -287,6 +288,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         vm.warp(at);
         vm.prank(executor);
         try lite.execute(ticketId, amount) {
+            executedOnTheAwayToken[ticketId] = true;
             _afterTheAwayTokenExecuted(ticketId, amount, executor);
         } catch { }
         vm.warp(currentTime);
@@ -459,6 +461,7 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         uint256 blockNumber = block.number;
         bool beforeFinality = deliverBeforeFinality;
         bool missedBefore = reorgMissedTheFinalState;
+        bool cancelledBefore = executedTicketCancelledWithinOneFault;
 
         bool wentBack = vm.revertToState(snapshot);
         genesisSnapshot = snapshot;
@@ -479,11 +482,21 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
         vm.roll(blockNumber);
         deliverBeforeFinality = beforeFinality;
         reorgMissedTheFinalState = missedBefore || !wentBack;
+        executedTicketCancelledWithinOneFault = cancelledBefore || executedTicketCancelledWithinOneFault;
         counts.reorgs++;
         faults = counts;
 
         for (uint256 i = 0; i < actions.length; i++) {
             _replay(actions[i]);
+        }
+    }
+
+    /// @dev Time passed with these messages undelivered: each one is late, a fault on its ticket.
+    function _countEveryMessageInFlightLate() internal {
+        for (uint256 i = 0; i < gateway.queueLength(); i++) {
+            ERC7786GatewayMock.QueuedMessage memory message = gateway.queuedMessage(i);
+            if (message.deliveries != 0 || message.dropped) continue;
+            faultsOf[_ticketIdOfQueued(i)]++;
         }
     }
 
