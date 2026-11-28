@@ -963,8 +963,8 @@ interface ITickets {
     /// - For the ticket's own half, its ticket must be sent; otherwise reverts with `NoWaitingReceipt`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Its away chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
-    /// - For the ticket's own half, the sender's away balance must cover the amount; otherwise reverts with
-    ///   `InsufficientBridgedBalance`. A second half's money is already on hold at home.
+    /// - For the ticket's own half, or a bring home's burn receipt, the sender's away balance must cover the amount;
+    ///   otherwise reverts with `InsufficientBridgedBalance`. Any other half's money is already on hold at home.
     /// - The route check of {ITREXMessaging-checkReceiptOrigin} must pass; otherwise the token reverts with its
     ///   error.
     ///

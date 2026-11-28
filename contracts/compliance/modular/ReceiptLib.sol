@@ -668,8 +668,8 @@ library ReceiptLib {
     /* ----- Waiting receipts ----- */
 
     /// @dev Whether a good receipt for a ticket home sent can be applied now: the token runs and its away chain is
-    ///  not blocked; for a first-half receipt, the sender's away balance covers what it moved. A second half's money
-    ///  is already on hold at home, so no away balance is read for it. Otherwise it waits.
+    ///  not blocked; for a receipt that spends the sender's away balance, that balance covers what it moved.
+    ///  Otherwise it waits.
     function _canBeAppliedNow(bytes32 chainKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
         private
         view
@@ -678,7 +678,7 @@ library ReceiptLib {
         bool tokenRunning = !IToken(token).paused();
         bool awayChainBlocked = TicketLib.layout().blockedAwayChains[chainKey];
         bool canBeAppliedNow = tokenRunning && !awayChainBlocked;
-        if (receipt.half != 0) return canBeAppliedNow;
+        if (!_spendsTheAwayBalance(receipt)) return canBeAppliedNow;
         bool awayBalanceCoversIt = receipt.amount <= IToken(token).awayBalanceOf(receipt.from);
         return canBeAppliedNow && awayBalanceCoversIt;
     }
@@ -688,15 +688,24 @@ library ReceiptLib {
         private
         view
     {
-        bool answersTheTicket = receipt.half == 0;
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(chainKey);
-        if (!answersTheTicket) return;
+        if (!_spendsTheAwayBalance(receipt)) return;
         uint256 awayBalance = IToken(token).awayBalanceOf(receipt.from);
         require(
             receipt.amount <= awayBalance,
             ErrorsLib.InsufficientBridgedBalance(receipt.from, awayBalance, receipt.amount)
         );
+    }
+
+    /// @dev Whether a receipt takes what it moved off the sender wallet's away balance: a ticket's first half, or the
+    ///  burn receipt of a bring home, which nothing put on hold. Any other half's money is already on hold at home.
+    function _spendsTheAwayBalance(MessageTypesLib.ReceiptMessage calldata receipt) private view returns (bool) {
+        if (receipt.half == 0) return true;
+        ITickets.Ticket storage ticket = TicketLib.layout().validations[receipt.ticketId];
+        bool aBringHome = ticket.written && ticket.kind == ITickets.TicketKind.BRING_HOME;
+        bool namesTheBurnedWallet = receipt.from.length != 0;
+        return aBringHome && namesTheBurnedWallet;
     }
 
     /// @dev Keeps a good receipt that cannot be applied yet under its half: its hash, and the bridge and peer that

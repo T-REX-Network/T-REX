@@ -1147,6 +1147,69 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
     }
 
+    /* ----- A bring home racing a dropped spend ----- */
+
+    /// @notice A reorg drops Bob paying Alice 5 and Alice paying Charlie 5 after polygon executed both, and the agent
+    ///         brings Alice's 10 home before their receipts land. Polygon burns 10, but home books Alice's spend from
+    ///         her away balance, which leaves 5: the burn receipt waits instead of reverting the delivery, and anyone
+    ///         applies it once the reversal of Alice's spend gives her 5 back.
+    function test_receiveReceipt_putsABringHomesBurnReceiptOnWait_whenADroppedSpendLeftTooLittleAwayBalance() public {
+        uint256 spent = 5;
+        _fundBobOnPolygon(spent);
+        (bytes32 bobsSpendId,, uint256 bobsReceiptIndex) = _droppedAsk(bobOnPolygon, bobSat, aliceSat, spent);
+        (bytes32 alicesSpendId,, uint256 alicesReceiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, charlieSat, spent);
+
+        vm.prank(agent);
+        bytes32 bringHomeId = boundCompliance.bringHome(aliceSat, ALICE_AWAY_BALANCE, alice, _salt());
+        uint256 aliceHomeBalanceBefore = token.balanceOf(alice);
+        polygonGateway.relay(polygonGateway.queueLength() - 1); // polygon burns the 10 Alice holds there
+        uint256 burnReceiptIndex = polygonGateway.queueLength() - 1;
+        polygonGateway.relay(bobsReceiptIndex);
+        polygonGateway.relay(alicesReceiptIndex);
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - spent, "alice's spend came off her away balance");
+
+        bytes32 burnHalfKey = MessageTypesLib.halfKeyOf(bringHomeId, 1);
+        MessageTypesLib.ReceiptMessage memory burnReceipt = _receiptAt(polygonGateway, burnReceiptIndex);
+        assertEq(burnReceipt.amount, ALICE_AWAY_BALANCE, "polygon burned all alice held there");
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptWaiting(burnHalfKey, polygon, address(polygonGateway), burnReceipt);
+        polygonGateway.relay(burnReceiptIndex);
+        _assertStatus(bringHomeId, ITickets.TicketStatus.Open, "the bring home waits for its burn receipt");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.InsufficientBridgedBalance.selector, aliceSat, ALICE_AWAY_BALANCE - spent, ALICE_AWAY_BALANCE
+            )
+        );
+        boundCompliance.applyWaitingReceipt(burnHalfKey, burnReceipt);
+
+        // Alice's dropped spend is reversed: Charlie's 5 burn and come back to Alice's away balance.
+        vm.warp(boundCompliance.ticketOf(alicesSpendId).stopWaitingAt);
+        _cancelHold(alicesSpendId, charlieSat);
+        _relayAll(polygonGateway);
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice's away balance covers the burn again");
+
+        boundCompliance.applyWaitingReceipt(burnHalfKey, burnReceipt);
+        _assertStatus(bringHomeId, ITickets.TicketStatus.Done, "the bring home is over");
+        assertEq(token.balanceOf(alice), aliceHomeBalanceBefore + ALICE_AWAY_BALANCE, "minted at alice's home wallet");
+
+        // Bob's dropped spend is reversed too: Alice's 5 of uncounted credit burn and go back to Bob.
+        vm.warp(boundCompliance.ticketOf(bobsSpendId).stopWaitingAt);
+        _cancelHold(bobsSpendId, aliceSat);
+        _relayAll(polygonGateway);
+        _assertHomeAgreesWithPolygon();
+        _assertPositionsAreTheSupply();
+    }
+
+    /// @dev Funds Bob's polygon wallet with `amount` by a real move out from his home wallet.
+    function _fundBobOnPolygon(uint256 amount) private {
+        vm.prank(agent);
+        token.mint(bob, amount);
+        vm.prank(bob);
+        boundCompliance.askToMove(bobHome, bobSat, amount, amount, "", _salt());
+        _relayAll(polygonGateway);
+    }
+
     /// @dev Gives every identity `asksPerWindow` asks per day, the other limits out of reach, from a new window: the
     ///  set up's move out of Alice's home wallet was an ask of her identity.
     function _setAsksPerWindow(uint32 asksPerWindow) private {

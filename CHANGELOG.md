@@ -66,6 +66,8 @@ All notable changes to this project will be documented in this file.
     counts a take of money on hold in the identity's asks per window (`AskLimitReached`), and refuses a spender on a
     home sender with `SpenderNotAllowed(spender, from, to, value)`, declared on `ITickets`. `cancelTickets` refuses a
     ticket waiting for approval while a receipt for it waits and can be applied (`ApplyWaitingReceiptFirst`).
+    A bring home's burn receipt above the away wallet's away balance waits (`ReceiptWaiting`), as a ticket's receipt
+    does, instead of reverting its delivery; anyone applies it with `applyWaitingReceipt` once the balance covers it.
     Unbinding the compliance from its token reverts `ValidationsPending` while the reserved total is above zero, as
     before, and also before `latestStopWaitingAt`, the latest `stopWaitingAt` of any ticket.
   - *Interfaces.* `ITransferValidation` is replaced by `ITickets` (the `TransferValidation` contract by `Tickets`),
