@@ -126,10 +126,11 @@ abstract contract ModularComplianceBaseUnitTest is AccessManagerHelper {
         validUntil = uint64(uint256(vm.load(address(mc), bytes32(uint256(recordSlot) + 3))));
     }
 
-    /// @dev The first slot of the record of `id`: `validations` is the namespace's third field.
+    /// @dev The first slot of the record of `id`: `validations` is the namespace's tenth field, after the develop
+    ///  version's seven kept unused, the validity windows and the waiting times.
     function _ticketSlot(bytes32 id) private pure returns (bytes32) {
         bytes32 base = 0x518dcda4927033bd42da8dd6047b92b4a950cebbc5bdd8461a5e9bb9c0545400;
-        return keccak256(abi.encode(id, uint256(base) + 2));
+        return keccak256(abi.encode(id, uint256(base) + 9));
     }
 
     /// @dev The request sent with the last salt was refused: nothing was recorded under its id.

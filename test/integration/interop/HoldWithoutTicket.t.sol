@@ -68,6 +68,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(ticketId, polygon);
@@ -735,6 +736,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(bobsHold.carriedFrom, bytes32(0), "no longer carries");
         assertEq(bobsHold.carriedAmount, 0);
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), aliceId);
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), bobId);
         _relayAll(polygonGateway);

@@ -855,18 +855,24 @@ interface ITickets {
     function cancelHold(bytes32 ticketId) external;
 
     /// @dev Closes by hand what waits on an away chain whose receipt route was closed with `closeReceiptRoute`, the
-    /// only way there (a distrusted bridge is not): no receipt can land from it, and its silence cannot tell a dead chain from a lost message. So home
-    /// decides from `reading`, the away chain's own state in one final block, never from home's clock.
+    /// only way there (a distrusted bridge is not): no receipt can land from it, and its silence cannot tell a dead
+    /// chain from a lost message. So home decides from `reading`, the away chain's own state in one final block, never
+    /// from home's clock.
     ///
     /// When the away token stored a receipt above zero for the half, it is applied as if it had arrived, see
     /// {IReceiptHandler-receiveReceipt}, and nothing is returned; a stored receipt for an id home has no record of is
     /// booked on hold. Otherwise, for:
-    /// - an open move, or one waiting for approval: it is cancelled once that chain's clock is past the latest valid until its copies can carry:
-    ///   home's own plus the chain's reorg slot shift, the one a still open answer reported, and the stored copy's;
+    /// - an open move, or one waiting for approval: it is cancelled, whether its chain is blocked or not, once that
+    ///   chain's clock is past the latest valid until its copies can carry: home's own plus the chain's reorg slot
+    ///   shift, the one a still open answer reported, and the stored copy's. A cancel, so not while a hostile change
+    ///   runs on that chain;
     /// - an open bring home: it ends `Done` with nothing moved once that chain's clock is past its half's valid until;
     /// - money on hold, its second half going to the receiver or back to the sender: once that chain's clock is past
     ///   the half's valid until, the money goes back to the sender by a new `MOVE_OUT` while the sender's chain has a
     ///   receipt route; otherwise it is minted at once to a home sender, or to the sender's identity contract;
+    /// - money on hold with no ticket whose tokens left their chain, the closed one: the carried part of an earlier
+    ///   hold is applied first, then the money is minted to the sender's identity contract, once its cancel is due
+    ///   and that chain's clock is past the valid until of a return half that is out;
     /// - money on hold with no ticket, moved inside that chain: what the receiver still holds as uncounted credit is
     ///   applied as the move inside that chain it was, never minted to the sender, after the carried part of an
     ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit. Each
@@ -879,15 +885,18 @@ interface ITickets {
     /// - `ticketId` recorded, or a stored receipt above zero read for it; otherwise reverts with `UnknownTicket`.
     /// - The away chain of the latest half, or of the stored receipt's sender for an id with no record, has its
     ///   receipt route closed; otherwise reverts with `ReceiptRouteNotClosed`.
-    /// - The token not paused, that chain not blocked and no hostile change running on it; otherwise reverts with
-    ///   `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
-    /// - A stored receipt for `ticketId`, which home applies; otherwise reverts with `ValidationBodyMismatch`: a
-    ///   receipt home would refuse as bad, or keep waiting, is never taken from a read.
+    /// - The token not paused; otherwise reverts with `TokenPaused`.
+    /// - A stored receipt for `ticketId`, which home applies, with that chain not blocked; otherwise reverts with
+    ///   `ValidationBodyMismatch` (a receipt home would refuse as bad, or keep waiting, is never taken from a read) or
+    ///   `AwayChainBlocked`.
     /// With no stored receipt:
     /// - No receipt waiting under the latest half; otherwise reverts with `ApplyWaitingReceiptFirst`: the read and
     ///   home disagree, and the receipt read again applies it.
     /// - `receiver` with the key of the ticket's receiver; otherwise reverts with `ValidationBodyMismatch`.
     /// - One of the cases above; otherwise reverts with `TicketNotCancellable`.
+    /// - For an open move or one waiting for approval, no hostile change running on its chain; otherwise reverts with
+    ///   `HostileChangeNotOver`. For any other case, neither the half's chain nor the sender's chain blocked;
+    ///   otherwise reverts with `AwayChainBlocked`.
     /// - `reading.awayClockTime` at or after the valid until the case needs; otherwise reverts with
     ///   `AwayClockBeforeValidUntil`.
     /// - For money on hold with no ticket: no later hold carrying it, otherwise `LaterHoldStillCarries`; and, before

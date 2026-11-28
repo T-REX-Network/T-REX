@@ -194,19 +194,34 @@ contract NamespaceFieldsTest is Test {
 
         ledgerStorage.decimals = 18;
         ledgerStorage.awayBalance[KEY] = 11;
-        ledgerStorage.totalAwayBalance = 12;
+        ledgerStorage.totalBridged = 12;
         ledgerStorage.inTransit[bytes32(NUMBER)] = 13;
         ledgerStorage.totalOnHold = 14;
         ledgerStorage.reservedForTickets[KEY] = 15;
+        ledgerStorage.recalls[NUMBER] = bytes32(uint256(17));
+        ledgerStorage.lastRecallId = 18;
+        ledgerStorage.openRecall[KEY] = 19;
+        ledgerStorage.settledProofs[NUMBER] = bytes32(uint256(20));
+        ledgerStorage.lastDelegationId = 21;
+        ledgerStorage.delegations[NUMBER] = bytes32(uint256(22));
+        ledgerStorage.totalAwayBalance = 23;
         ledgerStorage.uncountedCredit[KEY] = 16;
 
+        // The develop version's fields keep their slots, and the new fields are appended after them.
         assertEq(_word(_field(base, 0)), 18, "decimals");
         assertEq(_word(_entry(_field(base, 1), KEY)), 11, "awayBalance");
-        assertEq(_word(_field(base, 2)), 12, "totalAwayBalance");
+        assertEq(_word(_field(base, 2)), 12, "totalBridged, no longer used");
         assertEq(_word(_entry(_field(base, 3), bytes32(NUMBER))), 13, "inTransit");
-        assertEq(_word(_field(base, 4)), 14, "totalOnHold");
+        assertEq(_word(_field(base, 4)), 14, "totalOnHold, the former totalInTransit");
         assertEq(_word(_entry(_field(base, 5), KEY)), 15, "reservedForTickets");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 16, "uncountedCredit");
+        assertEq(_word(_entry(_field(base, 6), bytes32(NUMBER))), 17, "recalls, no longer used");
+        assertEq(_word(_field(base, 7)), 18, "lastRecallId, no longer used");
+        assertEq(_word(_entry(_field(base, 8), KEY)), 19, "openRecall, no longer used");
+        assertEq(_word(_entry(_field(base, 9), bytes32(NUMBER))), 20, "settledProofs, no longer used");
+        assertEq(_word(_field(base, 10)), 21, "lastDelegationId, no longer used");
+        assertEq(_word(_entry(_field(base, 11), bytes32(NUMBER))), 22, "delegations, no longer used");
+        assertEq(_word(_field(base, 12)), 23, "totalAwayBalance");
+        assertEq(_word(_entry(_field(base, 13), KEY)), 16, "uncountedCredit");
     }
 
     function test_TREXMessaging() public {
@@ -339,6 +354,13 @@ contract NamespaceFieldsTest is Test {
             validationStorage.slot := base
         }
 
+        validationStorage.defaultValidityWindow = 1;
+        validationStorage.reconciliationWindows[KEY] = 2;
+        validationStorage.issuancePaused[KEY] = true;
+        validationStorage.issuedValidations[KEY] = bytes32(uint256(4));
+        validationStorage.awaitedTerms[KEY] = bytes32(uint256(5));
+        validationStorage.parkedLegs[KEY] = bytes32(uint256(6));
+        validationStorage.reportedLegs[KEY] = true;
         validationStorage.validityWindows = ITickets.ValidityWindows({ onTicketRoute: 10, onReceiptRoute: 11 });
         validationStorage.waitingTimes[KEY] = 12;
         _writeTicket(validationStorage.validations[bytes32(NUMBER)]);
@@ -367,37 +389,45 @@ contract NamespaceFieldsTest is Test {
         validationStorage.ticketRouteVolumes[KEY] = TicketLib.TicketRouteVolume({ windowStart: 56, amount: 57 });
         validationStorage.asksPausedOn[KEY] = true;
 
+        // The develop version's fields keep their slots, and the new fields are appended after them.
+        assertEq(_word(_field(base, 0)), 1, "defaultValidityWindow, no longer used");
+        assertEq(_word(_entry(_field(base, 1), KEY)), 2, "reconciliationWindows, no longer used");
+        assertEq(_word(_entry(_field(base, 2), KEY)), 1, "issuancePaused, no longer used");
+        assertEq(_word(_entry(_field(base, 3), KEY)), 4, "issuedValidations, no longer used");
+        assertEq(_word(_entry(_field(base, 4), KEY)), 5, "awaitedTerms, no longer used");
+        assertEq(_word(_entry(_field(base, 5), KEY)), 6, "parkedLegs, no longer used");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "reportedLegs, no longer used");
         // Two uint64 fill bytes 0 to 15 of one slot.
-        assertEq(_word(_field(base, 0)), 10 | (11 << 64), "validityWindows");
-        assertEq(_word(_entry(_field(base, 1), KEY)), 12, "waitingTimes");
-        _assertTicket(_entry(_field(base, 2), bytes32(NUMBER)));
+        assertEq(_word(_field(base, 7)), 10 | (11 << 64), "validityWindows");
+        assertEq(_word(_entry(_field(base, 8), KEY)), 12, "waitingTimes");
+        _assertTicket(_entry(_field(base, 9), bytes32(NUMBER)));
 
-        bytes32 waitingSlot = _entry(_field(base, 3), KEY);
+        bytes32 waitingSlot = _entry(_field(base, 10), KEY);
         assertEq(_word(_field(waitingSlot, 0)), 31, "waitingReceipts.bodyHash");
         assertEq(_word(_field(waitingSlot, 1)), 32, "waitingReceipts.chainKey");
         assertEq(_word(_field(waitingSlot, 2)), uint256(uint160(ALICE)), "waitingReceipts.deliveredBy");
         assertEq(_word(_field(waitingSlot, 3)), 39, "waitingReceipts.peerKey");
         assertEq(_word(_field(waitingSlot, 4)), 40, "waitingReceipts.amount");
         assertEq(_word(_field(waitingSlot, 5)), 41, "waitingReceipts.arrivedAt");
-        assertEq(_word(_entry(_field(base, 4), KEY)), 35, "receiptHashes");
-        bytes32 limits = _entry(_field(base, 5), KEY);
+        assertEq(_word(_entry(_field(base, 11), KEY)), 35, "receiptHashes");
+        bytes32 limits = _entry(_field(base, 12), KEY);
         assertEq(_word(_field(limits, 0)), 36, "ticketLimits.perTicketCap");
         assertEq(_word(_field(limits, 1)), 37, "ticketLimits.perWindowCap");
-        assertEq(_word(_entry(_field(base, 6), KEY)), 1, "blockedAwayChains");
-        bytes32 times = _entry(_field(base, 7), KEY);
+        assertEq(_word(_entry(_field(base, 13), KEY)), 1, "blockedAwayChains");
+        bytes32 times = _entry(_field(base, 14), KEY);
         assertEq(_word(_field(times, 0)), 3 | (5 << 64) | (6 << 128), "measuredTimes");
         // latestStopWaitingAt fills bytes 0 to 7, asksPaused byte 8.
-        assertEq(_word(_field(base, 8)), 44 | (1 << 64), "latestStopWaitingAt and asksPaused");
-        assertEq(_word(_field(base, 9)), 45 | (46 << 32) | (47 << 64), "askLimits, the three counts");
-        assertEq(_word(_field(base, 10)), 48, "askLimits.smallestAmount");
-        assertEq(_word(_entry(_field(base, 11), _key(ALICE))), 49, "askLimitOverrides");
-        assertEq(_word(_entry(_field(base, 12), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
-        assertEq(_word(_entry(_field(base, 13), KEY)), 53, "openBringHome");
-        assertEq(_word(_entry(_field(base, 14), KEY)), 55, "uncountedCreditFrom");
-        bytes32 volume = _entry(_field(base, 15), KEY);
+        assertEq(_word(_field(base, 15)), 44 | (1 << 64), "latestStopWaitingAt and asksPaused");
+        assertEq(_word(_field(base, 16)), 45 | (46 << 32) | (47 << 64), "askLimits, the three counts");
+        assertEq(_word(_field(base, 17)), 48, "askLimits.smallestAmount");
+        assertEq(_word(_entry(_field(base, 18), _key(ALICE))), 49, "askLimitOverrides");
+        assertEq(_word(_entry(_field(base, 19), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
+        assertEq(_word(_entry(_field(base, 20), KEY)), 53, "openBringHome");
+        assertEq(_word(_entry(_field(base, 21), KEY)), 55, "uncountedCreditFrom");
+        bytes32 volume = _entry(_field(base, 22), KEY);
         assertEq(_word(_field(volume, 0)), 56, "ticketRouteVolumes.windowStart");
         assertEq(_word(_field(volume, 1)), 57, "ticketRouteVolumes.amount");
-        assertEq(_word(_entry(_field(base, 16), KEY)), 1, "asksPausedOn");
+        assertEq(_word(_entry(_field(base, 23), KEY)), 1, "asksPausedOn");
     }
 
     function _writeTicket(ITickets.Ticket storage ticket) private {

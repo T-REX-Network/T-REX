@@ -97,6 +97,21 @@ library TicketLib {
 
     /// @custom:storage-location erc7201:erc3643.storage.TransferValidation
     struct ValidationStorage {
+        /// No longer used, as the six fields after it: kept so the fields after them keep the slots an upgraded
+        /// compliance already has. The develop version's validity window.
+        uint64 defaultValidityWindow;
+        /// No longer used: the develop version's reconciliation windows.
+        mapping(bytes32 chainKey => uint64 window) reconciliationWindows;
+        /// No longer used: the develop version's issuance pause per chain.
+        mapping(bytes32 chainKey => bool paused) issuancePaused;
+        /// No longer used: the develop version's validations, whose shape the tickets do not share.
+        mapping(bytes32 validationId => bytes32 retired) issuedValidations;
+        /// No longer used: the develop version's terms of a validation awaiting approval.
+        mapping(bytes32 validationId => bytes32 retired) awaitedTerms;
+        /// No longer used: the develop version's parked legs.
+        mapping(bytes32 validationId => bytes32 retired) parkedLegs;
+        /// No longer used: the develop version's consumed deliveries.
+        mapping(bytes32 deliveryKey => bool consumed) reportedLegs;
         /// Added to the ask's timestamp to compute `validUntil`, per the route the ticket travels. Zero blocks asks.
         ITickets.ValidityWindows validityWindows;
         /// The waiting time of each away chain. Zero blocks asks from that chain.

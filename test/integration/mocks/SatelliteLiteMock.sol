@@ -111,6 +111,14 @@ contract SatelliteLiteMock is IERC7786Recipient {
         uint8 resendsSent;
     }
 
+    /// @notice The valid until bound a deployment starts with: home's longest validity window plus a lag budget of
+    ///  one minute, in seconds.
+    uint64 public constant DEFAULT_VALID_UNTIL_BOUND = 1 days + 1 minutes;
+    /// @notice The wait between two sends of one half's receipt a deployment starts with, in seconds.
+    uint64 public constant DEFAULT_RECEIPT_RESEND_WAIT = 10 minutes;
+    /// @notice The answer window a deployment starts with, in seconds.
+    uint64 public constant DEFAULT_ANSWER_WINDOW = 1 days;
+
     uint256 public immutable chainId;
     address public immutable referenceToken;
     ERC7786GatewayMock public immutable gateway;
@@ -119,10 +127,10 @@ contract SatelliteLiteMock is IERC7786Recipient {
     ///  validity window plus the lag budget. A copy further ahead is ignored, so a forged far valid until is never held.
     uint64 public validUntilBound;
     /// @notice The wait between two sends of one half's receipt before {resendReceipt} sends it again, in seconds.
-    ///  Never set back to zero; a deployment sets it.
+    ///  Set at deployment, never zero.
     uint64 public receiptResendWait;
     /// @notice The window, in seconds, over which a half's answers are counted against `MAX_ANSWERS_PER_WINDOW`.
-    ///  Never set back to zero; a deployment sets it.
+    ///  Set at deployment, never zero.
     uint64 public answerWindow;
 
     mapping(bytes32 receiveId => bool isDelivered) public delivered;
@@ -144,7 +152,9 @@ contract SatelliteLiteMock is IERC7786Recipient {
         chainId = chainId_;
         referenceToken = referenceToken_;
         gateway = gateway_;
-        validUntilBound = type(uint64).max;
+        validUntilBound = DEFAULT_VALID_UNTIL_BOUND;
+        receiptResendWait = DEFAULT_RECEIPT_RESEND_WAIT;
+        answerWindow = DEFAULT_ANSWER_WINDOW;
     }
 
     /// @notice Sets how far ahead of this chain's clock a held ticket's valid until may be.

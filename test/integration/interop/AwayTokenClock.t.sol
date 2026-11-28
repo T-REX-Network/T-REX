@@ -158,6 +158,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.ValidationExpired.selector, ticketId));
         polygonLite.execute(ticketId, 40);
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(TICKET_TYPE, ticketId);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(ticketId, polygon);
@@ -192,6 +193,21 @@ contract AwayTokenClockTest is InteropSuiteTest {
 
         assertEq(boundCompliance.ticketOf(ticketId).seenValidUntil, 0, "home's cap ignored it");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
+    }
+
+    /// @notice Every away token starts with its limits on: a valid until bound, a resend wait and an answer window,
+    ///         none of them zero, so a forged far valid until is ignored with no setting changed.
+    function test_constructor_startsWithEveryLimitOn() public {
+        SatelliteLiteMock freshAwayToken = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
+
+        assertEq(freshAwayToken.validUntilBound(), freshAwayToken.DEFAULT_VALID_UNTIL_BOUND(), "the bound is on");
+        assertGt(freshAwayToken.receiptResendWait(), 0, "resends are spaced");
+        assertGt(freshAwayToken.answerWindow(), 0, "answers are counted over a window");
+
+        bytes32 forgedId = keccak256("a ticket home never wrote");
+        uint64 farValidUntil = uint64(block.timestamp) + 10 days;
+        _deliverToLite(_forgedCopy(forgedId, farValidUntil));
+        assertFalse(polygonLite.known(forgedId), "the away token never holds it");
     }
 
     /* ----- The away token's own checks and limits ----- */
@@ -351,6 +367,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
 
         assertEq(polygonLite.storedReceipt(MOVE_OUT_TYPE, halfKey).amount, 7, "the move out minted 7");
         assertEq(polygonLite.storedReceipt(BRING_HOME_TYPE, halfKey).amount, 3, "the bring home burned 3");
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(BRING_HOME_TYPE, halfKey);
         bytes memory bringHomeReceipt =
             MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(BRING_HOME_TYPE, halfKey));

@@ -64,10 +64,10 @@ import { MessageTypesLib } from "../libraries/MessageTypesLib.sol";
 
 /// @title IToken
 /// @notice The T-REX token surface beyond ERC-3643: the ledger views the standard does not define.
-///  A position has three buckets. Free and frozen are native and `balanceOf` is their sum, plain ERC-20.
-///  Bridged is the part delegated to satellites, per ERC-7930 wallet, outside `balanceOf`; `totalSupply` counts
-///  all three. Inside the bridged bucket, the money of a move between its two halves is on hold against its
-///  ticket: no wallet holds it, its sender still owns it.
+///  Free and frozen are native and `balanceOf` is their sum, plain ERC-20. The away balance is the part on away
+///  chains, per ERC-7930 wallet, outside `balanceOf`. Money on hold is a separate number again: the money of a move
+///  between its two halves, kept against its ticket, which no wallet holds and its sender still owns.
+///  `totalSupply = native + totalAwayBalance + totalOnHold`.
 interface IToken is IERC3643 {
 
     event ReservedForValidation(bytes32 indexed walletKey, bytes wallet, uint256 amount);

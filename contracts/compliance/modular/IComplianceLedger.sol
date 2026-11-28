@@ -60,16 +60,19 @@
 pragma solidity 0.8.30;
 
 /// @title IComplianceLedger
-/// @dev The four numbers the compliance keeps, and the only thing a module reads from it.
+/// @dev What the compliance keeps, and the only thing a module reads from it: per identity, the total it owns, what
+/// open tickets reserve toward it and out of it, and per native wallet the identity it is counted under; per away
+/// chain, the money on hold that left it going forward and what open tickets reserve out of it, for a limit on what
+/// leaves a chain.
 ///
-/// The token knows balances per wallet. One investor holds several wallets, on this chain and on satellites,
+/// The token knows balances per wallet. One investor holds several wallets, on this chain and on away chains,
 /// and every rule about how the asset is distributed asks the same two questions about the investor, not the
 /// wallet: how much does this identity own in total, and how much is already promised to or from it by
-/// validations that have not settled yet. The compliance is the contract that sees every movement and issues
-/// every validation, so it keeps those numbers itself, once, instead of each module rebuilding them.
+/// tickets that have not ended yet. The compliance is the contract that sees every movement and writes every
+/// ticket, so it keeps those numbers itself, once, instead of each module rebuilding them.
 ///
 /// Nothing here is written from outside: the compliance updates these from the hooks the token already calls
-/// and from its own issuance, settlement and discard paths.
+/// and from its own ask, receipt and cancel paths.
 ///
 /// The positions are exact: `sum(positions) == totalSupply`. The token's identity registry admits no wallet
 /// without an active identity, even with its eligibility checks disabled, so every token lands on a wallet with
@@ -81,18 +84,18 @@ pragma solidity 0.8.30;
 /// registry no longer names keeps its remembered owner.
 interface IComplianceLedger {
 
-    /// @dev What `identity` owns in total: free, frozen and bridged, over every wallet linked to it, revoked
-    ///  wallets included. Moving tokens between two wallets of one identity does not change it.
+    /// @dev What `identity` owns in total: free, frozen, away balances and money on hold it sent, over every wallet
+    ///  linked to it, revoked wallets included. Moving tokens between two wallets of one identity does not change it.
     /// @param identity the ONCHAINID to look up
     function positionOf(address identity) external view returns (uint256);
 
-    /// @dev Sum of `amountMax` over the validations issued toward `identity` that have not settled or been
-    ///  discarded. What a cap on acquisitions must count on top of the position.
+    /// @dev Sum of `amountMax` over the tickets toward `identity` that have not ended, and of the money on hold going
+    ///  forward to it. What a cap on acquisitions must count on top of the position.
     /// @param identity the ONCHAINID to look up
     function pendingInOf(address identity) external view returns (uint256);
 
-    /// @dev Sum of `amountMax` over the validations issued out of `identity` that have not settled or been
-    ///  discarded. What a floor on holdings must subtract from the position.
+    /// @dev Sum of `amountMax` over the tickets out of `identity` that have not ended. What a floor on holdings must
+    ///  subtract from the position.
     /// @param identity the ONCHAINID to look up
     function pendingOutOf(address identity) external view returns (uint256);
 

@@ -87,8 +87,9 @@ library TokenLedgerLib {
         /// @dev Positions delegated to satellites, keyed by the canonical ERC-7930 wallet key. Separate from the
         ///  native mapping, which stays OpenZeppelin's.
         mapping(bytes32 walletKey => uint256) awayBalance;
-        /// @dev Sum of every away balance, kept so `totalSupply` counts it in O(1). Money on hold is not in it.
-        uint256 totalAwayBalance;
+        /// @dev No longer used: the former sum of away balances and money on hold together, kept so the fields after
+        ///  it keep the slots an upgraded token already has. Its two parts are `totalAwayBalance` and `totalOnHold`.
+        uint256 totalBridged;
         /// @dev The money on hold between the two halves of a move, keyed by its ticket: what left the sender's
         ///  wallet, an away wallet or a home wallet, and has not reached the wallet it ends on. Counted in
         ///  `totalOnHold`, still owned by the sender the ticket names.
@@ -101,6 +102,20 @@ library TokenLedgerLib {
         ///  compliance reserves at issuance and gives back when the ticket leaves its open row, a receipt or a
         ///  cancel.
         mapping(bytes32 walletKey => uint256) reservedForTickets;
+        /// @dev No longer used: the former recalls, kept so the fields after them keep their slots.
+        mapping(uint256 recallId => bytes32) recalls;
+        /// @dev No longer used: kept so the fields after it keep their slots.
+        uint256 lastRecallId;
+        /// @dev No longer used: kept so the fields after it keep their slots.
+        mapping(bytes32 walletKey => uint256 recallId) openRecall;
+        /// @dev No longer used: kept so the fields after it keep their slots.
+        mapping(uint256 recallId => bytes32) settledProofs;
+        /// @dev No longer used: kept so the fields after it keep their slots.
+        uint256 lastDelegationId;
+        /// @dev No longer used: kept so the fields after it keep their slots.
+        mapping(uint256 delegationId => bytes32) delegations;
+        /// @dev Sum of every away balance, kept so `totalSupply` counts it in O(1). Money on hold is not in it.
+        uint256 totalAwayBalance;
         /// @dev What each away wallet holds on its chain that home does not count for it yet: receipts with no ticket
         ///  that named it as the receiver. Never part of its away balance, so never asked to move. Written by the
         ///  compliance, which books those receipts.

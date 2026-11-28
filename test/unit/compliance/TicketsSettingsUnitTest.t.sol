@@ -209,7 +209,9 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
 
         mc.setValidityWindows(15 minutes, 25 minutes);
 
-        assertEq(uint256(vm.load(address(mc), slot)), 15 minutes | (25 minutes << 64));
+        // The validity windows follow the develop version's seven fields, kept unused.
+        bytes32 validityWindowsSlot = bytes32(uint256(slot) + 7);
+        assertEq(uint256(vm.load(address(mc), validityWindowsSlot)), 15 minutes | (25 minutes << 64));
     }
 
     function test_views_Success_WhenNothingWasIssued() public view {

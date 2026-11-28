@@ -420,6 +420,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.drop(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.BRING_HOME), MessageTypesLib.halfKeyOf(id, 1));
         polygonGateway.relay(_last(polygonGateway));
 
@@ -436,6 +437,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.drop(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), id);
         polygonGateway.relay(_last(polygonGateway));
 
@@ -451,6 +453,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         _execute(id, 50);
         _relayAll(polygonGateway);
 
+        vm.warp(block.timestamp + polygonLite.receiptResendWait());
         polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), id);
         uint256 resent = _last(polygonGateway);
         vm.expectEmit(true, true, false, true, address(boundCompliance));

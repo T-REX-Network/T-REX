@@ -107,17 +107,19 @@ contract TokenStorageLocationUnitTest is TokenBaseUnitTest {
         assertEq(token.awayBalanceOf(wallet), 77, "awayBalance is not at offset 1");
     }
 
-    function testTREXTokenStorageTotalBridged() public {
-        bytes32 totalBridgedSlot = bytes32(uint256(Utils.erc7201("erc3643.storage.TREXToken")) + 2);
-        assertEq(uint256(vm.load(address(token), totalBridgedSlot)), 0);
+    /// @dev The develop version's bridged total at offset 2 is no longer used; the away balances' total is appended
+    ///      at offset 12, after the develop version's last field.
+    function testTREXTokenStorageTotalAwayBalance() public {
+        bytes32 totalAwayBalanceSlot = _treXSlot(12);
+        assertEq(uint256(vm.load(address(token), totalAwayBalanceSlot)), 0);
 
-        vm.store(address(token), totalBridgedSlot, bytes32(uint256(55)));
-        assertEq(token.totalAwayBalance(), 55, "totalAwayBalance is not at offset 2");
-        assertEq(token.totalSupply(), 55, "totalSupply does not count the bridged total");
+        vm.store(address(token), totalAwayBalanceSlot, bytes32(uint256(55)));
+        assertEq(token.totalAwayBalance(), 55, "totalAwayBalance is not at offset 12");
+        assertEq(token.totalSupply(), 55, "totalSupply does not count the away balances");
     }
 
-    /// @dev The ledger ends with `inTransit` (3), `totalOnHold` (4) and `reservedForTickets` (5); the delegation and
-    ///      recall fields that followed are gone.
+    /// @dev The ledger keeps `inTransit` (3), `totalOnHold` (4) and `reservedForTickets` (5) at the develop
+    ///      version's offsets; the delegation and recall fields that followed are kept unused.
     function testTREXTokenStorageHoldsAndReservations() public {
         bytes32 ticketId = bytes32(uint256(7));
         vm.store(address(token), keccak256(abi.encode(ticketId, _treXSlot(3))), bytes32(uint256(11)));

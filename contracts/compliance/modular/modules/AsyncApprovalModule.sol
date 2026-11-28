@@ -264,9 +264,8 @@ contract AsyncApprovalModule is AbstractModuleUpgradeable, AccessManagedOwnableU
     }
 
     /// @dev Opens a request every approver approved, at the lowest maximum approved, by answering the
-    ///  compliance; anyone then sends the ticket with `sendTicket` there. Anyone may call it. A failure, a receipt
-    ///  waiting for the ticket for instance, reverts and leaves the request fully approved, so it can be tried
-    ///  again before the deadline.
+    ///  compliance; anyone then sends the ticket with `sendTicket` there. Anyone may call it. A failure reverts and
+    ///  leaves the request fully approved, so it can be tried again before the deadline.
     function finalize(address compliance, bytes32 ticketId) external {
         Request storage request = _getAsyncApprovalStorage().requests[compliance][ticketId];
         require(request.fullyApproved, ErrorsLib.NotFullyApproved(ticketId));
