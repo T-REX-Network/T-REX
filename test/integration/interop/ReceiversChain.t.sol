@@ -11,8 +11,9 @@ import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
 /// @dev A move from one away chain to another involves both: Alice on Polygon to Bob on Optimism is refused while
-///      Optimism is blocked, closed or under a hostile change, at the ask, at the first send of an approved ticket
-///      and at an ask for its receipt, as it would be for Polygon.
+///      Optimism is blocked, closed or under a hostile change, at the ask and at the first send of an approved ticket,
+///      as it would be for Polygon. An ask for the receipt goes to Polygon: it is refused while Optimism is blocked or
+///      under a hostile change, never because Optimism's route closed since the ask.
 contract ReceiversChainTest is HoldsSuiteTest {
 
     uint256 internal constant FOUR = 4;
@@ -130,6 +131,41 @@ contract ReceiversChainTest is HoldsSuiteTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, optimism));
         boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
+    }
+
+    function test_sendTicket_reverts_when_aHostileChangeRunsOnTheReceiversAwayChainAtAnAskForTheReceipt() public {
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
+        vm.prank(deployer);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")), true);
+        uint64 endsAt = token.hostileChangeEndsAt(optimism);
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, optimism, endsAt));
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
+    }
+
+    /// @notice Optimism's route closes after the ask. The ask for the receipt still goes to Polygon, which owes it,
+    ///         and once it went unanswered for one waiting time anyone cancels the ticket: it is not held open while
+    ///         the receiver's chain stays closed.
+    function test_sendTicket_asksForTheReceipt_whenTheReceiversAwayChainClosedSinceTheAsk() public {
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        uint64 waitingTime = boundCompliance.waitingTimeOf(ticket.fromChainKey);
+        _closeEvmChain(token, OPTIMISM);
+        assertFalse(token.isChainOpen(optimism), "the receiver's chain is closed");
+        vm.warp(ticket.validUntil + waitingTime);
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptAsked(ticketId, 1);
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
+        assertEq(boundCompliance.ticketOf(ticketId).asksForReceipt, 1, "one ask for the receipt stands");
+
+        vm.warp(block.timestamp + waitingTime);
+        bytes32[] memory ticketIds = new bytes32[](1);
+        ticketIds[0] = ticketId;
+        boundCompliance.cancelTickets(ticketIds);
+        _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled after the unanswered ask");
     }
 
     /// @dev Alice on Polygon asks to move 4 to Bob on Optimism, and the approver opens the ticket. Not sent yet.

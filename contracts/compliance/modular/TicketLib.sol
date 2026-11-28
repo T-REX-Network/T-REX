@@ -686,7 +686,8 @@ library TicketLib {
     ///  {waitingEndsAtOf}, an ask for the receipt, at most `MAX_RECEIPT_ASKS` times; one send per waiting time either
     ///  way, see {_requireCanBeSentAgain}. A blocked sender's chain refuses it as it refuses an ask to move, and so do
     ///  a hostile change running on it, see {requireNoHostileChange}, and the token's own pause, see
-    ///  {requireTokenRunning}.
+    ///  {requireTokenRunning}. The receiver's other away chain is held to the same block and hostile change only, see
+    ///  {_requireTheReceiversChainNotBlocked}.
     function _sendAgain(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
@@ -699,7 +700,7 @@ library TicketLib {
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
         requireNoHostileChange(token, chainKey);
-        _requireTheReceiversChainOpen(token, chainKey, to);
+        _requireTheReceiversChainNotBlocked(token, chainKey, to);
 
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
@@ -787,18 +788,38 @@ library TicketLib {
         require(ITREXMessaging(token).isChainOpen(firstChainKey), ErrorsLib.ChainNotOpen(firstChainKey));
     }
 
-    /// @dev A move from one away chain to another involves the receiver's chain too: like the first chain, it must not
-    ///  be blocked, have no hostile change running, have a waiting time, and keep an open receipt route, or its second
-    ///  half could not leave. A receiver at home or on the first chain adds no chain.
+    /// @dev A move from one away chain to another involves the receiver's chain too: at the ask and the first send,
+    ///  like the first chain, it must not be blocked, have no hostile change running, have a waiting time, and keep an
+    ///  open receipt route, or its second half could not leave. A receiver at home or on the first chain adds no chain.
     function _requireTheReceiversChainOpen(address token, bytes32 firstChainKey, bytes calldata to) private view {
-        (bool toHome,) = WalletKeyLib.isReferenceChain(to);
-        bytes32 toChainKey = _chainKeyOf(to);
-        bool toAnotherAwayChain = !toHome && toChainKey != firstChainKey;
+        (bool toAnotherAwayChain, bytes32 toChainKey) = _receiversOtherAwayChain(firstChainKey, to);
         if (!toAnotherAwayChain) return;
         requireAwayChainNotBlocked(toChainKey);
         requireNoHostileChange(token, toChainKey);
         require(layout().waitingTimes[toChainKey] != 0, ErrorsLib.WaitingTimeNotSet(toChainKey));
         require(ITREXMessaging(token).isChainOpen(toChainKey), ErrorsLib.ChainNotOpen(toChainKey));
+    }
+
+    /// @dev A copy sent again involves the receiver's other away chain only as a chain that must not be blocked or
+    ///  have a hostile change running. Its route may have been closed since the ask: the ask for the receipt still
+    ///  goes to the sender's chain, or the ticket could never be cancelled.
+    function _requireTheReceiversChainNotBlocked(address token, bytes32 firstChainKey, bytes calldata to) private view {
+        (bool toAnotherAwayChain, bytes32 toChainKey) = _receiversOtherAwayChain(firstChainKey, to);
+        if (!toAnotherAwayChain) return;
+        requireAwayChainNotBlocked(toChainKey);
+        requireNoHostileChange(token, toChainKey);
+    }
+
+    /// @dev The receiver's away chain, and whether it is another away chain than the one the move's first message
+    ///  goes to.
+    function _receiversOtherAwayChain(bytes32 firstChainKey, bytes calldata to)
+        private
+        view
+        returns (bool toAnotherAwayChain, bytes32 toChainKey)
+    {
+        (bool toHome,) = WalletKeyLib.isReferenceChain(to);
+        toChainKey = _chainKeyOf(to);
+        toAnotherAwayChain = !toHome && toChainKey != firstChainKey;
     }
 
     /// @dev The waiting time of a chain a ticket may go to: not blocked, no hostile change running, and a window

@@ -686,8 +686,9 @@ interface ITickets {
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
     /// - A move `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was sent
     ///   for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop, the block of its
-    ///   away chain, a hostile change and, for an away sender, the open route of its away chain apply to it: a copy
-    ///   from a dropped home block may be held there.
+    ///   away chain, a hostile change, for an away sender the open route of its away chain, and no receipt waiting
+    ///   that can be applied now (`ApplyWaitingReceiptFirst`) apply to it: a copy from a dropped home block may be
+    ///   held there.
     /// - Each other id must be a move stored `Open`, sent or not; otherwise reverts with `TicketNotCancellable`. A
     ///   bring home is never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
     /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` at least one waiting time past
@@ -719,7 +720,8 @@ interface ITickets {
     /// The first send of a ticket the approver opened, toward the chain its first message goes to, read from the
     /// record: the sender's, or the receiver's for a home `from`. At any time: the token not paused and that chain
     /// open as at a request (`TokenPaused`, `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a
-    /// receiver's other away chain as at a request (`AwayChainBlocked`, `HostileChangeNotOver`, `ChainNotOpen`); no
+    /// receiver's other away chain as at a request (`AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`,
+    /// `ChainNotOpen`); no
     /// receipt waiting for the ticket, otherwise `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove`
     /// does with no approval module, and `ReceiptAsked` before it when sent at or after `waitingEndsAt`: that first
     /// send is also the first ask for the receipt. For a home `from`, burns onto hold and sends the `MOVE_OUT`
@@ -743,8 +745,9 @@ interface ITickets {
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - The sender's chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - No hostile change may run on the sender's chain; otherwise reverts with `HostileChangeNotOver`.
-    /// - A receiver on another away chain: that chain not blocked, with no hostile change running, and open on the
-    ///   token; otherwise reverts with `AwayChainBlocked`, `HostileChangeNotOver` or `ChainNotOpen`.
+    /// - A receiver on another away chain: that chain not blocked, with no hostile change running; otherwise reverts
+    ///   with `AwayChainBlocked` or `HostileChangeNotOver`. Its route may have closed since the ask: the copy still
+    ///   goes to the sender's chain, so an unanswered ask can still cancel the ticket.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
     ///
