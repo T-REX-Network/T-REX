@@ -109,6 +109,7 @@ contract AllowedAmountFuzzTest is ModularComplianceBaseUnitTest {
         // The wallet's room, the receipt route the tickets go out on and the token's pause are the stub's, with
         // real state; the registry is the token's.
         vm.etch(token, address(new TokenReservationStub()).code);
+        TokenReservationStub(token).setChainOpen(polygon, true);
         vm.mockCall(token, abi.encodeWithSignature("identityRegistry()"), abi.encode(registry));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", from), abi.encode(aliceIdentity));
         vm.mockCall(registry, abi.encodeWithSignature("resolveIdentity(bytes)", to), abi.encode(bobIdentity));

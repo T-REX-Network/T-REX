@@ -88,11 +88,8 @@ interface ITrustedGatewayRegistry {
     /// @return True when the bridge is trusted.
     function isTrusted(address bridge) external view returns (bool);
 
-    /// @dev The depth, in blocks, a trusted bridge waits for before it relays. Zero is full finality.
-    ///
-    /// Requirements:
-    /// - `bridge` must be trusted; otherwise reverts with `BridgeNotTrusted`, so an unknown bridge is never read as
-    ///   one at full finality.
+    /// @dev The depth, in blocks, recorded for `bridge`: what it waits for before it relays. Zero is full finality.
+    /// Never reverts: an unknown bridge reads zero, so a caller asks `isTrusted` first.
     /// @param bridge The bridge to look up.
     /// @return The recorded depth.
     function depthOf(address bridge) external view returns (uint64);

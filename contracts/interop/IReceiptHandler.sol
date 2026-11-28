@@ -90,8 +90,8 @@ interface IReceiptHandler {
     ///   never sent, waiting for approval or cancelled before it left. It is a bad receipt when another body came for
     ///   the id, when its sender is not on the chain that sent it, when its receiver is not a well formed wallet, or,
     ///   for a ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
-    ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
-    ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt ends the id
+    ///   stopped, its chain is blocked, or its sender cannot cover the amount with its away balance and the uncounted
+    ///   credit it may carry. Then its hash is written and it is booked: a zero receipt ends the id
     ///   `Done`; any other puts its amount on hold under the sender with no destination,
     ///   gives uncounted credit to a receiver on the same away chain, and blocks nobody (`ReceiptWithoutTicket`). For a
     ///   ticket home wrote, a receipt that moved something is first held to that ticket's terms: one that breaks them

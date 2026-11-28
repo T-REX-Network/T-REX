@@ -176,13 +176,8 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc ITREXMessaging
-    function setPeer(bytes32 chainKey, bytes calldata peer) external restricted {
-        _setPeer(chainKey, peer);
-    }
-
-    /// @inheritdoc ITREXMessaging
-    function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external restricted {
-        _replaceHostilePeer(chainKey, peer);
+    function setPeer(bytes32 chainKey, bytes calldata peer, bool replacesAHostilePeer) external restricted {
+        _setPeer(chainKey, peer, replacesAHostilePeer);
     }
 
     /* ----- Interop Dispatch ----- */

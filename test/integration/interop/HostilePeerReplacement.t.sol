@@ -39,7 +39,6 @@
 
 pragma solidity 0.8.30;
 
-import { Vm } from "@forge-std/Vm.sol";
 import { IAccessManaged } from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
@@ -86,7 +85,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
 
         // The peer is set before the route opens: a peer set on an open route is a planned change.
         vm.prank(deployer);
-        token.setPeer(polygon, replacedPeerEnvelope);
+        token.setPeer(polygon, replacedPeerEnvelope, false);
         _openEvmChain(token, POLYGON, address(polygonBridge));
         _openEvmChain(token, OPTIMISM, address(optimismBridge));
 
@@ -105,7 +104,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
 
     /// @notice For four waiting times nothing is asked, asked for or cancelled toward the away chain; other away
     ///         chains go on. At the end of the freeze each of them passes.
-    function test_replaceHostilePeer_freezesAsksAndCancels() public {
+    function test_setPeerReplacingAHostilePeer_freezesAsksAndCancels() public {
         bytes32 ticketToAskFor = _ask(10, 50);
         bytes32 ticketToCancel = _ask(10, 50);
         _askAndLetTheAskGoUnanswered(ticketToCancel, bobOnPolygon, "");
@@ -138,7 +137,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
     /// @notice The approver's answer sends nothing, so it is not frozen; the first send of the approved ticket is,
     ///         and so is the cancel of a ticket still waiting for approval. After the freeze, an approved ticket is
     ///         sent.
-    function test_replaceHostilePeer_freezesTheSendOfAnApprovedTicket_butNotTheApproval() public {
+    function test_setPeerReplacingAHostilePeer_freezesTheSendOfAnApprovedTicket_butNotTheApproval() public {
         AsyncApprovalModule approval = _bindApprovalModule();
         bytes32 approvedInTheFreeze = _ask(10, 50);
         bytes32 waitingInTheFreeze = _ask(10, 50);
@@ -179,15 +178,13 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
     /* ----- No former pair ----- */
 
     /// @notice A hostile change right after a planned one deletes the former pair the planned one kept: the peer of
-    ///         before both is refused at once, and the spacing between changes is lifted.
-    function test_replaceHostilePeer_keepsNoFormerPeer() public {
+    ///         before both is refused at once.
+    function test_setPeerReplacingAHostilePeer_keepsNoFormerPeer() public {
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("plannedPolygonLite")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("plannedPolygonLite")), false);
         vm.warp(block.timestamp + 1);
 
-        vm.recordLogs();
         _replaceThePeer();
-        _assertNoFormerRouteKept(vm.getRecordedLogs());
 
         bytes memory payload = MessageTypesLib.encodeSettlement(_secondHalfReceipt(keccak256("a half never sent")));
         uint256 index = _queue(polygonBridge, replacedPeer, token, payload);
@@ -196,20 +193,21 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
 
         bytes memory nextPlannedPeer = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("nextPlannedPolygonLite"));
         vm.prank(deployer);
-        token.setPeer(polygon, nextPlannedPeer);
+        token.setPeer(polygon, nextPlannedPeer, false);
         assertEq(token.peerFor(polygon), nextPlannedPeer, "a planned change right after is allowed");
     }
 
-    function test_replaceHostilePeer_emitsPeerSetThenHostilePeerReplaced() public {
+    /// @notice A hostile swap is the same peer swap with the hostile mark: it emits `PeerSet` only, and the end of
+    ///         its freeze is read live from `hostileChangeEndsAt`.
+    function test_setPeer_emitsPeerSet_whenItReplacesAHostilePeer() public {
         uint64 endsAt = uint64(block.timestamp) + 4 * POLYGON_WINDOW;
 
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.PeerSet(polygon, replacementPeerEnvelope);
-        vm.expectEmit(true, false, false, true, address(token));
-        emit EventsLib.HostilePeerReplaced(polygon, replacementPeerEnvelope, endsAt);
         _replaceThePeer();
 
         assertEq(token.peerFor(polygon), replacementPeerEnvelope);
+        assertEq(token.hostileChangeEndsAt(polygon), endsAt, "the freeze runs four waiting times");
     }
 
     /* ----- Receipts still land ----- */
@@ -300,11 +298,11 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
     /* ----- Edges ----- */
 
     /// @notice With no waiting time set for the chain, the freeze ends at once.
-    function test_replaceHostilePeer_endsAtOnce_whenTheChainHasNoWaitingTime() public {
+    function test_setPeerReplacingAHostilePeer_endsAtOnce_whenTheChainHasNoWaitingTime() public {
         bytes32 base = _evmChainKey(BASE);
 
         vm.prank(deployer);
-        token.replaceHostilePeer(base, InteroperableAddress.formatEvmV1(BASE, makeAddr("baseLite")));
+        token.setPeer(base, InteroperableAddress.formatEvmV1(BASE, makeAddr("baseLite")), true);
 
         assertEq(token.hostileChangeEndsAt(base), block.timestamp, "no freeze");
     }
@@ -331,10 +329,10 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         assertEq(token.hostileChangeEndsAt(optimism), 0);
     }
 
-    function test_replaceHostilePeer_reverts_when_theCallerHasNoRole() public {
+    function test_setPeerReplacingAHostilePeer_reverts_when_theCallerHasNoRole() public {
         vm.prank(anyone);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, anyone));
-        token.replaceHostilePeer(polygon, replacementPeerEnvelope);
+        token.setPeer(polygon, replacementPeerEnvelope, true);
     }
 
     /* ----- Helpers ----- */
@@ -346,7 +344,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
     /// @dev Replaces Polygon's peer as hostile and returns when the freeze ends.
     function _replaceThePeer() private returns (uint64 endsAt) {
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, replacementPeerEnvelope);
+        token.setPeer(polygon, replacementPeerEnvelope, true);
         endsAt = token.hostileChangeEndsAt(polygon);
     }
 
@@ -401,13 +399,6 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         vm.prank(backend);
         approval.approveValidation(address(boundCompliance), ticketId, approvedMax);
         approval.finalize(address(boundCompliance), ticketId);
-    }
-
-    function _assertNoFormerRouteKept(Vm.Log[] memory logs) private pure {
-        for (uint256 i = 0; i < logs.length; i++) {
-            bool hasTopic = logs[i].topics.length > 0;
-            if (hasTopic) assertTrue(logs[i].topics[0] != EventsLib.FormerRouteKept.selector, "no former pair kept");
-        }
     }
 
     function _ids(bytes32 ticketId) private pure returns (bytes32[] memory ids) {

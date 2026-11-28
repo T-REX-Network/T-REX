@@ -726,8 +726,9 @@ library ReceiptLib {
     ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
     ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
     ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
-    ///  deliver its receipt, see {_requireReceiptRouteOpen}: that is {closeByHand}'s. Nor while a receipt for it waits and can be applied now,
-    ///  see {_requireNoWaitingReceiptToApply}.
+    ///  deliver its receipt, see {_requireReceiptRouteOpen}: that is {closeByHand}'s. Nor while a receipt for its
+    ///  first half waits and can be applied now, a ticket waiting for approval included, see
+    ///  {_requireNoWaitingReceiptToApply}.
     /// @param token the token the compliance is bound to
     function cancelTickets(bytes32[] calldata validationIds, address token) external {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
@@ -744,6 +745,7 @@ library ReceiptLib {
             if (waitingForApproval) {
                 (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
                 if (!fromHome) _requireReceiptRouteOpen(token, ticket.fromChainKey);
+                _requireNoWaitingReceiptToApply(store, ticketId, ticket, token);
                 TicketLib.discardUnanswered(ticketId, token);
                 continue;
             }
@@ -873,8 +875,8 @@ library ReceiptLib {
 
     /// @dev The away chain a close by hand reads, once it is known: the chain of the ticket's latest half, or the
     ///  stored receipt's sender's for an id with no record. It must deliver no receipt, and nothing is decided under
-    ///  a stop or a hostile change. A block is checked per case: an open move is cancelled on a closed route even
-    ///  while its chain is blocked.
+    ///  a stop. A block is checked per case: an open move is cancelled on a closed route even while its chain is
+    ///  blocked. A hostile change freezes only that cancel, see {_cancelOnTheClosedRoute}.
     /// @return chainKey the away chain read
     function _requireTheChainIsClosed(bytes32 ticketId, ITickets.AwayChainReading calldata reading, address token)
         private
@@ -891,7 +893,6 @@ library ReceiptLib {
         bool routeClosed = ITREXMessaging(token).receiptRouteFor(chainKey) == address(0);
         require(routeClosed, ErrorsLib.ReceiptRouteNotClosed(chainKey));
         TicketLib.requireTokenRunning(token);
-        TicketLib.requireNoHostileChange(token, chainKey);
     }
 
     /// @dev No receipt in the read. A receipt waiting at home for the latest half says otherwise, so it is read again
@@ -922,17 +923,14 @@ library ReceiptLib {
         }
         TicketLib.requireAwayChainNotBlocked(chainKey);
         TicketLib.requireAwayChainNotBlocked(ticket.fromChainKey);
-        if (!ticket.written) {
-            HoldLib.closeHoldByHand(ticketId, receiver, reading.awayClockTime, token);
-            return 0;
-        }
+        if (!ticket.written) return HoldLib.closeHoldByHand(ticketId, receiver, reading.awayClockTime, token);
         return SecondHalfLib.closeHalfByHand(ticketId, reading.awayClockTime, token);
     }
 
-    /// @dev An open move, or one waiting for approval, on a closed route is cancelled once the away chain's clock in the read is past every valid
-    ///  until a copy of the ticket can carry there: home's own, moved by up to the chain's reorg slot shift for a copy
-    ///  from a home block a reorg dropped that may still be on its way, the one a still open answer reported, and the
-    ///  stored copy's.
+    /// @dev An open move, or one waiting for approval, on a closed route is cancelled once the away chain's clock in
+    ///  the read is past every valid until a copy of the ticket can carry there: home's own, moved by up to the chain's
+    ///  reorg slot shift for a copy from a home block a reorg dropped that may still be on its way, the one a still
+    ///  open answer reported, and the stored copy's. A cancel, so not while a hostile change runs on that chain.
     function _cancelOnTheClosedRoute(
         TicketLib.ValidationStorage storage store,
         ITickets.Ticket storage ticket,
@@ -940,6 +938,7 @@ library ReceiptLib {
         ITickets.AwayChainReading calldata reading,
         address token
     ) private {
+        TicketLib.requireNoHostileChange(token, ticket.fromChainKey);
         uint64 reorgSlotShift = store.measuredTimes[ticket.fromChainKey].reorgSlotShift;
         uint64 latestValidUntil = ticket.validUntil + reorgSlotShift;
         if (ticket.seenValidUntil > latestValidUntil) latestValidUntil = ticket.seenValidUntil;

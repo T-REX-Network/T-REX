@@ -91,7 +91,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementLite")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementLite")), true);
 
         _approve(ticketId, 50);
 
@@ -227,7 +227,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     function test_sendTicket_reverts_when_aHostileChangeRunsAtTheFirstSend() public {
         bytes32 ticketId = _askAndApprove(bobSat, 50);
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementLite")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementLite")), true);
         uint64 endsAt = token.hostileChangeEndsAt(polygon);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
@@ -616,14 +616,16 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         uint64 stopWaitingAt = boundCompliance.ticketOf(ticketId).stopWaitingAt;
         vm.warp(stopWaitingAt - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, stopWaitingAt));
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.cancelHold(ticketId);
 
         uint256 heldAmount = boundCompliance.ticketOf(ticketId).moved;
         vm.warp(stopWaitingAt);
+        vm.prank(stranger);
+        boundCompliance.cancelHold(ticketId);
         vm.expectEmit(true, true, false, false, address(boundCompliance));
         emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, heldAmount, 0);
         vm.prank(stranger);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.sendSecondHalf(ticketId, bobSat);
     }
 
     function _assertNothingSent(Vm.Log[] memory logs) private pure {

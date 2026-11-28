@@ -268,7 +268,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        _cancelHold(ticketId, bobSat);
         uint256 oldBringHome = _nextUndelivered(polygonGateway);
         _closeEvmChain(token, POLYGON);
         uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
@@ -611,7 +611,7 @@ contract CloseByHandTest is HoldsSuiteTest {
     function test_closeByHand_returnsOnlyTheLatestHalfAmount() public {
         (bytes32 aliceId,) = _bookAliceAndLetBobSpend(1);
         vm.warp(boundCompliance.ticketOf(aliceId).stopWaitingAt);
-        boundCompliance.cancelHold(aliceId, bobSat);
+        _cancelHold(aliceId, bobSat);
         _relayAll(polygonGateway);
         assertEq(boundCompliance.ticketOf(aliceId).moved, 1, "short: 1 left on hold");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - 1, "1 returned to alice");
@@ -750,7 +750,8 @@ contract CloseByHandTest is HoldsSuiteTest {
         boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(halfValidUntil));
     }
 
-    function test_closeByHand_reverts_when_aHostileChangeRuns() public {
+    /// @notice Closing an open move by hand is a cancel, which a hostile change freezes.
+    function test_closeByHand_reverts_when_aHostileChangeRunsOnTheChainOfAnOpenMove() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, FOUR, FOUR);
         _replacePolygonPeerAsHostile();
         _closeEvmChain(token, POLYGON);
@@ -759,6 +760,21 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
         boundCompliance.closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
+    }
+
+    /// @notice A hostile change freezes asks, ticket sends, asks for receipts and cancels only: a half whose chain is
+    ///         under one is still closed by hand.
+    function test_closeByHand_closesASecondHalf_whileAHostileChangeRunsOnItsChain() public {
+        bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(FOUR);
+        vm.prank(deployer);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")), true);
+        _closeEvmChain(token, OPTIMISM);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+        assertGt(token.hostileChangeEndsAt(optimism), block.timestamp, "the hostile change runs");
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(ticketId, FOUR, uint64(block.number), validUntil);
+        _closeByHand(ticketId, bobOptimismSat, _reading(validUntil));
     }
 
     function test_closeByHand_reverts_when_theCallerHasNoRole() public {
@@ -860,14 +876,70 @@ contract CloseByHandTest is HoldsSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "nothing goes back to her away wallet");
     }
 
-    function test_closeByHand_reverts_when_theHoldWithNoTicketLeftItsChain() public {
+    /// @notice Money on hold with no ticket whose tokens left their chain goes back to its sender; that chain is the
+    ///         closed one, so it is minted to the sender's identity contract once its cancel is due.
+    function test_closeByHand_mintsAHoldWithNoTicketToTheSendersIdentityContract_whenItLeftItsClosedChain() public {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobOptimismSat, FOUR);
         polygonGateway.relay(receiptIndex);
         _closeEvmChain(token, POLYGON);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        uint256 supplyBefore = token.totalSupply();
 
-        _expectNotCancellable(ticketId, ITickets.TicketStatus.OnHold);
-        boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(uint64(block.timestamp)));
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(ticketId, FOUR, uint64(block.number), uint64(block.timestamp));
+        _closeByHand(ticketId, bobOptimismSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        assertEq(token.onHoldOf(ticketId), 0, "nothing left on hold");
+        assertEq(token.totalSupply(), supplyBefore, "the supply does not move");
+        _assertPositionsAreTheSupply();
+    }
+
+    /// @notice A hold that left its chain carrying an earlier hold's credit: the earlier move is applied first for the
+    ///         carried part, so the return never gives back money the earlier hold still counts.
+    function test_closeByHand_appliesTheCarriedPartFirst_whenAHoldThatLeftItsChainCarriesCredit() public {
+        uint256 amount = 2;
+        (bytes32 aliceId,, uint256 aliceReceipt) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, amount);
+        (bytes32 bobId,, uint256 bobReceipt) = _droppedAsk(bobOnPolygon, bobSat, bobOptimismSat, amount);
+        polygonGateway.relay(aliceReceipt);
+        polygonGateway.relay(bobReceipt);
+        assertEq(boundCompliance.ticketOf(bobId).carriedAmount, amount, "bob's hold carries alice's credit");
+        _closeEvmChain(token, POLYGON);
+        vm.warp(boundCompliance.ticketOf(bobId).stopWaitingAt);
+
+        _closeByHand(bobId, bobOptimismSat, _reading(uint64(block.timestamp)));
+
+        _assertStatus(aliceId, ITickets.TicketStatus.Done, "alice's move applied for the carried part");
+        _assertStatus(bobId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(bobIdentity)), amount, "minted to bob's identity contract");
+        assertEq(token.onHoldOf(aliceId), 0, "nothing left on alice's hold");
+        _assertPositionsAreTheSupply();
+    }
+
+    /// @notice The same once the cancel's move out back to the sender is out to the closed chain: past its valid
+    ///         until on that chain's clock, the money is minted to the sender's identity contract.
+    function test_closeByHand_mintsAHoldWithNoTicketToTheSendersIdentityContract_whenItsReturnIsOut() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobOptimismSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _cancelHold(ticketId, aliceSat);
+        _closeEvmChain(token, POLYGON);
+        uint64 returnValidUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.AwayClockBeforeValidUntil.selector, ticketId, returnValidUntil - 1, returnValidUntil
+            )
+        );
+        boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(returnValidUntil - 1));
+
+        _closeByHand(ticketId, bobOptimismSat, _reading(returnValidUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        _assertPositionsAreTheSupply();
     }
 
     /* ----- Helpers ----- */

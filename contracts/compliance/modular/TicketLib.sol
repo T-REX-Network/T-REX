@@ -135,7 +135,7 @@ library TicketLib {
         /// What the ticket route toward each away chain carried in its current window of one waiting time, held
         /// under the chain's per-window cap, see {ITickets-TicketLimits}.
         mapping(bytes32 chainKey => TicketRouteVolume volume) ticketRouteVolumes;
-        /// New asks refused for one away chain: the chain the first message of the ask goes to.
+        /// New asks refused for one away chain: every ask the chain is involved in, as the sender's or the receiver's.
         mapping(bytes32 chainKey => bool paused) asksPausedOn;
     }
 
@@ -215,14 +215,14 @@ library TicketLib {
         address authority
     ) external returns (bytes32 ticketId) {
         require(!layout().asksPaused, ErrorsLib.AsksPaused());
-        require(requestedMin <= requestedMax, ErrorsLib.InvalidRequestedRange(requestedMin, requestedMax));
+        require(requestedMin <= requestedMax, ErrorsLib.EmptyValidationRange(requestedMin, requestedMax));
 
         Draft memory draft;
         draft.amountMin = requestedMin;
         draft.amountMax = requestedMax;
         draft.requestedMax = requestedMax;
         _resolveRoute(draft, from, to, spender);
-        require(!layout().asksPausedOn[_firstChainOf(draft)], ErrorsLib.AsksPaused());
+        _requireAsksOpenOnBothChains(draft);
         _requireCallerOwnsTheWallet(draft, from, token, authority);
 
         ticketId = ticketIdOf(
@@ -235,6 +235,10 @@ library TicketLib {
             salt
         );
         if (_mayTakeTheHold(ticketId)) {
+            // A take skips the ticket rules, but it is still an ask: counted against the identity's asks per window.
+            ValidationStorage storage store = layout();
+            _requireWithinTheAskRate(store, draft.fromIdentity);
+            _countTheAskInTheWindow(store, draft.fromIdentity);
             _takeTheHold(ticketId, from, to, spender, salt, draft, token);
             return ticketId;
         }
@@ -352,8 +356,17 @@ library TicketLib {
         draft.fromKey = WalletKeyLib.canonicalKey(from);
         draft.toKey = WalletKeyLib.canonicalKey(to);
         if (spender.length == 0) return;
-        require(!fromHome, ErrorsLib.ValidationSpenderRefused(spender));
+        (, address homeSpender) = WalletKeyLib.isReferenceChain(spender);
+        require(!fromHome, ErrorsLib.SpenderNotAllowed(homeSpender, homeWallet, address(0), draft.requestedMax));
         WalletKeyLib.parse(spender);
+    }
+
+    /// @dev Asks paused on a chain refuse every ask that chain is involved in: the sender's and the receiver's. A home
+    ///  wallet's key is never paused, so a move to or from home is ruled by its away chain alone.
+    function _requireAsksOpenOnBothChains(Draft memory draft) private view {
+        ValidationStorage storage store = layout();
+        require(!store.asksPausedOn[draft.fromChainKey], ErrorsLib.AsksPaused());
+        require(!store.asksPausedOn[draft.toChainKey], ErrorsLib.AsksPaused());
     }
 
     /// @dev The chain the move's first message goes to: the sender's away chain for its ticket, or the receiver's
@@ -372,12 +385,17 @@ library TicketLib {
         ITickets.AskLimits memory limits = store.askLimits;
         IdentityAsks memory asks = store.identityAsks[draft.fromIdentity];
         require(asks.openTickets < limits.openTicketsPerIdentity, ErrorsLib.TooManyOpenTickets(draft.fromIdentity));
-        uint32 asksSoFar = _asksInTheCurrentWindow(asks, limits.askWindow);
-        require(asksSoFar < askLimitOf(store, draft.fromIdentity), ErrorsLib.AskLimitReached(draft.fromIdentity));
+        _requireWithinTheAskRate(store, draft.fromIdentity);
         require(
             draft.requestedMax >= limits.smallestAmount,
             ErrorsLib.BelowMinimumAmount(draft.requestedMax, limits.smallestAmount)
         );
+    }
+
+    /// @dev The identity's asks in the current window below its limit: every ask, a take of money on hold included.
+    function _requireWithinTheAskRate(ValidationStorage storage store, address identity) private view {
+        uint32 asksSoFar = _asksInTheCurrentWindow(store.identityAsks[identity], store.askLimits.askWindow);
+        require(asksSoFar < askLimitOf(store, identity), ErrorsLib.AskLimitReached(identity));
     }
 
     /// @dev The asks an identity made in its current window; zero once the window is over.
@@ -387,14 +405,12 @@ library TicketLib {
         return asks.asksInWindow;
     }
 
-    /// @dev Counts an ask against its identity: one more open ticket, one more ask in the window, a new window once
-    ///  the last one is over.
-    function _countTheAsk(ValidationStorage storage store, address identity) private {
+    /// @dev Counts an ask against its identity: one more ask in the window, a new window once the last one is over.
+    function _countTheAskInTheWindow(ValidationStorage storage store, address identity) private {
         IdentityAsks storage asks = store.identityAsks[identity];
         uint32 asksSoFar = _asksInTheCurrentWindow(asks, store.askLimits.askWindow);
         if (asksSoFar == 0) asks.windowStartedAt = uint64(block.timestamp);
         asks.asksInWindow = asksSoFar + 1;
-        asks.openTickets += 1;
     }
 
     /// @dev The asks per window `identity` may make: its own limit when it has one, the token's otherwise.
@@ -748,15 +764,17 @@ library TicketLib {
     }
 
     /// @dev The waiting time of the chain the move's first message goes to. The token must be running, and that chain
-    ///  open and configured: this is where a request is refused with `TokenPaused`.
+    ///  open and configured: this is where a request is refused with `TokenPaused`. Its open receipt route with a peer
+    ///  is checked here, at the ask itself, since an ask that waits for approval sends nothing.
     function _openTheFirstChain(address token, bytes32 firstChainKey) private view returns (uint64 window) {
         requireTokenRunning(token);
         window = _openChainWindow(layout(), token, firstChainKey);
+        require(ITREXMessaging(token).isChainOpen(firstChainKey), ErrorsLib.ChainNotOpen(firstChainKey));
     }
 
     /// @dev A move from one away chain to another involves the receiver's chain too: like the first chain, it must not
-    ///  be blocked, have no hostile change running, and keep an open receipt route, or its second half could not
-    ///  leave. A receiver at home or on the first chain adds no chain.
+    ///  be blocked, have no hostile change running, have a waiting time, and keep an open receipt route, or its second
+    ///  half could not leave. A receiver at home or on the first chain adds no chain.
     function _requireTheReceiversChainOpen(address token, bytes32 firstChainKey, bytes calldata to) private view {
         (bool toHome,) = WalletKeyLib.isReferenceChain(to);
         bytes32 toChainKey = _chainKeyOf(to);
@@ -764,6 +782,7 @@ library TicketLib {
         if (!toAnotherAwayChain) return;
         requireAwayChainNotBlocked(toChainKey);
         requireNoHostileChange(token, toChainKey);
+        require(layout().waitingTimes[toChainKey] != 0, ErrorsLib.WaitingTimeNotSet(toChainKey));
         require(ITREXMessaging(token).isChainOpen(toChainKey), ErrorsLib.ChainNotOpen(toChainKey));
     }
 
@@ -974,7 +993,8 @@ library TicketLib {
 
         ValidationStorage storage store = layout();
         if (stored.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = stored.stopWaitingAt;
-        _countTheAsk(store, draft.fromIdentity);
+        _countTheAskInTheWindow(store, draft.fromIdentity);
+        store.identityAsks[draft.fromIdentity].openTickets += 1;
         if (!draft.onReceiptRoute) _countOnTheTicketRoute(store, draft);
 
         // A home wallet's tokens are burned in the ask itself, or at the first send after the approval, so nothing is

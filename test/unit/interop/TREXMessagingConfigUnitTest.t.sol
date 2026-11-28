@@ -203,10 +203,17 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         assertFalse(token.isChainOpen(evmChain));
     }
 
-    function test_closeReceiptRoute_RevertWhen_TheRouteIsNotSet() public {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, evmChain));
-        vm.prank(identityManager);
+    function test_closeReceiptRoute_closesAgain_whenTheRouteIsAlreadyClosed() public {
+        vm.startPrank(identityManager);
+        token.setReceiptRoute(evmType, evmRef, trustedGateway, awayChainSelector, awayReceiptBridge);
         token.closeReceiptRoute(evmChain);
+
+        vm.expectEmit(true, false, false, true, address(token));
+        emit EventsLib.ReceiptRouteClosed(evmChain);
+        token.closeReceiptRoute(evmChain);
+        vm.stopPrank();
+
+        assertEq(token.receiptRouteFor(evmChain), address(0), "the route stays closed");
     }
 
     function test_closeReceiptRoute_RevertWhen_TheCallerHasNoRole() public {
@@ -276,14 +283,14 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         assertFalse(token.isChainOpen(nonEvmChain), "routed, but nowhere to send to");
 
         vm.prank(identityManager);
-        token.setPeer(nonEvmChain, nonEvmPeer);
+        token.setPeer(nonEvmChain, nonEvmPeer, false);
 
         assertTrue(token.isChainOpen(nonEvmChain));
     }
 
     function testSetPeerRegistersTheChainToo() public {
         vm.prank(identityManager);
-        token.setPeer(nonEvmChain, nonEvmPeer);
+        token.setPeer(nonEvmChain, nonEvmPeer, false);
 
         (bytes2 chainType, bytes memory chainReference) = token.chainOf(nonEvmChain);
         assertEq(chainType, nonEvmType);
@@ -293,7 +300,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     function testSetPeerRevertsWhenThePeerIsOnAnotherChain() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChainMismatch.selector, evmChain, nonEvmChain));
         vm.prank(identityManager);
-        token.setPeer(evmChain, nonEvmPeer);
+        token.setPeer(evmChain, nonEvmPeer, false);
     }
 
     /// @dev Trailing bytes decode to the same peer but never equal a gateway's canonical sender.
@@ -302,7 +309,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidPeer.selector, padded));
         vm.prank(identityManager);
-        token.setPeer(nonEvmChain, padded);
+        token.setPeer(nonEvmChain, padded, false);
     }
 
     function testSetPeerRevertsOnAnEmptyAccount() public {
@@ -310,7 +317,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidPeer.selector, chainOnly));
         vm.prank(identityManager);
-        token.setPeer(nonEvmChain, chainOnly);
+        token.setPeer(nonEvmChain, chainOnly, false);
     }
 
     /// @dev A left-padded EVM account names the same Lite, but a gateway reports 20 bytes, so no message would match.
@@ -319,7 +326,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidPeer.selector, padded));
         vm.prank(identityManager);
-        token.setPeer(evmChain, padded);
+        token.setPeer(evmChain, padded, false);
     }
 
     function testEmptyPeerRestoresTheDefault() public {
@@ -327,10 +334,10 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         token.setReceiptRoute(evmType, evmRef, trustedGateway, awayChainSelector, awayReceiptBridge);
 
         bytes memory explicitPeer = InteroperableAddress.formatEvmV1(0x89, makeAddr("OtherLite"));
-        token.setPeer(evmChain, explicitPeer);
+        token.setPeer(evmChain, explicitPeer, false);
         assertEq(token.peerFor(evmChain), explicitPeer);
 
-        token.setPeer(evmChain, "");
+        token.setPeer(evmChain, "", false);
         vm.stopPrank();
 
         assertEq(token.peerFor(evmChain), InteroperableAddress.formatEvmV1(0x89, address(token)));
@@ -340,7 +347,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     function testEmptyPeerRevertsOnAChainNeverSeen() public {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotRegistered.selector, evmChain));
         vm.prank(identityManager);
-        token.setPeer(evmChain, "");
+        token.setPeer(evmChain, "", false);
     }
 
     function testIdentityManagerRegistersANonEvmPeer() public {
@@ -348,7 +355,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
         emit EventsLib.PeerSet(nonEvmChain, nonEvmPeer);
 
         vm.prank(identityManager);
-        token.setPeer(nonEvmChain, nonEvmPeer);
+        token.setPeer(nonEvmChain, nonEvmPeer, false);
 
         assertEq(token.peerFor(nonEvmChain), nonEvmPeer);
     }
@@ -356,7 +363,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
     function testSetPeerRevertsWhenNotIdentityManager() public {
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, agent));
         vm.prank(agent);
-        token.setPeer(nonEvmChain, nonEvmPeer);
+        token.setPeer(nonEvmChain, nonEvmPeer, false);
     }
 
     /* ----- Storage isolation ----- */
@@ -372,7 +379,7 @@ contract TREXMessagingConfigUnitTest is TokenBaseUnitTest {
 
         vm.startPrank(identityManager);
         token.setReceiptRoute(evmType, evmRef, trustedGateway, awayChainSelector, awayReceiptBridge);
-        token.setPeer(nonEvmChain, nonEvmPeer);
+        token.setPeer(nonEvmChain, nonEvmPeer, false);
         vm.stopPrank();
 
         assertEq(token.balanceOf(user1), balanceBefore);

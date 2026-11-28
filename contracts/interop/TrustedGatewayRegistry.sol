@@ -110,7 +110,6 @@ contract TrustedGatewayRegistry is ITrustedGatewayRegistry, AccessManagedOwnable
 
     /// @inheritdoc ITrustedGatewayRegistry
     function depthOf(address bridge) external view returns (uint64) {
-        require(isTrusted(bridge), ErrorsLib.BridgeNotTrusted(bridge));
         return _records[bridge].depth;
     }
 

@@ -39,7 +39,6 @@
 
 pragma solidity 0.8.30;
 
-import { Vm } from "@forge-std/Vm.sol";
 import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-InteroperableAddress.sol";
 
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
@@ -54,8 +53,8 @@ import { SatelliteLiteMock } from "test/integration/mocks/SatelliteLiteMock.sol"
 /// @dev A planned change of an away chain's receipt route or peer. Home changes first and keeps the pair it had as
 ///      the former pair for four waiting times: every receipt the away token sent before it switched still lands on
 ///      it, an ask for the receipt of a ticket pinned to it still reaches the away token that holds the ticket, and a
-///      receipt that came on it inside the window and waits stays applicable after the window. Two changes on one
-///      chain stay four waiting times apart.
+///      receipt that came on it inside the window and waits stays applicable after the window. Changes on one chain
+///      are planned four waiting times apart; the token does not refuse a second one.
 contract PlannedRouteChangesTest is InteropSuiteTest {
 
     uint256 internal constant ALICE_HOME_BALANCE = 1000;
@@ -82,7 +81,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
         // The away token is the peer before the route opens: a peer set on an open route is a planned change.
         vm.prank(deployer);
-        token.setPeer(polygon, liteEnvelope);
+        token.setPeer(polygon, liteEnvelope, false);
         _openEvmChain(token, POLYGON, address(polygonBridge));
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");
@@ -134,29 +133,34 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         polygonBridge.relay(tooLateIndex);
     }
 
-    /// @notice A second change inside the window would drop the former pair while receipts on it may still travel:
-    ///         both setters refuse it until the window ends.
-    function test_setReceiptRoute_reverts_when_aSecondChangeComesInsideTheSwapWindow() public {
+    /// @notice Changes are planned four waiting times apart, but the token does not refuse a second change inside
+    ///         the window: it passes, and the older pair is dropped, so a receipt on it is refused.
+    function test_setReceiptRoute_dropsTheOlderPair_whenASecondChangeComesInsideTheSwapWindow() public {
         uint64 acceptedUntil = uint64(block.timestamp) + 4 * POLYGON_WINDOW;
+        bytes32 neverSent = keccak256("a second half home never sent");
         _changeRoute();
         ERC7786GatewayMock thirdBridge = _newReceiptBridge(POLYGON);
-        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
-        bytes memory tooRecent =
-            abi.encodeWithSelector(ErrorsLib.RouteChangedTooRecently.selector, polygon, acceptedUntil);
+        uint256 onTheOlderPair =
+            _formerLiteSends(polygonBridge, MessageTypesLib.encodeSettlement(_secondHalfReceipt(neverSent)));
+
+        vm.warp(acceptedUntil - 1);
+        _openEvmChain(token, POLYGON, address(thirdBridge));
+
+        assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the second change passes inside the window");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(polygonBridge), polygon));
+        polygonBridge.relay(onTheOlderPair);
+    }
+
+    /// @notice A second peer change inside the window passes too.
+    function test_setPeer_passes_whenASecondChangeComesInsideTheSwapWindow() public {
+        uint64 acceptedUntil = uint64(block.timestamp) + 4 * POLYGON_WINDOW;
+        _changeRoute();
 
         vm.warp(acceptedUntil - 1);
         vm.prank(deployer);
-        vm.expectRevert(tooRecent);
-        token.setReceiptRoute(
-            chainType, chainReference, address(thirdBridge), _awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON)
-        );
-        vm.prank(deployer);
-        vm.expectRevert(tooRecent);
-        token.setPeer(polygon, nextPeerEnvelope);
+        token.setPeer(polygon, nextPeerEnvelope, false);
 
-        vm.warp(acceptedUntil);
-        _openEvmChain(token, POLYGON, address(thirdBridge));
-        assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the change passes once the window ends");
+        assertEq(token.peerFor(polygon), nextPeerEnvelope, "the second change passes inside the window");
     }
 
     /// @notice The window is four of the chain's waiting times after the change, the waiting time read as it is at
@@ -176,17 +180,12 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         polygonBridge.relay(index);
         assertEq(uint8(boundCompliance.statusOf(answeredLate)), uint8(ITickets.TicketStatus.Done), "still taken");
 
-        ERC7786GatewayMock thirdBridge = _newReceiptBridge(POLYGON);
-        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RouteChangedTooRecently.selector, polygon, endAfterTheChange));
-        vm.prank(deployer);
-        token.setReceiptRoute(
-            chainType, chainReference, address(thirdBridge), _awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON)
-        );
-
+        bytes32 neverSent = keccak256("a second half home never sent");
+        uint256 afterTheEnd =
+            _formerLiteSends(polygonBridge, MessageTypesLib.encodeSettlement(_secondHalfReceipt(neverSent)));
         vm.warp(endAfterTheChange);
-        _openEvmChain(token, POLYGON, address(thirdBridge));
-        assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the change passes at the new end");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotOnRoute.selector, address(polygonBridge), polygon));
+        polygonBridge.relay(afterTheEnd);
     }
 
     /// @notice A closed route has no pair a change could drop: inside the window of an earlier change, its peer and
@@ -199,7 +198,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         ERC7786GatewayMock thirdBridge = _newReceiptBridge(POLYGON);
 
         vm.prank(deployer);
-        token.setPeer(polygon, nextPeerEnvelope);
+        token.setPeer(polygon, nextPeerEnvelope, false);
         _openEvmChain(token, POLYGON, address(thirdBridge));
 
         assertEq(token.peerFor(polygon), nextPeerEnvelope, "the peer of a closed route is set inside the window");
@@ -308,31 +307,17 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
     /* ----- What a change keeps ----- */
 
-    /// @notice A chain with no receipt route takes no receipt, so a change there keeps nothing and starts no window.
-    function test_setPeer_keepsNoFormerRoute_whenTheChainHasNoRoute() public {
+    /// @notice A chain with no receipt route takes no receipt, so a change there has nothing to keep.
+    function test_setPeer_passesASecondChangeAtOnce_whenTheChainHasNoRoute() public {
         bytes32 base = _evmChainKey(BASE);
         bytes memory secondPeer = InteroperableAddress.formatEvmV1(BASE, makeAddr("nextBaseLite"));
 
-        vm.recordLogs();
         vm.startPrank(deployer);
-        token.setPeer(base, InteroperableAddress.formatEvmV1(BASE, makeAddr("baseLite")));
-        token.setPeer(base, secondPeer);
+        token.setPeer(base, InteroperableAddress.formatEvmV1(BASE, makeAddr("baseLite")), false);
+        token.setPeer(base, secondPeer, false);
         vm.stopPrank();
 
-        _assertNoFormerRouteKept(vm.getRecordedLogs());
         assertEq(token.peerFor(base), secondPeer, "the second change passed at once");
-    }
-
-    function test_setReceiptRoute_keepsNoFormerRoute_whenTheChainHasNoRoute() public {
-        ERC7786GatewayMock firstBaseBridge = _newReceiptBridge(BASE);
-        ERC7786GatewayMock secondBaseBridge = _newReceiptBridge(BASE);
-
-        vm.recordLogs();
-        _openEvmChain(token, BASE, address(firstBaseBridge));
-        _assertNoFormerRouteKept(vm.getRecordedLogs());
-
-        _openEvmChain(token, BASE, address(secondBaseBridge));
-        assertEq(token.receiptRouteFor(_evmChainKey(BASE)), address(secondBaseBridge), "no window held it back");
     }
 
     /// @notice A peer change on an open route keeps the bridge and the old peer as the former pair: a receipt from
@@ -342,8 +327,6 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         bytes32 neverSent = keccak256("a second half home never sent");
         bytes memory payload = MessageTypesLib.encodeSettlement(_secondHalfReceipt(neverSent));
 
-        vm.expectEmit(true, true, false, true, address(token));
-        emit EventsLib.FormerRouteKept(polygon, address(polygonBridge), keccak256(liteEnvelope), acceptedUntil);
         vm.expectEmit(true, false, false, true, address(token));
         emit EventsLib.PeerSet(polygon, nextPeerEnvelope);
         _changePeer();
@@ -584,7 +567,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
     /// @dev A planned change of Polygon's peer, the route kept.
     function _changePeer() private {
         vm.prank(deployer);
-        token.setPeer(polygon, nextPeerEnvelope);
+        token.setPeer(polygon, nextPeerEnvelope, false);
     }
 
     function _receipt(bytes32 ticketId, uint256 amount) private view returns (MessageTypesLib.ReceiptMessage memory) {
@@ -637,13 +620,6 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         for (uint256 i = 0; i < gateway.queueLength(); i++) {
             ERC7786GatewayMock.QueuedMessage memory message = gateway.queuedMessage(i);
             if (message.deliveries == 0 && !message.dropped) gateway.relay(i);
-        }
-    }
-
-    function _assertNoFormerRouteKept(Vm.Log[] memory logs) private pure {
-        for (uint256 i = 0; i < logs.length; i++) {
-            bool hasTopic = logs[i].topics.length > 0;
-            if (hasTopic) assertTrue(logs[i].topics[0] != EventsLib.FormerRouteKept.selector, "no former pair kept");
         }
     }
 

@@ -75,9 +75,11 @@ import { TREXMessagingLib } from "./TREXMessagingLib.sol";
  * gateways, which one carries this token's traffic to a given chain, and which peer it will talk to
  * there.
  *
- * A token and its Lite on each satellite are messaging peers, and nothing sits between them. The token
- * sends through its route, addressed to its peer; it accepts inbound only from that same pair. There is
- * no shared per-chain intermediary on either side, and none is needed.
+ * A token and its Lite on each satellite are messaging peers, and nothing sits between them. Each away chain
+ * has two routes: tickets go out on its ticket route (or its receipt route when none is set), and money
+ * messages go out on its receipt route, addressed to the peer. A receipt is taken only from a receipt bridge:
+ * the bridge and peer its half was pinned to, the chain's current ones, or, for four waiting times after a
+ * planned change, its former ones. There is no shared per-chain intermediary on either side.
  *
  * Everything here fails closed. A token opens no chain by default, refuses to send to a chain it was
  * not explicitly opened for, and re-reads the registry on every use, so an emergency gateway removal
@@ -210,12 +212,8 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
         TREXMessagingLib.setTicketRoute(chainType, chainReference, bridge);
     }
 
-    function _setPeer(bytes32 chainKey, bytes calldata peer) internal {
-        TREXMessagingLib.setPeer(chainKey, peer);
-    }
-
-    function _replaceHostilePeer(bytes32 chainKey, bytes calldata peer) internal {
-        TREXMessagingLib.replaceHostilePeer(chainKey, peer);
+    function _setPeer(bytes32 chainKey, bytes calldata peer, bool replacesAHostilePeer) internal {
+        TREXMessagingLib.setPeer(chainKey, peer, replacesAHostilePeer);
     }
 
     /// @dev Sends a ticket to this token's peer on `chainKey`, on its ticket route when set, pinning the half to

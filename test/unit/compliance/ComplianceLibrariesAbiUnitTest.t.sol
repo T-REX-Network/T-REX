@@ -97,7 +97,7 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(IModularCompliance.ModuleHasNoType.selector, ErrorsLib.ModuleHasNoType.selector);
         assertEq(IModularCompliance.DuplicateModuleType.selector, ErrorsLib.DuplicateModuleType.selector);
         assertEq(IModularCompliance.ModuleNotBound.selector, ErrorsLib.ModuleNotBound.selector);
-        assertEq(ITickets.InvalidRequestedRange.selector, ErrorsLib.InvalidRequestedRange.selector);
+        assertEq(ITickets.SpenderNotAllowed.selector, ErrorsLib.SpenderNotAllowed.selector);
         assertEq(ITickets.NotACrossChainMove.selector, ErrorsLib.NotACrossChainMove.selector);
         assertEq(ITickets.FrozenWallet.selector, ErrorsLib.FrozenWallet.selector);
         assertEq(ITickets.SecondHalfNotOwed.selector, ErrorsLib.SecondHalfNotOwed.selector);

@@ -483,7 +483,6 @@ contract TREXAccessManagerUnitTest is Test {
         _assertRow(target, token, ITREXMessaging.closeReceiptRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setTicketRoute.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, ITREXMessaging.setPeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
-        _assertRow(target, token, ITREXMessaging.replaceHostilePeer.selector, domainId, RolesLib.Role.IDENTITY_MANAGER);
         _assertRow(target, token, IERC3643.mint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.batchMint.selector, domainId, RolesLib.Role.AGENT_MINTER);
         _assertRow(target, token, IERC3643.burn.selector, domainId, RolesLib.Role.AGENT_BURNER);

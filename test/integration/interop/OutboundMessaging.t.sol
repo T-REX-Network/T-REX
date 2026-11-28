@@ -278,7 +278,7 @@ contract OutboundMessagingTest is InteropSuiteTest {
         _dispatch(ticketId, solana);
 
         vm.prank(deployer);
-        token.setPeer(solana, hex"0001000201010401020304");
+        token.setPeer(solana, hex"0001000201010401020304", false);
 
         _dispatch(ticketId, solana);
         assertEq(solanaRoute.queuedMessage(0).recipient, hex"0001000201010401020304");

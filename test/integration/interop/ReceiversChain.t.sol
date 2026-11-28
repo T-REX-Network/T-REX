@@ -16,6 +16,7 @@ import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 contract ReceiversChainTest is HoldsSuiteTest {
 
     uint256 internal constant FOUR = 4;
+    uint256 internal constant BASE = 8453;
     address internal approver = makeAddr("approver");
 
     /* ----- The ask ----- */
@@ -37,9 +38,43 @@ contract ReceiversChainTest is HoldsSuiteTest {
         boundCompliance.askToMove(aliceSat, bobOptimismSat, FOUR, FOUR, "", _salt());
     }
 
+    /// @notice Asks paused on the receiver's away chain refuse a move toward it, though its first message goes to
+    ///         the sender's chain.
+    function test_askToMove_reverts_when_asksArePausedOnTheReceiversAwayChain() public {
+        vm.prank(deployer);
+        boundCompliance.setAsksPaused(optimism, true);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(ErrorsLib.AsksPaused.selector);
+        boundCompliance.askToMove(aliceSat, bobOptimismSat, FOUR, FOUR, "", _salt());
+    }
+
+    /// @notice A receiver's away chain with an open route but no waiting time is refused at the ask: its second half
+    ///         could never go there.
+    function test_askToMove_reverts_when_theReceiversAwayChainHasNoWaitingTime() public {
+        bytes32 base = _evmChainKey(BASE);
+        _openEvmChain(token, BASE, address(_newReceiptBridge(BASE)));
+        bytes memory bobBaseSat = _linkSatelliteWallet(bobIdentity, BASE, makeAccount("bobOnBase"));
+        assertTrue(token.isChainOpen(base), "the route is open");
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.WaitingTimeNotSet.selector, base));
+        boundCompliance.askToMove(aliceSat, bobBaseSat, FOUR, FOUR, "", _salt());
+    }
+
+    /// @notice An ask that waits for approval sends nothing, so the sender's chain is checked open at the ask itself.
+    function test_askToMove_reverts_when_theSendersAwayChainIsClosed_whileAnApprovalModuleIsBound() public {
+        _bindApprovalModule(approver);
+        _closeEvmChain(token, POLYGON);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
+        boundCompliance.askToMove(aliceSat, bobSat, FOUR, FOUR, "", _salt());
+    }
+
     function test_askToMove_reverts_when_aHostileChangeRunsOnTheReceiversAwayChain() public {
         vm.prank(deployer);
-        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")), true);
         uint64 endsAt = token.hostileChangeEndsAt(optimism);
 
         vm.prank(address(aliceIdentity));

@@ -157,7 +157,7 @@ contract TicketSettingsTest is InteropSuiteTest {
 
         vm.warp(stopWaitingAt - 1);
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
         token.setCompliance(address(fresh));
 
         vm.warp(stopWaitingAt);

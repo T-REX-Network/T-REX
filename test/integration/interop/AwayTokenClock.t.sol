@@ -36,7 +36,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
         polygonGateway = _newReceiptBridge(POLYGON);
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         _openEvmChain(token, POLYGON, address(polygonGateway));
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");

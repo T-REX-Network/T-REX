@@ -36,8 +36,8 @@ contract SecondHalvesAwayTokensTest is InteropSuiteTest {
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
         vm.startPrank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)), false);
         vm.stopPrank();
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));

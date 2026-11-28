@@ -109,14 +109,16 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         boundCompliance.bringHome(aliceHome, BROUGHT, alice, _salt());
     }
 
-    function test_bringHome_reverts_while_aHostilePeerChangeRuns() public {
+    /// @notice A hostile change freezes asks, ticket sends, asks for receipts and cancels: a bring home still leaves.
+    function test_bringHome_writesAnOpenBringHome_whileAHostilePeerChangeRuns() public {
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementPeer")));
-        uint64 endsAt = token.hostileChangeEndsAt(polygon);
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementPeer")), true);
+        assertGt(token.hostileChangeEndsAt(polygon), block.timestamp, "the hostile change runs");
 
         vm.prank(agent);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
-        boundCompliance.bringHome(aliceOnA, BROUGHT, alice, _salt());
+        bytes32 ticketId = boundCompliance.bringHome(aliceOnA, BROUGHT, alice, _salt());
+
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open), "the bring home is out");
     }
 
     function test_bringHome_reverts_when_theAwayChainHasNoWaitingTime() public {
@@ -352,7 +354,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         bytes32 id = _bringHome(BROUGHT);
         bytes memory formerPeer = token.peerFor(polygon);
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonPeer")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonPeer")), false);
         vm.warp(boundCompliance.ticketOf(id).secondHalfValidUntil + POLYGON_WINDOW);
 
         boundCompliance.sendSecondHalf(id, aliceOnA);
@@ -372,7 +374,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
     function test_sendSecondHalf_reverts_when_theBringHomesPeerWasReplacedAsHostile() public {
         bytes32 id = _bringHome(BROUGHT);
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementPeer")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("replacementPeer")), true);
         vm.warp(token.hostileChangeEndsAt(polygon) + 1);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, polygon));

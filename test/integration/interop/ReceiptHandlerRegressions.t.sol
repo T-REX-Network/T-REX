@@ -72,7 +72,7 @@ contract ReceiptHandlerRegressionsTest is InteropSuiteTest {
         polygonBridge = _newReceiptBridge(POLYGON);
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonBridge);
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         _openEvmChain(token, POLYGON, address(polygonBridge));
 
         aliceOnPolygon = makeAccount("aliceOnPolygon");

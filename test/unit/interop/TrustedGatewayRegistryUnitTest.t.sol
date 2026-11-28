@@ -184,15 +184,16 @@ contract TrustedGatewayRegistryUnitTest is AccessManagerHelper {
         vm.stopPrank();
     }
 
-    function test_depthOf_RevertWhen_TheBridgeIsNotTrusted() public {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotTrusted.selector, bridge));
-        registry.depthOf(bridge);
+    function test_depthOf_returnsTheRecordedDepth_whenTheBridgeIsNotTrusted() public {
+        assertEq(registry.depthOf(bridge), 0, "an unknown bridge reads depth zero");
 
-        vm.prank(interopManager);
-        registry.setTrustedGateway(bridge, false, 0);
+        vm.startPrank(interopManager);
+        registry.setTrustedGateway(bridge, true, 3);
+        registry.setTrustedGateway(bridge, false, 7);
+        vm.stopPrank();
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.BridgeNotTrusted.selector, bridge));
-        registry.depthOf(bridge);
+        assertFalse(registry.isTrusted(bridge), "the bridge is distrusted");
+        assertEq(registry.depthOf(bridge), 7, "a distrusted bridge still reads its recorded depth");
     }
 
     function test_setTrustedGateway_RevertWhen_TheBridgeIsZeroAtADepth() public {

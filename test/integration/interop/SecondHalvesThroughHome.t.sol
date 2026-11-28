@@ -472,7 +472,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         bytes32 id = _firstHalfLanded(MOVED);
         bytes memory formerPeer = token.peerFor(optimism);
         vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")), false);
         vm.warp(_secondSendDueAt(id));
 
         boundCompliance.sendSecondHalf(id, bobOnB);
@@ -514,7 +514,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
     function test_sendSecondHalf_reverts_when_theFormerPeersWindowEnded() public {
         bytes32 id = _firstHalfLanded(MOVED);
         vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")), false);
         vm.warp(_secondSendDueAt(id));
         boundCompliance.sendSecondHalf(id, bobOnB);
 
@@ -530,7 +530,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
     function test_sendSecondHalf_reverts_when_thePinnedPeerWasReplacedAsHostile() public {
         bytes32 id = _firstHalfLanded(MOVED);
         vm.prank(deployer);
-        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer")));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer")), true);
         vm.warp(token.hostileChangeEndsAt(optimism) + 1);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, optimism));
@@ -591,7 +591,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         vm.clearMockedCalls();
         bytes memory replacementPeer = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer"));
         vm.prank(deployer);
-        token.replaceHostilePeer(optimism, replacementPeer);
+        token.setPeer(optimism, replacementPeer, true);
         assertGt(token.hostileChangeEndsAt(optimism), block.timestamp, "the hostile change runs");
 
         boundCompliance.sendSecondHalf(id, bobOnB);
@@ -620,17 +620,6 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         _closeEvmChain(token, OPTIMISM);
 
         _aSendsTheTicketsReceipt(id, bobOnB, MOVED);
-
-        _assertGoesBackToAlice(id);
-    }
-
-    function test_receiveReceipt_returnsTheMoney_whenTheReceiversChainHasNoWaitingTime() public {
-        (, bytes32 base) = _openBase();
-        bytes memory bobOnBase = _linkSatelliteWallet(bobIdentity, BASE, makeAccount("bobOnBase"));
-        assertEq(boundCompliance.waitingTimeOf(base), 0);
-        bytes32 id = _requestValidation(address(aliceIdentity), aliceOnA, bobOnBase, MOVED, MOVED);
-
-        _aSendsTheTicketsReceipt(id, bobOnBase, MOVED);
 
         _assertGoesBackToAlice(id);
     }
@@ -800,7 +789,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
     function test_sendOnReceiptRoute_reverts_when_aPinnedHalfIsSentAfterAHostilePeerChange() public {
         bytes32 id = _firstHalfLanded(MOVED);
         vm.prank(deployer);
-        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")));
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismPeer")), true);
 
         vm.prank(address(boundCompliance));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.PeerChanged.selector, optimism));

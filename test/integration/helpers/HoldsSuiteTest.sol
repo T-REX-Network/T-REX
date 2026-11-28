@@ -53,8 +53,8 @@ abstract contract HoldsSuiteTest is InteropSuiteTest {
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
         vm.startPrank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)), false);
         vm.stopPrank();
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));
@@ -280,7 +280,14 @@ abstract contract HoldsSuiteTest is InteropSuiteTest {
     /// @dev Replaces the polygon peer as hostile: a hostile change runs on polygon from now.
     function _replacePolygonPeerAsHostile() internal {
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonAwayToken")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonAwayToken")), true);
+    }
+
+    /// @dev Starts the cancel of money on hold with no ticket and sends its first half to `wallet`: the receiver for
+    ///  tokens that stayed on their away chain, the sender for tokens that left it.
+    function _cancelHold(bytes32 ticketId, bytes memory wallet) internal {
+        boundCompliance.cancelHold(ticketId);
+        boundCompliance.sendSecondHalf(ticketId, wallet);
     }
 
     /// @dev Binds an approval module answered by `approver`; an approval module is bound only while asks are paused.

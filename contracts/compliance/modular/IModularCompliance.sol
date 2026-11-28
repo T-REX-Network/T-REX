@@ -86,8 +86,8 @@ interface IModularCompliance is IERC3643Compliance {
      *  there cannot be more than 25 modules bound to the modular compliance for gas cost reasons
      *  the module must name at least one type in `moduleTypes`, and it is sorted into the list of each type
      *  it names, so the compliance only calls it where it said it answers
-     *  reverts with `TicketsStillReserved` while a ticket holds a reservation, and, for a module of the
-     *  `APPROVAL` type, with `AsksNotPaused` unless asks are paused for the whole token
+     *  allowed while tickets are open; a module of the `APPROVAL` type reverts with `AsksNotPaused` unless asks
+     *  are paused for the whole token
      *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleAdded event and a ModuleTypesRecorded event
      */
@@ -104,8 +104,7 @@ interface IModularCompliance is IERC3643Compliance {
      *  it gained
      *  removing and re-adding the module is not the same thing: an unbind increments the module's bind nonce,
      *  which is how a module scopes its per-compliance settings, so the rebound module comes back unconfigured
-     *  reverts with `TicketsStillReserved` while a ticket holds a reservation, and, for an approval module, with
-     *  `AsksNotPaused` unless asks are paused
+     *  allowed while tickets are open; an approval module reverts with `AsksNotPaused` unless asks are paused
      *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleTypesRecorded event, including when nothing changed
      */
@@ -114,8 +113,7 @@ interface IModularCompliance is IERC3643Compliance {
     /**
      *  @dev removes a module from the list of compliance modules
      *  @param _module address of the module to remove
-     *  reverts with `TicketsStillReserved` while a ticket holds a reservation, and, for an approval module, with
-     *  `AsksNotPaused` unless asks are paused
+     *  allowed while tickets are open; an approval module reverts with `AsksNotPaused` unless asks are paused
      *  Restricted to the configured AccessManager role (OWNER).
      *  Emits a ModuleRemoved event
      */
@@ -135,7 +133,7 @@ interface IModularCompliance is IERC3643Compliance {
 
     /**
      *  @dev calls any function on bound modules
-     *  can be called only on bound modules, and not while a ticket holds a reservation (`TicketsStillReserved`)
+     *  can be called only on bound modules, also while tickets are open
      *  @param callData the bytecode for interaction with the module, abi encoded
      *  @param _module The address of the module
      *  Restricted to the configured AccessManager role (OWNER).
@@ -161,8 +159,7 @@ interface IModularCompliance is IERC3643Compliance {
      * - The `_module` must not already be bound to the contract.
      * - The total number of modules must not exceed 25 after adding the new module.
      * - The `_interactions` array must contain no more than 5 elements to prevent out-of-gas errors.
-     * - No ticket may hold a reservation (`TicketsStillReserved`), and an approval module needs asks paused
-     *   (`AsksNotPaused`).
+     * - An approval module needs asks paused (`AsksNotPaused`). Open tickets do not hold it back.
      *
      * Operations:
      * - The function first adds the module using the `addModule` function.

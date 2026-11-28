@@ -254,7 +254,6 @@ library TREXMessagingLib {
         require(isReceiptBridge(bridge), ErrorsLib.NotAReceiptBridge(bridge));
         bytes32 chainKey = _registerChain(messagingStorage, chainType, chainReference);
         _requireFullFinality(bridge, chainKey, awayChainSelector, awayReceiptBridge);
-        _requireNoChangeInsideTheWindow(messagingStorage, chainKey);
 
         _keepTheFormerRoute(messagingStorage, chainKey);
         messagingStorage.receiptRoutes[chainKey] = bridge;
@@ -267,10 +266,7 @@ library TREXMessagingLib {
 
     /// @dev See {ITREXMessaging-closeReceiptRoute}. Authorization is the caller's.
     function closeReceiptRoute(bytes32 chainKey) external {
-        MessagingStorage storage messagingStorage = layout();
-        require(messagingStorage.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
-
-        delete messagingStorage.receiptRoutes[chainKey];
+        delete layout().receiptRoutes[chainKey];
 
         emit EventsLib.ReceiptRouteClosed(chainKey);
     }
@@ -291,29 +287,20 @@ library TREXMessagingLib {
     }
 
     /// @dev See {ITREXMessaging-setPeer}. Authorization is the caller's.
-    function setPeer(bytes32 chainKey, bytes calldata peer) external {
-        MessagingStorage storage messagingStorage = layout();
-        _requireNoChangeInsideTheWindow(messagingStorage, chainKey);
-        _requireValidPeer(messagingStorage, chainKey, peer);
-
-        _keepTheFormerRoute(messagingStorage, chainKey);
-        messagingStorage.peers[chainKey] = peer;
-
-        emit EventsLib.PeerSet(chainKey, peer);
-    }
-
-    /// @dev See {ITREXMessaging-replaceHostilePeer}. Authorization is the caller's.
-    function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external {
+    function setPeer(bytes32 chainKey, bytes calldata peer, bool replacesAHostilePeer) external {
         MessagingStorage storage messagingStorage = layout();
         _requireValidPeer(messagingStorage, chainKey, peer);
 
-        // No former pair: home cannot tell a receipt of the hostile peer from an honest one.
-        delete messagingStorage.formerReceiptRoutes[chainKey];
-        messagingStorage.hostileChangedAt[chainKey] = uint64(block.timestamp);
+        if (replacesAHostilePeer) {
+            // No former pair: home cannot tell a receipt of the hostile peer from an honest one.
+            delete messagingStorage.formerReceiptRoutes[chainKey];
+            messagingStorage.hostileChangedAt[chainKey] = uint64(block.timestamp);
+        } else {
+            _keepTheFormerRoute(messagingStorage, chainKey);
+        }
         messagingStorage.peers[chainKey] = peer;
 
         emit EventsLib.PeerSet(chainKey, peer);
-        emit EventsLib.HostilePeerReplaced(chainKey, peer, hostileChangeEndsAt(chainKey));
     }
 
     /// @dev See {ITREXMessaging-hostileChangeEndsAt}. Computed from the waiting time as it is now, so changing it
@@ -648,22 +635,10 @@ library TREXMessagingLib {
         return pinnedToTheFormerPair && isReceiptBridge(pin.bridge);
     }
 
-    /// @dev Changes of route or peer on one away chain stay a window apart: a second change would drop the former
-    ///  pair while receipts sent on it may still be on their way. A closed route keeps no new pair, so it drops
-    ///  nothing and may be set again at once (see `_keepTheFormerRoute`).
-    function _requireNoChangeInsideTheWindow(MessagingStorage storage messagingStorage, bytes32 chainKey) private view {
-        bool chainHasARoute = messagingStorage.receiptRoutes[chainKey] != address(0);
-        if (!chainHasARoute) return;
-        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
-        bool keepsAFormerPair = former.bridge != address(0);
-        if (!keepsAFormerPair) return;
-        uint64 allowedAt = _formerPairEndsAt(chainKey, former);
-        require(block.timestamp >= allowedAt, ErrorsLib.RouteChangedTooRecently(chainKey, allowedAt));
-    }
-
     /// @dev Keeps the route and peer an open away chain has now as its former pair, for one window. Home changes
     ///  first: the away token switches after, and the receipts it sent before switching arrive on this pair. A
-    ///  closed or never routed chain takes no receipt, so it has nothing to keep.
+    ///  closed or never routed chain takes no receipt, so it has nothing to keep. A second change inside the window
+    ///  drops the older pair, which is why the runbook plans changes at least four waiting times apart.
     function _keepTheFormerRoute(MessagingStorage storage messagingStorage, bytes32 chainKey) private {
         address currentBridge = messagingStorage.receiptRoutes[chainKey];
         if (currentBridge == address(0)) return;
@@ -673,10 +648,6 @@ library TREXMessagingLib {
         former.bridge = currentBridge;
         former.changedAt = uint64(block.timestamp);
         former.peer = currentPeer;
-
-        emit EventsLib.FormerRouteKept(
-            chainKey, currentBridge, keccak256(currentPeer), _formerPairEndsAt(chainKey, former)
-        );
     }
 
     /// @dev Until when `former` is taken: four of the chain's waiting times after its change, the waiting time read

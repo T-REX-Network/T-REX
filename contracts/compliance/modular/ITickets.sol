@@ -123,7 +123,7 @@ interface ITickets {
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
     event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount, uint64 awayBlockNumber, uint64 awayClockTime);
 
-    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
+    error SpenderNotAllowed(address spender, address from, address to, uint256 value);
     error NotACrossChainMove();
     error FrozenWallet(address user);
     error SecondHalfNotOwed(bytes32 ticketId);
@@ -456,14 +456,15 @@ interface ITickets {
     /// blocks the sender's chain (`AwayChainBlockSet`). Emits `HoldTaken`.
     ///
     /// Requirements:
-    /// - Asks not paused for every chain, nor for the chain the first message goes to; otherwise reverts with
+    /// - Asks not paused for every chain, nor for `from`'s chain or `to`'s chain; otherwise reverts with
     ///   `AsksPaused`.
-    /// - `requestedMin <= requestedMax`; otherwise reverts with `InvalidRequestedRange`.
+    /// - `requestedMin <= requestedMax`; otherwise reverts with `EmptyValidationRange(requestedMin, requestedMax)`.
     /// - The id of the request not yet recorded, or money on hold the ask may take; otherwise reverts with
     ///   `TicketAlreadyWritten`.
     /// - Both envelopes, and `spender` when given, canonical; otherwise `NonCanonicalInteroperableAddress`.
     /// - `from` and `to` not both home wallets; otherwise reverts with `NotACrossChainMove`.
-    /// - No spender for a home `from`; otherwise reverts with `ValidationSpenderRefused`.
+    /// - No spender for a home `from`; otherwise reverts with `SpenderNotAllowed(spender, from, 0, requestedMax)`,
+    ///   the spender as a home address, or zero when it is an away wallet.
     /// - The caller is the identity an away `from` is linked to, a home `from` itself (never its identity), or
     ///   authorised by the AccessManager for this selector; otherwise reverts with `NotAuthorizedForWallet`. Every ask counts in the limits of `from`'s
     ///   identity, a home wallet's included.
@@ -474,15 +475,18 @@ interface ITickets {
     /// - No hostile change running on that chain, see {ITREXMessaging-hostileChangeEndsAt}; otherwise
     ///   `HostileChangeNotOver`.
     /// - The sender's identity below its open tickets and its asks in the current window; otherwise
-    ///   `TooManyOpenTickets` or `AskLimitReached`.
+    ///   `TooManyOpenTickets` or `AskLimitReached`. A take of money on hold is an ask too: it is refused over the asks
+    ///   in the window (`AskLimitReached`) and counted there, but not as an open ticket.
     /// - `from` bound to an identity (revoked included) and `to` eligible; otherwise `UnverifiedWallet`.
     /// - `requestedMax` at least the smallest amount, and at most `from`'s free balance: its away balance less what
     ///   is reserved, or a home wallet's unfrozen balance; otherwise `BelowMinimumAmount` or `RequestAboveBalance`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
     /// - A home `from` not frozen; otherwise `FrozenWallet`.
-    /// - The chain the first message goes to open on the token; otherwise the token reverts with `ChainNotOpen`.
-    /// - For a receiver on another away chain, that chain too not blocked, with no hostile change running, and open
-    ///   on the token; otherwise `AwayChainBlocked`, `HostileChangeNotOver` or `ChainNotOpen`.
+    /// - The chain the first message goes to open on the token, a receipt route with a peer, checked at the ask even
+    ///   when it waits for approval; otherwise `ChainNotOpen`.
+    /// - For a receiver on another away chain, that chain too not blocked, with no hostile change running, with a
+    ///   waiting time, and open on the token; otherwise `AwayChainBlocked`, `HostileChangeNotOver`,
+    ///   `WaitingTimeNotSet` or `ChainNotOpen`.
     ///
     /// Emits `TicketWritten`, then the token's `HalfPinned` and `ProtocolMessageSent`. For a home `from`: the token's
     /// `HeldInTransit` and `Transfer`, `SecondHalfSent`, then the token's `HalfPinned` and `ProtocolMessageSent`.
@@ -580,8 +584,8 @@ interface ITickets {
     /// @param times The measured times, in seconds.
     function setMeasuredTimes(bytes32 chainKey, MeasuredTimes calldata times) external;
 
-    /// @dev Pauses or resumes new asks whose first message goes to `chainKey`, or every new ask when `chainKey` is
-    /// zero. Receipts, asks for receipts and cancels go on, so the tickets already out can end. Binding an approval
+    /// @dev Pauses or resumes new asks that involve `chainKey`, as the sender's or the receiver's chain, or every new
+    /// ask when `chainKey` is zero. Receipts, asks for receipts and cancels go on, so the tickets already out can end. Binding an approval
     /// module needs every ask paused.
     ///
     /// Requirements:
@@ -760,9 +764,10 @@ interface ITickets {
     ///
     /// An owed half, one that died answered zero after its valid until, is sent as a new half, with a fresh valid
     /// until: the send time plus the waiting time of its chain. At most `MAX_NEW_HALVES` halves per money on hold.
-    /// A half whose send failed inside its receipt's delivery never left, and is sent under its own number. An owed
-    /// bring home of the cancel of money on hold is sent as `cancelHold` sends it, for what the receiver's uncounted
-    /// credit covers, never while a later hold carries this one's credit (`LaterHoldStillCarries`).
+    /// A half whose send failed inside its receipt's delivery never left, and is sent under its own number. The halves
+    /// of a cancel `cancelHold` started are sent here: an owed bring home on the receiver for what its uncounted credit
+    /// covers, zero included, never while a later hold carries this one's credit (`LaterHoldStillCarries`), and the
+    /// move out back to the sender.
     ///
     /// Otherwise the latest half is sent again, byte for byte, as an ask for its receipt: the away token answers with
     /// its stored receipt or a zero receipt. At most `MAX_SENDS_PER_HALF` sends per half, at fixed times: the second
@@ -825,33 +830,29 @@ interface ITickets {
         external
         returns (bytes32 ticketId);
 
-    /// @dev Cancels money on hold with no ticket, for anyone, once nobody took it: a receipt home has no ticket for
-    /// was booked on hold under its sender, see {IReceiptHandler-receiveReceipt}, and the same ask was not mined again
-    /// before `stopWaitingAt`. When the away token moved the tokens to a wallet on its own chain, the cancel first
-    /// sends a `BRING_HOME` on that receiver for at most its uncounted credit; what it burns goes back to the sender by
-    /// a `MOVE_OUT`, as uncounted credit for the part this hold carried from an earlier one. When the tokens left the
-    /// away chain, they go back to the sender by a `MOVE_OUT` at once. A bring home that burns less than it asked is a
-    /// short cancel: the rest stays on hold, announced, and is not sent again until carried credit comes back to the
-    /// receiver; then `cancelHold` sends it again. Money on hold whose credit a later hold carries is cancelled after
-    /// that later one, last in, first out. A bring home that expired unexecuted is sent again with `cancelHold` or
-    /// `sendSecondHalf`.
+    /// @dev Starts the cancel of money on hold with no ticket, for anyone, once nobody took it: a receipt home has no
+    /// ticket for was booked on hold under its sender, see {IReceiptHandler-receiveReceipt}, and the same ask was not
+    /// mined again before `stopWaitingAt`. The cancel's first half is then owed, and `sendSecondHalf` sends it with the
+    /// wallet it goes to, since the record keeps no wallet's bytes. When the away token moved the tokens to a wallet on
+    /// its own chain, that half is a `BRING_HOME` on the receiver for at most its uncounted credit; what it burns goes
+    /// back to the sender by a `MOVE_OUT`, as uncounted credit for the part this hold carried from an earlier one. When
+    /// the tokens left the away chain, it is a `MOVE_OUT` back to the sender. A bring home that burns less than it
+    /// asked, zero included, is a short cancel: the rest stays on hold, announced, and is not sent again until carried
+    /// credit comes back to the receiver; `sendSecondHalf` then sends it again. Money on hold whose credit a later hold
+    /// carries is cancelled after that later one, last in, first out.
     ///
     /// Requirements:
     /// - `ticketId` must be recorded; otherwise reverts with `UnknownTicket`.
-    /// - It must be money on hold with no ticket; otherwise reverts with `TicketNotCancellable`.
-    /// - `receiver` must have the key of the receiver the receipt named; otherwise reverts with
-    ///   `ValidationBodyMismatch`.
+    /// - It must be money on hold with no ticket whose cancel has not started; otherwise reverts with
+    ///   `TicketNotCancellable`.
     /// - The token not paused, the sender's away chain not blocked and no hostile change running on it; otherwise
     ///   reverts with `TokenPaused`, `AwayChainBlocked` or `HostileChangeNotOver`.
+    /// - At or after `stopWaitingAt`; otherwise reverts with `CancelNotDue`.
     /// - No later hold carrying its credit; otherwise reverts with `LaterHoldStillCarries`.
-    /// - A first cancel only at or after `stopWaitingAt`; otherwise reverts with `CancelNotDue`. A cancel already
-    ///   started only when its next bring home is owed; otherwise reverts with `TicketNotCancellable`.
     ///
-    /// Emits `SecondHalfSent` and the token's `HalfPinned` and `ProtocolMessageSent`, or `CancelHoldShort` when the receiver has no uncounted credit left to burn.
+    /// Emits nothing: the half's `SecondHalfSent` follows from `sendSecondHalf`.
     /// @param ticketId The id the money on hold is kept under.
-    /// @param receiver ERC-7930 interoperable address of the receiver the receipt named, read off
-    /// `ReceiptWithoutTicket`.
-    function cancelHold(bytes32 ticketId, bytes calldata receiver) external;
+    function cancelHold(bytes32 ticketId) external;
 
     /// @dev Closes by hand what waits on an away chain whose receipt route was closed with `closeReceiptRoute`, the
     /// only way there (a distrusted bridge is not): no receipt can land from it, and its silence cannot tell a dead chain from a lost message. So home

@@ -114,6 +114,9 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         // selectors mocked below, so only the reservation calls actually reach the stub.
         vm.etch(token, address(new TokenReservationStub()).code);
         TokenReservationStub(token).setBridgedBalance(fromSat, BRIDGED_BALANCE);
+        // The ask checks that its chains have an open receipt route with a peer.
+        TokenReservationStub(token).setChainOpen(polygon, true);
+        TokenReservationStub(token).setChainOpen(optimism, true);
 
         _bind(fromSat, aliceIdentity);
         _bind(toSat, bobIdentity);
@@ -168,7 +171,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
     function test_requestTransferValidation_RevertWhen_RangeIsInverted() public configured {
         vm.prank(aliceIdentity);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InvalidRequestedRange.selector, 20, 10));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.EmptyValidationRange.selector, 20, 10));
         mc.askToMove(fromSat, toSat, 20, 10, "", _salt());
     }
 
@@ -177,7 +180,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
     function test_askToMove_reverts_when_aHomeSenderNamesASpender() public configured {
         bytes memory spender = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("spender"));
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, spender));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, address(0), alice, address(0), 40));
         mc.askToMove(nativeAlice, toSat, 10, 40, spender, _salt());
 
         _assertNothingRecorded(nativeAlice, toSat, spender, 10, 40);

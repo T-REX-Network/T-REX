@@ -237,14 +237,15 @@ library SecondHalfLib {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
         ITickets.Ticket storage ticket = store.validations[ticketId];
-        bool onHoldWithAHalf = ticket.status == ITickets.TicketStatus.OnHold && ticket.half != 0;
+        // The bring home of a cancel of money on hold with no ticket is sent again while it is out, or sent anew once
+        // it is owed, the first one included, for what the receiver's uncounted credit covers then.
+        bool aCancelsBringHome = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
+        bool anOwedCancelsBringHome = aCancelsBringHome && ticket.secondHalfOwed;
+        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
+        bool onHoldWithAHalf = onHold && (ticket.half != 0 || anOwedCancelsBringHome);
         bool anOpenBringHome =
             ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
         require(onHoldWithAHalf || anOpenBringHome, ErrorsLib.SecondHalfNotOwed(ticketId));
-        // The bring home of a cancel of money on hold with no ticket is sent again while it is out, or sent anew once
-        // it is owed, for what the receiver's uncounted credit covers then.
-        bool aCancelsBringHome = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
-        bool anOwedCancelsBringHome = aCancelsBringHome && ticket.secondHalfOwed;
         if (aCancelsBringHome) {
             bool sendable = TicketLib.aBringHomeIsOut(ticket) || anOwedCancelsBringHome;
             require(sendable, ErrorsLib.SecondHalfNotOwed(ticketId));
@@ -397,12 +398,12 @@ library SecondHalfLib {
         require(!TicketLib.isRecorded(TicketLib.layout(), ticketId), ErrorsLib.TicketAlreadyWritten(ticketId));
     }
 
-    /// @dev The away chain a bring home's half goes to: the token runs, the chain is not blocked and has no hostile
-    ///  change running, and it has a waiting time to give the half its valid until.
+    /// @dev The away chain a bring home's half goes to: the token runs, the chain is not blocked, and it has a waiting
+    ///  time to give the half its valid until. A hostile change does not hold it: it freezes asks, ticket sends, asks
+    ///  for receipts and cancels only.
     function _requireChainTakesTheHalf(bytes32 chainKey, address token) private view {
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(chainKey);
-        TicketLib.requireNoHostileChange(token, chainKey);
         uint64 waitingTime = TicketLib.layout().waitingTimes[chainKey];
         require(waitingTime != 0, ErrorsLib.WaitingTimeNotSet(chainKey));
     }
@@ -712,8 +713,9 @@ library SecondHalfLib {
     /* ----- Sending a half, shared with {HoldLib} ----- */
 
     /// @dev The cancel's `BRING_HOME` on the receiver, for at most its uncounted credit, which it takes until the
-    ///  answer gives back what did not burn. With no credit left there is nothing to burn: a short cancel at once.
-    ///  Both doors send it: {HoldLib-cancelHold} and, once a bring home of the cancel is owed, {sendSecondHalf}.
+    ///  answer gives back what did not burn. Sent even for zero: one that executes and burns nothing is a short cancel,
+    ///  announced by its answer. {sendSecondHalf} sends it once it is owed; a take the receiver may not take sends it
+    ///  from inside the ask.
     function sendTheCancelsBringHome(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
@@ -725,13 +727,6 @@ library SecondHalfLib {
         uint256 amount = ticket.moved;
         if (credit < amount) amount = credit;
         ticket.secondHalfToKey = receiverKey;
-        if (amount == 0) {
-            ticket.secondHalfOwed = false;
-            ticket.shortCancel = true;
-            emit EventsLib.CancelHoldShort(ticketId, ticket.moved);
-            return;
-        }
-
         IToken(token).setUncountedCredit(receiverKey, credit - amount);
         ticket.amountMax = amount;
         takeANewHalf(ticket, ticketId);

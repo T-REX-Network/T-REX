@@ -87,7 +87,7 @@ contract PinnedOriginTest is InteropSuiteTest {
 
     function _changePeer() private {
         vm.prank(deployer);
-        token.setPeer(satellite, InteroperableAddress.formatEvmV1(POLYGON, newLite));
+        token.setPeer(satellite, InteroperableAddress.formatEvmV1(POLYGON, newLite), false);
     }
 
     /// @dev The receipt got through the transport and reached the compliance, which announces it.

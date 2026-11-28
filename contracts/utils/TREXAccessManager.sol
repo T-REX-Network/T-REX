@@ -276,7 +276,6 @@ contract TREXAccessManager is AccessManagerUpgradeable {
         _setTargetFunctionRole(token, ITREXMessaging.closeReceiptRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setTicketRoute.selector, identityManagerRole);
         _setTargetFunctionRole(token, ITREXMessaging.setPeer.selector, identityManagerRole);
-        _setTargetFunctionRole(token, ITREXMessaging.replaceHostilePeer.selector, identityManagerRole);
 
         // From here on, one agent verb per role. Each batch has a row of its own, on the role of its single-item
         // function: without one it falls back to ADMIN_ROLE, and an agent granted with an execution delay could

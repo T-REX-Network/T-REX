@@ -121,7 +121,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         bytes32 ticketId = _ask(10, 50);
         address nextLite = makeAddr("newPolygonLite");
         vm.prank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, nextLite));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, nextLite), false);
         vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
         vm.prank(agent);
         boundCompliance.blockAwayChain(polygon);
@@ -129,7 +129,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         polygonBridge.relay(_queue(polygonBridge, nextLite, token, MessageTypesLib.encodeSettlement(receipt)));
         assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, 40, "the receipt waits");
         vm.prank(deployer);
-        token.replaceHostilePeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("thirdPolygonLite")));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, makeAddr("thirdPolygonLite")), true);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
 

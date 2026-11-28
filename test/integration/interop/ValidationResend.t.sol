@@ -200,7 +200,7 @@ contract ValidationResendTest is InteropSuiteTest {
         bytes memory formerPeer = token.peerFor(polygon);
         bytes memory newPeer = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("newPolygonLite"));
         vm.prank(deployer);
-        token.setPeer(polygon, newPeer);
+        token.setPeer(polygon, newPeer, false);
         vm.warp(firstAskDueAt);
 
         boundCompliance.sendTicket(id, bobSat, "");

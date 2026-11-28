@@ -87,7 +87,7 @@ library ErrorsLib {
     error FrozenWallet(address user);
     error ComplianceAlreadyBoundToToken();
     error TokenCirculating();
-    error TicketsStillReserved();
+    error ValidationsPending();
     error InvalidCompliance();
     error InvalidIdentityRegistry();
     error NoTokenToRecover();
@@ -230,8 +230,6 @@ library ErrorsLib {
     error ValidityWindowNotSet();
     /// @dev Issuance toward this chain needs its reconciliation window; none was configured.
     error WaitingTimeNotSet(bytes32 chainKey);
-    /// @dev The requested range is inverted.
-    error InvalidRequestedRange(uint256 requestedMin, uint256 requestedMax);
     /// @dev The balance cap, the modules or the clamp left no amount to authorize.
     error EmptyValidationRange(uint256 min, uint256 max);
     /// @dev The caller is neither the identity `from` is linked to nor authorised by the AccessManager.
@@ -314,9 +312,6 @@ library ErrorsLib {
     // Interop Errors
     error NonCanonicalInteroperableAddress(bytes envelope);
     error AwayChainBlocked(bytes32 chainKey);
-    /// @dev The route or peer of `chainKey` changed less than four waiting times ago: a change now would drop the
-    ///  former pair while receipts sent on it may still be on their way. Allowed from `allowedAt`.
-    error RouteChangedTooRecently(bytes32 chainKey, uint64 allowedAt);
     /// @dev The peer of `chainKey` was replaced as hostile: asks, ticket sends and cancels for it wait until `endsAt`.
     error HostileChangeNotOver(bytes32 chainKey, uint64 endsAt);
     error ChainNotOpen(bytes32 chainKey);

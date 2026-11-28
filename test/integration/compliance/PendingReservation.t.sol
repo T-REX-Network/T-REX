@@ -219,7 +219,7 @@ contract PendingReservationTest is InteropSuiteTest {
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
         token.setCompliance(address(fresh));
 
         assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
@@ -238,7 +238,7 @@ contract PendingReservationTest is InteropSuiteTest {
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
         token.setCompliance(address(fresh));
 
         assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");
@@ -269,7 +269,7 @@ contract PendingReservationTest is InteropSuiteTest {
         Token nextToken = _deployToken("next", "Next Token", "NXT");
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
         boundCompliance.bindToken(address(nextToken));
     }
 

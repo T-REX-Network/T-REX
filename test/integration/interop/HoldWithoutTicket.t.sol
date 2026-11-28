@@ -163,6 +163,54 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertAMalformedReceiverIsRefused(keccak256("a zero receipt with a padded receiver"), 0);
     }
 
+    /// @notice A cancel of a ticket waiting for approval is refused while a receipt for its first half waits and can
+    ///         now be placed: whoever wants the ticket to move on applies the receipt first.
+    function test_cancelTickets_reverts_when_aReceiptForATicketWaitingForApprovalCanNowBePlaced() public {
+        _bindApprovalModule(approver);
+        (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        _askAgain(aliceSat, bobSat, FOUR, salt);
+        _blockPolygon();
+        polygonGateway.relay(receiptIndex);
+        _unblockPolygon();
+        vm.warp(boundCompliance.ticketOf(ticketId).validUntil);
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = ticketId;
+
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, ticketId, polygon));
+        boundCompliance.cancelTickets(ids);
+
+        _assertStatus(ticketId, ITickets.TicketStatus.WaitingForApproval, "not cancelled");
+    }
+
+    /// @notice Taking money on hold is an ask: it counts in the identity's asks per window, so the next ask in the
+    ///         window is refused once the take used the last one.
+    function test_askToMove_countsATakeOfMoneyOnHold_inTheIdentitysAsksPerWindow() public {
+        _setAsksPerWindow(1);
+        (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+
+        _askAgain(aliceSat, bobSat, FOUR, salt);
+        assertTrue(boundCompliance.ticketOf(ticketId).written, "the ask took the money on hold");
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AskLimitReached.selector, address(aliceIdentity)));
+        boundCompliance.askToMove(aliceSat, bobSat, 1, 1, "", _salt());
+    }
+
+    /// @notice A take over the identity's asks per window is refused before anything moves.
+    function test_askToMove_reverts_when_aTakeOfMoneyOnHoldIsOverTheAskLimit() public {
+        _setAsksPerWindow(1);
+        (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        _requestValidation(address(aliceIdentity), aliceSat, charlieSat, 1, 1);
+
+        vm.prank(address(aliceIdentity));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AskLimitReached.selector, address(aliceIdentity)));
+        boundCompliance.askToMove(aliceSat, bobSat, FOUR, FOUR, "", salt);
+
+        assertFalse(boundCompliance.ticketOf(ticketId).written, "the money is still on hold, not taken");
+    }
+
     /// @notice A ticket home wrote and never sent waited for approval, so home's own copy is its only honest one: a
     ///         receipt on any other copy breaks its terms and blocks the chain, and is still booked on hold.
     function test_receiveReceipt_putsTheReceiptOnHoldAndBlocksTheChain_whenTheTicketNeverLeft() public {
@@ -537,7 +585,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.cancelHold(ticketId);
 
         vm.prank(address(aliceIdentity));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.TicketAlreadyWritten.selector, ticketId));
@@ -568,12 +616,13 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         vm.warp(stopWaitingAt - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, stopWaitingAt));
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.cancelHold(ticketId);
 
         vm.warp(stopWaitingAt);
+        boundCompliance.cancelHold(ticketId);
         vm.expectEmit(true, true, false, false, address(boundCompliance));
         emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, FOUR, 0);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.sendSecondHalf(ticketId, bobSat);
 
         // The bring home burns 4 on bob, the move out mints 4 to alice, and its receipt ends the hold.
         _relayAll(polygonGateway);
@@ -603,17 +652,17 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         vm.warp(bobsHold.stopWaitingAt);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.LaterHoldStillCarries.selector, aliceId, bobId));
-        boundCompliance.cancelHold(aliceId, bobSat);
+        boundCompliance.cancelHold(aliceId);
 
         // Bob's move is undone first: charlie's 2 burn, and come back to bob as alice's credit again.
-        boundCompliance.cancelHold(bobId, charlieSat);
+        _cancelHold(bobId, charlieSat);
         _relayAll(polygonGateway);
         _assertStatus(bobId, ITickets.TicketStatus.Done, "bob's hold is over");
         assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), TWO, "the credit is back on bob");
         assertEq(token.awayBalanceOf(bobSat), 0, "never counted for bob");
         assertEq(boundCompliance.ticketOf(aliceId).carriedBy, bytes32(0), "unlinked");
 
-        boundCompliance.cancelHold(aliceId, bobSat);
+        _cancelHold(aliceId, bobSat);
         _relayAll(polygonGateway);
 
         _assertStatus(aliceId, ITickets.TicketStatus.Done, "alice's hold is over");
@@ -698,7 +747,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 mintsBefore = polygonLite.mints();
 
         vm.warp(boundCompliance.ticketOf(aliceId).stopWaitingAt);
-        boundCompliance.cancelHold(aliceId, bobSat);
+        _cancelHold(aliceId, bobSat);
         _relayNext(polygonGateway); // the bring home finds nothing to burn on bob
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.CancelHoldShort(aliceId, TWO);
@@ -719,14 +768,14 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
                 ErrorsLib.TicketNotCancellable.selector, aliceId, uint8(ITickets.TicketStatus.OnHold)
             )
         );
-        boundCompliance.cancelHold(aliceId, bobSat);
+        boundCompliance.cancelHold(aliceId);
     }
 
     function test_cancelHold_resumes_whenTheCarriedCreditComesBack() public {
         (bytes32 aliceId, uint256 bobsReceiptIndex) = _bookAliceAndLetBobSpend(TWO);
         bytes32 bobId = _receiptAt(polygonGateway, bobsReceiptIndex).ticketId;
         vm.warp(boundCompliance.ticketOf(aliceId).stopWaitingAt);
-        boundCompliance.cancelHold(aliceId, bobSat);
+        _cancelHold(aliceId, bobSat);
         _relayAll(polygonGateway);
         assertTrue(boundCompliance.ticketOf(aliceId).shortCancel, "alice's cancel came back short");
 
@@ -736,14 +785,14 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(boundCompliance.ticketOf(bobId).carriedFrom, aliceId, "bob's hold carries from alice's");
 
         vm.warp(boundCompliance.ticketOf(bobId).stopWaitingAt);
-        boundCompliance.cancelHold(bobId, charlieSat);
+        _cancelHold(bobId, charlieSat);
         _relayAll(polygonGateway);
         ITickets.Ticket memory resumed = boundCompliance.ticketOf(aliceId);
         assertFalse(resumed.shortCancel, "the short cancel resumes");
         assertTrue(resumed.secondHalfOwed, "its next bring home is owed");
 
         uint8 halfBefore = resumed.half;
-        boundCompliance.cancelHold(aliceId, bobSat);
+        boundCompliance.sendSecondHalf(aliceId, bobSat);
         assertEq(boundCompliance.ticketOf(aliceId).half, halfBefore + 1, "a new bring home");
         _relayAll(polygonGateway);
 
@@ -756,7 +805,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 aliceId,) = _bookAliceAndLetBobSpend(1);
 
         vm.warp(boundCompliance.ticketOf(aliceId).stopWaitingAt);
-        boundCompliance.cancelHold(aliceId, bobSat);
+        _cancelHold(aliceId, bobSat);
         _relayNext(polygonGateway); // the bring home burns the 1 bob still holds
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.CancelHoldShort(aliceId, 1);
@@ -772,28 +821,24 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         );
     }
 
-    /// @notice A bring home of the cancel that expired unexecuted is owed: `cancelHold` sends the next one, for what
-    ///         the receiver's credit allows now.
-    function test_cancelHold_sendsTheBringHomeAgain_whenItExpiredUnexecuted() public {
+    /// @notice Once the cancel started, `cancelHold` is not a second door to its halves: an owed bring home is sent
+    ///         with `sendSecondHalf` only.
+    function test_cancelHold_reverts_when_theCancelAlreadyStarted() public {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        _cancelHold(ticketId, bobSat);
 
         vm.warp(boundCompliance.ticketOf(ticketId).secondHalfValidUntil);
         _relayAll(polygonGateway);
-        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
-        assertTrue(held.secondHalfOwed, "owed");
-        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR, "the credit is back");
+        assertTrue(boundCompliance.ticketOf(ticketId).secondHalfOwed, "owed");
 
-        boundCompliance.cancelHold(ticketId, bobSat);
-        ITickets.Ticket memory resent = boundCompliance.ticketOf(ticketId);
-        assertEq(resent.half, held.half + 1, "a new bring home");
-        assertEq(resent.amountMax, FOUR, "for what bob's credit allows now");
-        _relayAll(polygonGateway);
-
-        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the hold is over");
-        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ErrorsLib.TicketNotCancellable.selector, ticketId, uint8(ITickets.TicketStatus.OnHold)
+            )
+        );
+        boundCompliance.cancelHold(ticketId);
     }
 
     /// @notice An owed bring home of the cancel is a half like any other: `sendSecondHalf` sends the next one, for
@@ -802,7 +847,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        _cancelHold(ticketId, bobSat);
         vm.warp(boundCompliance.ticketOf(ticketId).secondHalfValidUntil);
         _relayAll(polygonGateway);
         ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
@@ -824,7 +869,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
-        boundCompliance.cancelHold(ticketId, bobSat);
+        _cancelHold(ticketId, bobSat);
         _relayNext(polygonGateway); // the bring home burns on bob
         _relayNext(polygonGateway); // its receipt sends the move out back to alice
 
@@ -840,14 +885,14 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertHomeAgreesWithPolygon();
     }
 
-    /// @notice Tokens that left the away chain have no receiver to burn from: the cancel is a move out back to the
-    ///         sender at once.
-    function test_cancelHold_sendsTheMoveOutToTheSender_whenTheTokensLeftTheAwayChain() public {
+    /// @notice Tokens that left the away chain have no receiver to burn from: the cancel's half is a move out back to
+    ///         the sender, sent to her wallet.
+    function test_cancelHold_owesTheMoveOutToTheSender_whenTheTokensLeftTheAwayChain() public {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobOptimismSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
 
-        boundCompliance.cancelHold(ticketId, bobOptimismSat);
+        _cancelHold(ticketId, aliceSat);
         _relayAll(polygonGateway);
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "back to alice");
@@ -855,13 +900,14 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(optimismLite.balanceOf(bobOptimismSat), 0, "nothing reached optimism");
     }
 
-    function test_cancelHold_reverts_when_theReceiverIsNotTheOneTheReceiptNamed() public {
+    function test_sendSecondHalf_reverts_when_theCancelsReceiverIsNotTheOneTheReceiptNamed() public {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
         vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        boundCompliance.cancelHold(ticketId);
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationBodyMismatch.selector, ticketId));
-        boundCompliance.cancelHold(ticketId, charlieSat);
+        boundCompliance.sendSecondHalf(ticketId, charlieSat);
     }
 
     function test_cancelHold_reverts_when_theTicketWasWritten() public {
@@ -870,13 +916,13 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, ticketId, uint8(ITickets.TicketStatus.Open))
         );
-        boundCompliance.cancelHold(ticketId, bobSat);
+        boundCompliance.cancelHold(ticketId);
     }
 
     function test_cancelHold_reverts_when_theIdIsUnknown() public {
         bytes32 unknownId = keccak256("never booked");
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnknownTicket.selector, unknownId));
-        boundCompliance.cancelHold(unknownId, bobSat);
+        boundCompliance.cancelHold(unknownId);
     }
 
     /// @notice Within the hostile change, the replaced peer sends a receipt under an id home never wrote: the token
@@ -994,14 +1040,18 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.applyWaitingReceipt(halfKey, receipt);
     }
 
-    function test_applyWaitingReceipt_reverts_when_theSenderOfAReceiptWithNoTicketHasNoIdentity() public {
+    /// @notice A receipt with no ticket waits only while the token is stopped, its chain blocked, or its amount above
+    ///         what the sender may spend: a sender with no identity waits for that last reason alone.
+    function test_applyWaitingReceipt_reverts_onTheBalanceAlone_when_theSenderOfAReceiptWithNoTicketHasNoIdentity()
+        public
+    {
         bytes memory strangerSat = InteroperableAddress.formatEvmV1(POLYGON, makeAddr("strangerOnPolygon"));
         bytes32 unknownId = keccak256("from a wallet nobody linked");
         MessageTypesLib.ReceiptMessage memory receipt = _receiptWithNoTicket(unknownId, strangerSat, bobSat, FOUR);
         polygonGateway.relay(_awayTokenSends(polygonGateway, polygonLite, receipt));
         bytes32 halfKey = MessageTypesLib.halfKeyOf(unknownId, 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.UnverifiedWallet.selector, strangerSat));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.InsufficientBridgedBalance.selector, strangerSat, 0, FOUR));
         boundCompliance.applyWaitingReceipt(halfKey, receipt);
     }
 
@@ -1061,6 +1111,17 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(token.onHoldOf(inventedId), 0, "nothing on hold");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice's tokens never moved");
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "the chain that sent it is blocked");
+    }
+
+    /// @dev Gives every identity `asksPerWindow` asks per day, the other limits out of reach, from a new window: the
+    ///  set up's move out of Alice's home wallet was an ask of her identity.
+    function _setAsksPerWindow(uint32 asksPerWindow) private {
+        ITickets.AskLimits memory limits = ITickets.AskLimits({
+            openTicketsPerIdentity: 100, asksPerIdentityPerWindow: asksPerWindow, askWindow: 1 days, smallestAmount: 1
+        });
+        vm.prank(deployer);
+        boundCompliance.setAskLimits(limits);
+        vm.warp(block.timestamp + limits.askWindow);
     }
 
 }

@@ -245,7 +245,7 @@ contract SeedInterop is Script {
         }
         bytes memory peer = InteroperableAddress.formatEvmV1(satelliteChainId, deployer);
         if (keccak256(token.peerFor(chainKey)) != keccak256(peer)) {
-            token.setPeer(chainKey, peer);
+            token.setPeer(chainKey, peer, false);
             console.log("Peer set: the deployer on the satellite chain");
         }
     }

@@ -63,8 +63,6 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.HalfPinned.selector, EventsLib.HalfPinned.selector);
         assertEq(ITREXMessaging.ProtocolMessageSent.selector, EventsLib.ProtocolMessageSent.selector);
         assertEq(ITREXMessaging.TicketRouteSet.selector, EventsLib.TicketRouteSet.selector);
-        assertEq(ITREXMessaging.FormerRouteKept.selector, EventsLib.FormerRouteKept.selector);
-        assertEq(ITREXMessaging.HostilePeerReplaced.selector, EventsLib.HostilePeerReplaced.selector);
     }
 
     function test_errors_MatchTheLibraryDefinitions() public pure {
@@ -81,7 +79,6 @@ contract TREXMessagingAbiUnitTest is Test {
         assertEq(ITREXMessaging.MessageTypeNotInbound.selector, ErrorsLib.MessageTypeNotInbound.selector);
         assertEq(ITREXMessaging.PeerChainMismatch.selector, ErrorsLib.PeerChainMismatch.selector);
         assertEq(ITREXMessaging.SenderNotPeer.selector, ErrorsLib.SenderNotPeer.selector);
-        assertEq(ITREXMessaging.RouteChangedTooRecently.selector, ErrorsLib.RouteChangedTooRecently.selector);
         assertEq(ITREXMessaging.UnsupportedMessageVersion.selector, ErrorsLib.UnsupportedMessageVersion.selector);
     }
 

@@ -262,7 +262,7 @@ contract MoveOutAndBringHomeTest is InteropSuiteTest {
 
     function test_askToMove_reverts_when_aHomeSenderNamesASpender() public {
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationSpenderRefused.selector, bobSat));
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SpenderNotAllowed.selector, address(0), alice, address(0), 1));
         boundCompliance.askToMove(aliceHome, aliceSat, 1, 1, bobSat, _salt());
     }
 

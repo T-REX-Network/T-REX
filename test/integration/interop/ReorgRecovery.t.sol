@@ -48,7 +48,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         // The away token is the token's peer before the route opens: a peer set on an open route is a change.
         polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
         vm.startPrank(deployer);
-        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)));
+        token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         vm.stopPrank();
         _openEvmChain(token, POLYGON, address(polygonGateway));
         _openEvmChain(token, OPTIMISM, address(optimismGateway));

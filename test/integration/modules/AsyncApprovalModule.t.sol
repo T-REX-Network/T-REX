@@ -785,7 +785,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
         ModularCompliance fresh = _newUnboundComplianceProxy(address(trexImplementationAuthority));
 
         vm.prank(deployer);
-        vm.expectRevert(ErrorsLib.TicketsStillReserved.selector);
+        vm.expectRevert(ErrorsLib.ValidationsPending.selector);
         token.setCompliance(address(fresh));
 
         assertEq(boundCompliance.getTokenBound(), address(token), "the token stays bound");

@@ -333,8 +333,8 @@ contract ModularCompliance is
     /// @inheritdoc ITickets
     /// @dev Not `restricted`: anyone may cancel money on hold with no ticket, once its clock allows it, see
     ///  {HoldLib-cancelHold}.
-    function cancelHold(bytes32 ticketId, bytes calldata receiver) external {
-        HoldLib.cancelHold(ticketId, receiver, _getTokenBound());
+    function cancelHold(bytes32 ticketId) external {
+        HoldLib.cancelHold(ticketId, _getTokenBound());
     }
 
     /// @inheritdoc ITickets
@@ -393,9 +393,9 @@ contract ModularCompliance is
     ///  under it is upgraded instead.
     function _requireBoundTokenCanLeave() private view {
         require(!_hasSupply(_getTokenBound()), ErrorsLib.TokenCirculating());
-        require(_ledger().pendingTotal == 0, ErrorsLib.TicketsStillReserved());
+        require(_ledger().pendingTotal == 0, ErrorsLib.ValidationsPending());
         bool homeStoppedWaiting = block.timestamp >= _validationStorage().latestStopWaitingAt;
-        require(homeStoppedWaiting, ErrorsLib.TicketsStillReserved());
+        require(homeStoppedWaiting, ErrorsLib.ValidationsPending());
     }
 
     /* ----- The ERC-3643 hooks over the ledger ----- */

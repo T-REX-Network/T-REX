@@ -156,8 +156,8 @@ library HoldLib {
     }
 
     /// @dev Whether a good receipt with no ticket can be booked now: the token runs, its away chain is not blocked,
-    ///  and, when it moved something, its sender resolves to an identity and can cover the amount, see
-    ///  {_whatTheSenderMaySpend}. Otherwise it waits.
+    ///  and, when it moved something, its sender can cover the amount, see {_whatTheSenderMaySpend}. Otherwise it
+    ///  waits.
     /// @param token the token the compliance is bound to
     function canBeBookedNow(bytes32 originChainKey, MessageTypesLib.ReceiptMessage calldata receipt, address token)
         internal
@@ -169,9 +169,7 @@ library HoldLib {
         bool awayChainBlocked = store.blockedAwayChains[originChainKey];
         if (!tokenRunning || awayChainBlocked) return false;
         if (_movesNothing(receipt)) return true;
-        bool senderHasAnIdentity = _identityOf(receipt.from, token) != address(0);
-        bool senderCoversIt = receipt.amount <= _whatTheSenderMaySpend(store, receipt.from, token);
-        return senderHasAnIdentity && senderCoversIt;
+        return receipt.amount <= _whatTheSenderMaySpend(store, receipt.from, token);
     }
 
     /// @dev {canBeBookedNow} as requirements, each with its own error, for {ReceiptLib-applyWaitingReceipt}.
@@ -184,7 +182,6 @@ library HoldLib {
         TicketLib.requireTokenRunning(token);
         TicketLib.requireAwayChainNotBlocked(originChainKey);
         if (_movesNothing(receipt)) return;
-        require(_identityOf(receipt.from, token) != address(0), ErrorsLib.UnverifiedWallet(receipt.from));
         uint256 spendable = _whatTheSenderMaySpend(TicketLib.layout(), receipt.from, token);
         require(
             receipt.amount <= spendable, ErrorsLib.InsufficientBridgedBalance(receipt.from, spendable, receipt.amount)
@@ -280,44 +277,54 @@ library HoldLib {
     /* ----- The cancel ----- */
 
     /// @dev See {ITickets-cancelHold}. Anyone may cancel: the tokens are on hold under their sender, and the cancel
-    ///  only gives back what the away token says it burned.
+    ///  only gives back what the away token says it burned. The cancel starts here and its first half is owed: the
+    ///  record keeps no wallet's bytes, so {SecondHalfLib-sendSecondHalf} sends it, with the wallet it goes to.
     /// @param token the token the compliance is bound to
-    function cancelHold(bytes32 ticketId, bytes calldata receiver, address token) external {
+    function cancelHold(bytes32 ticketId, address token) external {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
         ITickets.Ticket storage ticket = store.validations[ticketId];
         bool heldWithoutTicket = !ticket.written && ticket.status == ITickets.TicketStatus.OnHold;
-        require(heldWithoutTicket, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
-        require(WalletKeyLib.canonicalKey(receiver) == ticket.toKey, ErrorsLib.ValidationBodyMismatch(ticketId));
-        TicketLib.requireTicketCanBeDecided(token, ticket);
-
         bool cancelStarted = ticket.secondHalfToKey != bytes32(0);
-        if (!cancelStarted) {
-            require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
-        }
-        if (cancelStarted) {
-            bool nextBringHomeOwed = ticket.secondHalfToKey == ticket.toKey && ticket.secondHalfOwed;
-            require(nextBringHomeOwed, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
-        }
+        require(heldWithoutTicket, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        require(!cancelStarted, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        TicketLib.requireTicketCanBeDecided(token, ticket);
+        require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
+        bytes32 laterHoldId = ticket.carriedBy;
+        require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
 
-        _cancel(ticket, ticketId, receiver, token);
+        // Tokens that stayed on the away chain are brought home from the receiver first; tokens that left it go back
+        // to the sender.
+        ticket.secondHalfOwed = true;
+        if (_insideOneAwayChain(ticket)) {
+            ticket.secondHalfToKey = ticket.toKey;
+            return;
+        }
+        ticket.secondHalfToKey = ticket.fromKey;
+        ticket.amountMax = ticket.moved;
+        SecondHalfLib.takeANewHalf(ticket, ticketId);
     }
 
     /* ----- Close by hand ----- */
 
     /// @dev See {ITickets-closeByHand}: {ReceiptLib-closeByHand} found no stored receipt in the read of the closed
-    ///  chain the money moved inside. The tokens never left that chain, so nothing is minted to the sender: what the
-    ///  receiver still holds as uncounted credit is applied as the move it was, and a bring home of the cancel that is
-    ///  out burned nothing once that chain's clock is past its valid until. Last in, first out: never while a later
-    ///  hold carries this one's credit, and the earlier move this one carries from is applied first for that part.
-    ///  Each move is applied as a move inside one chain is: to the identity its receiver has now, never the one read
-    ///  at booking.
+    ///  chain. Money that left its away chain goes back to its sender, see {_closeTheReturnByHand}. Money that moved
+    ///  inside the closed chain never left it, so nothing is minted to the sender: what the receiver still holds as
+    ///  uncounted credit is applied as the move it was, and a bring home of the cancel that is out burned nothing once
+    ///  that chain's clock is past its valid until. Last in, first out: never while a later hold carries this one's
+    ///  credit, and the earlier move this one carries from is applied first for that part. Each move is applied as a
+    ///  move inside one chain is: to the identity its receiver has now, never the one read at booking.
     /// @param receiver the receiver's wallet, checked by the caller
     /// @param awayClockTime the timestamp of the block read on the closed chain
     /// @param token the token the compliance is bound to
-    function closeHoldByHand(bytes32 ticketId, bytes calldata receiver, uint64 awayClockTime, address token) external {
+    /// @return returnedAmount what goes back to the sender
+    function closeHoldByHand(bytes32 ticketId, bytes calldata receiver, uint64 awayClockTime, address token)
+        external
+        returns (uint256 returnedAmount)
+    {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         ITickets.Ticket storage ticket = store.validations[ticketId];
+        if (!_insideOneAwayChain(ticket)) return _closeTheReturnByHand(ticket, ticketId, awayClockTime, token);
 
         // Checks
         bool aBringHomeIsOut = _requireTheHoldCanBeClosedByHand(ticket, ticketId, awayClockTime);
@@ -579,9 +586,9 @@ library HoldLib {
 
     /* ----- Private: the cancel ----- */
 
-    /// @dev Starts the cancel, or sends its next bring home. Last in, first out: never while a later hold carries this
-    ///  one's credit. Tokens that left the away chain go back to the sender at once; tokens that stayed there are
-    ///  brought home from the receiver first.
+    /// @dev Cancels the hold of a take the receiver may not take now, inside the ask that has the receiver's bytes.
+    ///  Last in, first out: never while a later hold carries this one's credit. Tokens that left the away chain go
+    ///  back to the sender at once; tokens that stayed there are brought home from the receiver first.
     function _cancel(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata receiver, address token) private {
         bytes32 laterHoldId = ticket.carriedBy;
         require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
@@ -597,7 +604,7 @@ library HoldLib {
     }
 
     /// @dev The answer to the cancel's bring home. What it did not burn is the receiver's uncounted credit again. A
-    ///  bring home that expired unexecuted is dead: {cancelHold} sends the next one. One that burned less than the
+    ///  bring home that expired unexecuted is dead: {SecondHalfLib-sendSecondHalf} sends the next one. One that burned less than the
     ///  money on hold is a short cancel: the rest stays on hold, announced, and is not sent again. What it burned goes
     ///  back to the sender by a move out inside this delivery.
     function _applyTheBringHomeAnswer(
@@ -690,6 +697,39 @@ library HoldLib {
     }
 
     /* ----- Private: close by hand ----- */
+
+    /// @dev Money on hold whose tokens left their away chain goes back to its sender, whose chain is the closed one:
+    ///  the money is minted to the sender's identity contract, see {SecondHalfLib-closeHalfByHand}. Last in, first
+    ///  out: never while a later hold carries this one's credit, and the earlier move this one carries from is
+    ///  applied first, so it never returns money the earlier hold still counts.
+    function _closeTheReturnByHand(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        uint64 awayClockTime,
+        address token
+    ) private returns (uint256 returnedAmount) {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+
+        // Checks
+        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
+        require(onHold, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        bytes32 laterHoldId = ticket.carriedBy;
+        require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
+        bool cancelStarted = ticket.secondHalfToKey != bytes32(0);
+        if (!cancelStarted) {
+            require(block.timestamp >= ticket.stopWaitingAt, ErrorsLib.CancelNotDue(ticketId, ticket.stopWaitingAt));
+        }
+        bool carriesAnEarlierMove = ticket.carriedFrom != bytes32(0);
+        address senderIdentity;
+        if (carriesAnEarlierMove) senderIdentity = _identityNowOf(ticket.fromWallet, token);
+
+        // Effects and interactions: the earlier move first, then the return.
+        if (carriesAnEarlierMove) {
+            store.validations[ticket.carriedFrom].toIdentity = senderIdentity;
+            _applyTheCarriedPartFirst(ticket, ticketId, token);
+        }
+        returnedAmount = SecondHalfLib.closeHalfByHand(ticketId, awayClockTime, token);
+    }
 
     /// @dev The checks of {closeHoldByHand} on the hold itself: on hold inside one away chain with no return to its
     ///  sender, no later hold carrying its credit, its cancel due, and a bring home that is out past its valid until
@@ -809,11 +849,6 @@ library HoldLib {
     function _breaksARuleNow(IModule.TransferContext memory move, uint256 amount) private view returns (bool) {
         if (ComplianceLedgerLib.isRelocation(move.fromIdentity, move.toIdentity)) return false;
         return amount > ModuleSetLib.callCheckTransfer(move);
-    }
-
-    /// @dev The identity a wallet resolves to, zero when none.
-    function _identityOf(bytes calldata wallet, address token) private view returns (address) {
-        return address(_registryOf(token).resolveIdentity(wallet));
     }
 
     /// @dev The identity a wallet resolves to now; a wallet linked to none cannot take a move.
