@@ -208,8 +208,11 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
   the tokens to a wallet on its own chain, that wallet gets uncounted credit (the token's `uncountedCreditOf`): tokens it holds
   that home does not count for it yet and that it cannot ask to move. The request sent again with the same terms and
   `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
-  Lite's copy. That ask takes the money on hold and finishes the move, once the held receipt keeps the ask's terms and
-  the per-ticket cap; no approval module may be bound. The take is an ask: it is refused over the identity's asks per
+  Lite's copy. That ask takes the money on hold when the held receipt names the ask's wallets
+  (`HeldReceiptBreaksItsTerms` otherwise); no approval module may be bound. A move to another chain is then decided as
+  a first-half receipt is; a move inside one away chain is applied when the receiver may take it now, and its hold is
+  cancelled otherwise. A held receipt that breaks the ask's terms or the per-ticket cap is still taken as it happened
+  and blocks the sender's chain. The take is an ask: it is refused over the identity's asks per
   window (`AskLimitReached`) and counted there, but not as an open ticket. If nobody takes it within four waiting
   times of the sender's chain, anyone starts its cancel (`cancelHold(ticketId)`), which sends nothing: the cancel's
   first half is owed, and anyone sends it, and every later half of the cancel, with `sendSecondHalf(ticketId,

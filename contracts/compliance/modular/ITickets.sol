@@ -490,7 +490,8 @@ interface ITickets {
     /// - `requestedMax` at least the smallest amount, and at most `from`'s free balance: its away balance less what
     ///   is reserved, or a home wallet's unfrozen balance; otherwise `BelowMinimumAmount` or `RequestAboveBalance`.
     /// - A non-empty final range with a positive maximum; otherwise `EmptyValidationRange` or `ZeroValue`.
-    /// - A home `from` not frozen; otherwise `FrozenWallet`.
+    /// - A home `from` not frozen where it is burned: in the ask with no `APPROVAL` module bound, otherwise at the
+    ///   first send, see {sendTicket}; otherwise `FrozenWallet`.
     /// - The chain the first message goes to open on the token, a receipt route with a peer, checked at the ask even
     ///   when it waits for approval; otherwise `ChainNotOpen`.
     /// - For a receiver on another away chain, that chain too not blocked, with no hostile change running, with a
@@ -508,8 +509,8 @@ interface ITickets {
     ///
     /// While an `APPROVAL` module is bound, nothing is issued or sent yet: the ticket is recorded and
     /// reserved as `WaitingForApproval`, `TicketWaitingForApproval` is emitted, the module is told, and
-    /// `answerApproval` decides. The deadline for the answer and for the first send is `validUntil`, and it stays
-    /// the away token's deadline once the ticket is sent.
+    /// `answerApproval` decides. `validUntil` is the deadline for the answer only: anyone may make the first send at
+    /// any time after it, see {sendTicket}, and `validUntil` stays the away token's deadline once the ticket is sent.
     /// @param from ERC-7930 interoperable address of the sender.
     /// @param to ERC-7930 interoperable address of the recipient.
     /// @param requestedMin Inclusive lower bound the caller proposes.
@@ -824,8 +825,8 @@ interface ITickets {
     /// - `awayWallet` canonical and on another chain; otherwise `NonCanonicalInteroperableAddress` or
     ///   `NotASatelliteWallet`.
     /// - The token not paused, otherwise `TokenPaused`; the wallet's chain not blocked, otherwise `AwayChainBlocked`;
-    ///   no hostile change running on it, otherwise `HostileChangeNotOver`; and a waiting time set for it, otherwise
-    ///   `WaitingTimeNotSet`.
+    ///   and a waiting time set for it, otherwise `WaitingTimeNotSet`. A hostile change running on it does not hold
+    ///   a bring home.
     /// - `homeWallet` and `awayWallet` linked to one existing identity; otherwise reverts with `WalletsNotLinked`.
     /// - No other bring home open on `awayWallet`; otherwise reverts with `BringHomeAlreadyOpen`.
     /// - `amount` at most the wallet's free balance, its away balance less what is reserved; otherwise reverts with
@@ -965,11 +966,14 @@ interface ITickets {
     ///
     /// Requirements:
     /// - `receipt` must be the one waiting under `halfKey`; otherwise reverts with `NoWaitingReceipt`.
-    /// - For the ticket's own half, its ticket must be sent; otherwise reverts with `NoWaitingReceipt`.
+    /// - For a ticket home never sent, its own half is booked on hold with no destination, as at delivery; the
+    ///   sender's away balance and the uncounted credit it may carry must cover it, otherwise
+    ///   `InsufficientBridgedBalance`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - Its away chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
-    /// - For the ticket's own half, or a bring home's burn receipt, the sender's away balance must cover the amount;
-    ///   otherwise reverts with `InsufficientBridgedBalance`. Any other half's money is already on hold at home.
+    /// - For the own half of a ticket home sent, or a bring home's burn receipt, the sender's away balance must cover
+    ///   the amount; otherwise reverts with `InsufficientBridgedBalance`. Any other half's money is already on hold at
+    ///   home.
     /// - The route check of {ITREXMessaging-checkReceiptOrigin} must pass; otherwise the token reverts with its
     ///   error.
     ///

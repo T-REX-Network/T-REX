@@ -1089,7 +1089,8 @@ library TicketLib {
     }
 
     /// @dev Keeps a recorded ticket waiting for the approval module, and tells the module. The validity window
-    ///  of the receipt route from now is the deadline for the answer and for the first send after it.
+    ///  of the receipt route from now is the deadline for the answer only: the first send after it comes at any
+    ///  time.
     function _awaitApproval(
         bytes32 ticketId,
         bytes calldata from,
