@@ -526,8 +526,8 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     }
 
     /// @notice DR-12 and DR-13: at the end of each run every message is let through, the clock moves on and every due ask,
-    ///  cancel and half is sent, until nothing is left to deliver. A move out out of new halves is closed by hand, the
-    ///  designed way out. Then every request has ended and nothing stays reserved or on hold.
+    ///  cancel and half is sent, until nothing is left to deliver. A move out out of new halves, or a bring home out of
+    ///  sends, is closed by hand, the designed way out. Then every request has ended and nothing stays reserved or on hold.
     function afterInvariant() public virtual {
         for (uint256 round = 0; round < DRAIN_ROUNDS; round++) {
             _letEverythingArrive();
@@ -668,7 +668,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     }
 
     /// @dev A move out still on hold once everything arrived has no send left: it is closed by hand on the away
-    ///  chain's clock, which sends its money back home.
+    ///  chain's clock, which sends its money back home. So is a bring home still open.
     function _closeByHandWhatCannotEnd() internal {
         for (uint256 i = 1; i < moveOutIds.length; i++) {
             bytes32 ticketId = moveOutIds[i];
@@ -682,6 +682,27 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             _openEvmChain(token, POLYGON, address(gateway));
             closedByHand[ticketId] = true;
         }
+        for (uint256 i = 1; i < bringHomeIds.length; i++) {
+            _closeByHandAnOpenBringHome(i);
+        }
+    }
+
+    /// @dev A bring home still open once everything arrived went unanswered after its three sends: it is closed by
+    ///  hand with what the away token stored for its latest half, as an operator reads it from the closed chain.
+    function _closeByHandAnOpenBringHome(uint256 index) internal {
+        bytes32 ticketId = bringHomeIds[index];
+        ITickets.Ticket memory bringHomeTicket = boundCompliance.ticketOf(ticketId);
+        if (bringHomeTicket.status != ITickets.TicketStatus.Open) return;
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, bringHomeTicket.half);
+        ITickets.AwayChainReading memory reading;
+        reading.blockNumber = uint64(block.number);
+        reading.awayClockTime = uint64(block.timestamp);
+        reading.storedReceipt = lite.storedReceipt(uint8(MessageTypesLib.Message.BRING_HOME), halfKey);
+        _closeEvmChain(token, POLYGON);
+        vm.prank(deployer);
+        boundCompliance.closeByHand(ticketId, _homeWalletOf(bringHomeActor[index]), reading);
+        _openEvmChain(token, POLYGON, address(gateway));
+        closedByHand[ticketId] = true;
     }
 
     /// @dev L2 and L3 once everything ended: every away balance is what the away token holds, no wallet carries
