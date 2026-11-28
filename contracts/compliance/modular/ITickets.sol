@@ -727,9 +727,8 @@ interface ITickets {
     /// The first send of a ticket the approver opened, toward the chain its first message goes to, read from the
     /// record: the sender's, or the receiver's for a home `from`. At any time: the token not paused and that chain
     /// open as at a request (`TokenPaused`, `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a
-    /// receiver's other away chain as at a request (`AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`,
-    /// `ChainNotOpen`); no
-    /// receipt waiting for the ticket, otherwise `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove`
+    /// receiver's other away chain not blocked (`AwayChainBlocked`): its route and peer were checked at the ask, and the
+    /// ticket goes to the sender's chain; no receipt waiting for the ticket, otherwise `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove`
     /// does with no approval module, and `ReceiptAsked` before it when sent at or after `waitingEndsAt`: that first
     /// send is also the first ask for the receipt. For a home `from`, burns onto hold and sends the `MOVE_OUT`
     /// instead; its maximum must still fit in the wallet's unfrozen balance, as at the ask, otherwise

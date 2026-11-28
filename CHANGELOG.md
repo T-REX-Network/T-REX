@@ -60,10 +60,9 @@ All notable changes to this project will be documented in this file.
     chain's own clock decides. `askToMove` is refused while asks are
     paused on the sender's or the receiver's chain (`setAsksPaused(chainKey, ...)` covers both), checks that the chain
     its first message goes to is open at the ask, also when an approval module is bound (`ChainNotOpen`), needs a
-    receiver's other away chain unblocked, under no hostile change, with a waiting time and open (`WaitingTimeNotSet`
-    and `ChainNotOpen` checked again at the first send of an approved ticket; a resend or an ask for the receipt
-    needs that chain only unblocked, so it still goes out once that chain's route closed or its peer was replaced as
-    hostile),
+    receiver's other away chain unblocked, under no hostile change, with a waiting time and open (`WaitingTimeNotSet`,
+    `ChainNotOpen`; the first send of an approved ticket, a resend or an ask for the receipt needs that chain only
+    unblocked, so it still goes out once that chain's route closed or its peer was replaced as hostile),
     counts a take of money on hold in the identity's asks per window (`AskLimitReached`), and refuses a spender on a
     home sender with `SpenderNotAllowed(spender, from, to, value)`, declared on `ITickets`. `cancelTickets` refuses a
     ticket waiting for approval while a receipt for it waits and can be applied (`ApplyWaitingReceiptFirst`).

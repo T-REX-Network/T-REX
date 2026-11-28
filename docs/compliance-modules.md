@@ -190,7 +190,8 @@ Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, b
 lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
 since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
 first send with `sendTicket(ticketId, to, spender)`, at any time, and that send checks the token
-and the chain again, as either may have been stopped while the request waited. A zero answer is a refusal,
+and the chain again, as either may have been stopped while the request waited, and a receiver's other away chain
+only for a block. A zero answer is a refusal,
 which releases the reservation and ends the validation `Cancelled`; any other answer must lie inside
 `[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered is discarded past its
 deadline with `cancelTickets`, by anyone, since nothing was sent for it, unless a receipt for it waits and can be

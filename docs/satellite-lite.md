@@ -48,10 +48,10 @@ An ask is refused while asks are paused for the whole token or on any chain it i
 receiver's (`setAsksPaused(chainKey, true)`, `AsksPaused`). The chain its first message goes to must be open, a
 receipt route with a peer, checked at the ask itself, also when the ticket waits for an approval (`ChainNotOpen`).
 A receiver on another away chain needs that chain unblocked, under no hostile change, with a waiting time and open
-(`AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`, `ChainNotOpen`); the first send of an approved
-ticket checks that chain again. Every later send, a resend or an ask for the receipt, needs that chain only unblocked
-(`AwayChainBlocked`): its route may have closed, or its peer been replaced as hostile, since the ask, and the copy
-and its answer travel between home and the sender's chain only, so an unanswered ask can still cancel the ticket.
+(`AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`, `ChainNotOpen`). Every later send, the first send
+of an approved ticket, a resend or an ask for the receipt, needs that chain only unblocked (`AwayChainBlocked`): its
+route may have closed, or its peer been replaced as hostile, since the ask, and the ticket and its answer travel
+between home and the sender's chain only, so an unanswered ask can still cancel the ticket.
 
 A bring home is a ticket too, of kind `BRING_HOME`, written by an agent with `bringHome(awayWallet, amount,
 homeWallet, salt)` on the compliance for two wallets of one identity. It reserves `amount` on the away wallet in the
