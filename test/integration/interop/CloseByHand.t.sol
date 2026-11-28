@@ -8,6 +8,7 @@ import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
@@ -125,7 +126,7 @@ contract CloseByHandTest is HoldsSuiteTest {
 
         _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "booked on hold");
         assertEq(token.onHoldOf(ticketId), FOUR);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR);
     }
 
     /// @notice A bring home burned in time and its receipt is stuck behind the closed route: the stored receipt
@@ -283,7 +284,7 @@ contract CloseByHandTest is HoldsSuiteTest {
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "still applied");
         assertEq(token.awayBalanceOf(bobSat), FOUR, "bob is counted once");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "no credit given back twice");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "no credit given back twice");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest late answer blocks nobody");
         _assertHomeAgreesWithPolygon();
     }
@@ -469,7 +470,7 @@ contract CloseByHandTest is HoldsSuiteTest {
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move inside polygon is applied");
         assertEq(token.awayBalanceOf(bobSat), FOUR, "bob is counted");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "nothing minted back to alice");
         assertEq(boundCompliance.positionOf(address(bobIdentity)), FOUR);
         assertEq(boundCompliance.positionOf(address(aliceIdentity)), ALICE_AWAY_BALANCE - FOUR);
@@ -493,8 +494,8 @@ contract CloseByHandTest is HoldsSuiteTest {
         assertEq(token.awayBalanceOf(charlieSat), TWO);
         assertEq(token.awayBalanceOf(bobSat), 0);
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - TWO);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
-        assertEq(boundCompliance.uncountedCreditOf(charlieSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(charlieSat)), 0);
         assertEq(token.totalOnHold(), 0);
         _assertHomeAgreesWithPolygon();
         _assertPositionsAreTheSupply();
@@ -623,7 +624,7 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertStatus(aliceId, ITickets.TicketStatus.Done, "the rest applied inside polygon");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - 1, "nothing more minted to alice");
         assertEq(token.awayBalanceOf(bobSat), 1);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
     }
 
     /* ----- Refusals ----- */

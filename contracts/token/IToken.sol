@@ -166,6 +166,18 @@ interface IToken is IERC3643 {
     /// @dev Gives back `amount` of what was reserved against `wallet`. Callable by the bound compliance alone.
     function releaseFromTicket(bytes calldata wallet, uint256 amount) external;
 
+    /// @dev The uncounted credit of an away wallet: tokens it holds on its away chain that home does not count for it
+    ///  yet, from receipts with no ticket that named it as the receiver. Never part of its away balance, so never
+    ///  asked to move.
+    /// @param walletKey the canonical key of the away wallet, see {WalletKeyLib-canonicalKey}
+    function uncountedCreditOf(bytes32 walletKey) external view returns (uint256);
+
+    /// @dev Sets the uncounted credit of an away wallet to `amount`. Callable by the bound compliance alone, which
+    ///  books the receipts with no ticket and their cancels.
+    /// @param walletKey the canonical key of the away wallet
+    /// @param amount the wallet's uncounted credit from now on
+    function setUncountedCredit(bytes32 walletKey, uint256 amount) external;
+
     /// @dev Initializes a token behind its beacon proxy. Called once, by the factory.
     function init(
         string calldata tokenName,

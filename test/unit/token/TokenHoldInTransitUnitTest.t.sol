@@ -73,6 +73,24 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
 
     // ==== hold Tests ====
 
+    /// @notice The token keeps each away wallet's uncounted credit; the bound compliance writes it.
+    function test_setUncountedCredit_writesTheWalletsCredit_onTheToken() public {
+        bytes32 walletKey = keccak256(satellite1);
+        uint256 credit = 7;
+
+        vm.prank(compliance);
+        token.setUncountedCredit(walletKey, credit);
+
+        assertEq(token.uncountedCreditOf(walletKey), credit, "the token holds the credit");
+        assertEq(token.awayBalanceOf(satellite1), 60, "never part of the away balance");
+    }
+
+    function test_setUncountedCredit_RevertWhen_CallerIsNotTheBoundCompliance() public {
+        vm.prank(user1);
+        vm.expectRevert(ErrorsLib.OnlyBoundCompliance.selector);
+        token.setUncountedCredit(keccak256(satellite1), 7);
+    }
+
     function test_holdInTransit_Success_WhenTheBurnLegLands() public {
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.HeldInTransit(keccak256(satellite1), VALIDATION_ID, satellite1, 30);

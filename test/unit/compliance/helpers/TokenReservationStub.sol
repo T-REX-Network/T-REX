@@ -127,6 +127,13 @@ contract TokenReservationStub {
         onHoldOf[ticketId] += amount;
     }
 
+    /// @dev Each away wallet's uncounted credit, kept on the token and written by the compliance.
+    mapping(bytes32 walletKey => uint256) public uncountedCreditOf;
+
+    function setUncountedCredit(bytes32 walletKey, uint256 amount) external {
+        uncountedCreditOf[walletKey] = amount;
+    }
+
     /// @dev What each ticket's applied receipt moved, as the token's `finishMove` would record it.
     mapping(bytes32 ticketId => uint256) public finishedOf;
 

@@ -298,6 +298,17 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     }
 
     /// @inheritdoc IToken
+    function setUncountedCredit(bytes32 walletKey, uint256 amount) external {
+        _requireBoundCompliance();
+        TokenLedgerLib.layout().uncountedCredit[walletKey] = amount;
+    }
+
+    /// @inheritdoc IToken
+    function uncountedCreditOf(bytes32 walletKey) external view returns (uint256) {
+        return TokenLedgerLib.layout().uncountedCredit[walletKey];
+    }
+
+    /// @inheritdoc IToken
     function totalAwayBalance() external view returns (uint256) {
         return TokenLedgerLib.layout().totalAwayBalance;
     }

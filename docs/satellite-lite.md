@@ -146,7 +146,7 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
 - **Re-included in another order.** The id is the same, since it never depended on the order. Nothing to do.
 - **Dropped.** The receipt reaches the reference chain under an id home has no record of. Home puts its amount on
   hold under the sender, with no destination (`ReceiptWithoutTicket`), and no chain is blocked; when the Lite moved
-  the tokens to a wallet on its own chain, that wallet gets uncounted credit (`uncountedCreditOf`): tokens it holds
+  the tokens to a wallet on its own chain, that wallet gets uncounted credit (the token's `uncountedCreditOf`): tokens it holds
   that home does not count for it yet and that it cannot ask to move. The request sent again with the same terms and
   `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
   Lite's copy. That ask takes the money on hold and finishes the move, once the held receipt keeps the ask's terms and

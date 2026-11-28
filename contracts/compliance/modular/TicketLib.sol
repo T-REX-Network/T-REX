@@ -129,9 +129,6 @@ library TicketLib {
         mapping(address identity => IdentityAsks asks) identityAsks;
         /// The bring home open on each away wallet, zero when none: one at a time per wallet.
         mapping(bytes32 walletKey => bytes32 ticketId) openBringHome;
-        /// What each away wallet holds on its chain that home does not count for it yet: receipts with no ticket that
-        /// named it as the receiver, see {HoldLib}. Never part of its away balance, so never asked to move.
-        mapping(bytes32 walletKey => uint256 amount) uncountedCredit;
         /// The latest money on hold that gave the wallet uncounted credit: a receipt with no ticket that spends that
         /// credit carries it from there.
         mapping(bytes32 walletKey => bytes32 ticketId) uncountedCreditFrom;

@@ -198,6 +198,7 @@ contract NamespaceFieldsTest is Test {
         ledgerStorage.inTransit[bytes32(NUMBER)] = 13;
         ledgerStorage.totalOnHold = 14;
         ledgerStorage.reservedForTickets[KEY] = 15;
+        ledgerStorage.uncountedCredit[KEY] = 16;
 
         assertEq(_word(_field(base, 0)), 18, "decimals");
         assertEq(_word(_entry(_field(base, 1), KEY)), 11, "awayBalance");
@@ -205,6 +206,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_field(base, 3), bytes32(NUMBER))), 13, "inTransit");
         assertEq(_word(_field(base, 4)), 14, "totalOnHold");
         assertEq(_word(_entry(_field(base, 5), KEY)), 15, "reservedForTickets");
+        assertEq(_word(_entry(_field(base, 6), KEY)), 16, "uncountedCredit");
     }
 
     function test_TREXMessaging() public {
@@ -361,7 +363,6 @@ contract NamespaceFieldsTest is Test {
         validationStorage.identityAsks[ALICE] =
             TicketLib.IdentityAsks({ openTickets: 50, asksInWindow: 51, windowStartedAt: 52 });
         validationStorage.openBringHome[KEY] = bytes32(uint256(53));
-        validationStorage.uncountedCredit[KEY] = 54;
         validationStorage.uncountedCreditFrom[KEY] = bytes32(uint256(55));
         validationStorage.ticketRouteVolumes[KEY] = TicketLib.TicketRouteVolume({ windowStart: 56, amount: 57 });
         validationStorage.asksPausedOn[KEY] = true;
@@ -392,12 +393,11 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_entry(_field(base, 11), _key(ALICE))), 49, "askLimitOverrides");
         assertEq(_word(_entry(_field(base, 12), _key(ALICE))), 50 | (51 << 32) | (52 << 64), "identityAsks");
         assertEq(_word(_entry(_field(base, 13), KEY)), 53, "openBringHome");
-        assertEq(_word(_entry(_field(base, 14), KEY)), 54, "uncountedCredit");
-        assertEq(_word(_entry(_field(base, 15), KEY)), 55, "uncountedCreditFrom");
-        bytes32 volume = _entry(_field(base, 16), KEY);
+        assertEq(_word(_entry(_field(base, 14), KEY)), 55, "uncountedCreditFrom");
+        bytes32 volume = _entry(_field(base, 15), KEY);
         assertEq(_word(_field(volume, 0)), 56, "ticketRouteVolumes.windowStart");
         assertEq(_word(_field(volume, 1)), 57, "ticketRouteVolumes.amount");
-        assertEq(_word(_entry(_field(base, 17), KEY)), 1, "asksPausedOn");
+        assertEq(_word(_entry(_field(base, 16), KEY)), 1, "asksPausedOn");
     }
 
     function _writeTicket(ITickets.Ticket storage ticket) private {

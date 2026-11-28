@@ -720,9 +720,8 @@ library SecondHalfLib {
         bytes calldata receiver,
         address token
     ) internal {
-        TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 receiverKey = ticket.toKey;
-        uint256 credit = store.uncountedCredit[receiverKey];
+        uint256 credit = IToken(token).uncountedCreditOf(receiverKey);
         uint256 amount = ticket.moved;
         if (credit < amount) amount = credit;
         ticket.secondHalfToKey = receiverKey;
@@ -733,7 +732,7 @@ library SecondHalfLib {
             return;
         }
 
-        store.uncountedCredit[receiverKey] = credit - amount;
+        IToken(token).setUncountedCredit(receiverKey, credit - amount);
         ticket.amountMax = amount;
         takeANewHalf(ticket, ticketId);
         sendTheLatestHalf(ticket, ticketId, receiver, token);

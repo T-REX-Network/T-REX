@@ -8,6 +8,7 @@ import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncA
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 
 import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
@@ -35,7 +36,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
         assertEq(token.onHoldOf(ticketId), FOUR, "the amount is on hold");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "it left alice's wallet");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR, "bob holds it, uncounted");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR, "bob holds it, uncounted");
         assertEq(token.awayBalanceOf(bobSat), 0, "never counted for bob");
         assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold), "on hold");
         assertFalse(held.written, "no ticket home sent answers it");
@@ -72,7 +73,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         polygonGateway.relay(polygonGateway.queueLength() - 1);
 
         assertEq(token.onHoldOf(ticketId), FOUR, "booked once");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR, "credited once");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR, "credited once");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR);
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
@@ -89,7 +90,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _relayAll(polygonGateway);
 
         assertEq(token.onHoldOf(ticketId), FOUR, "counted once");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR);
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 
@@ -266,7 +267,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(takenId, ticketId, "the same id");
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move is finished");
         assertEq(token.awayBalanceOf(bobSat), FOUR, "counted for bob");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "no credit left");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "no credit left");
         assertEq(token.onHoldOf(ticketId), 0);
         assertEq(boundCompliance.positionOf(address(aliceIdentity)), ALICE_AWAY_BALANCE - FOUR, "alice's position");
         assertEq(boundCompliance.positionOf(address(bobIdentity)), FOUR, "bob's position");
@@ -476,7 +477,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         vm.expectEmit(true, true, false, false, address(boundCompliance));
         emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, FOUR, 0);
         _askAgain(aliceSat, bobSat, FOUR, salt);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "the bring home takes bob's credit");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "the bring home takes bob's credit");
 
         _relayAll(polygonGateway);
 
@@ -491,7 +492,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) =
             _droppedAsk(aliceOnPolygon, aliceSat, bobOptimismSat, FOUR);
         polygonGateway.relay(receiptIndex);
-        assertEq(boundCompliance.uncountedCreditOf(bobOptimismSat), 0, "no credit on another chain");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobOptimismSat)), 0, "no credit on another chain");
 
         _askAgain(aliceSat, bobOptimismSat, FOUR, salt);
         _relayAll(optimismGateway);
@@ -578,7 +579,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the hold is over");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice has her 10 back");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
         assertEq(token.onHoldOf(ticketId), 0);
         assertEq(polygonLite.balanceOf(bobSat), 0, "burned on bob");
         _assertHomeAgreesWithPolygon();
@@ -596,8 +597,8 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(boundCompliance.ticketOf(aliceId).carriedBy, bobId);
         assertEq(token.onHoldOf(bobId), 0, "the carried part stays in alice's hold");
         assertEq(token.onHoldOf(aliceId), TWO);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "bob's credit is carried");
-        assertEq(boundCompliance.uncountedCreditOf(charlieSat), TWO);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "bob's credit is carried");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(charlieSat)), TWO);
 
         vm.warp(bobsHold.stopWaitingAt);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.LaterHoldStillCarries.selector, aliceId, bobId));
@@ -607,7 +608,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.cancelHold(bobId, charlieSat);
         _relayAll(polygonGateway);
         _assertStatus(bobId, ITickets.TicketStatus.Done, "bob's hold is over");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), TWO, "the credit is back on bob");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), TWO, "the credit is back on bob");
         assertEq(token.awayBalanceOf(bobSat), 0, "never counted for bob");
         assertEq(boundCompliance.ticketOf(aliceId).carriedBy, bytes32(0), "unlinked");
 
@@ -616,8 +617,8 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         _assertStatus(aliceId, ITickets.TicketStatus.Done, "alice's hold is over");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice has everything back");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
-        assertEq(boundCompliance.uncountedCreditOf(charlieSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(charlieSat)), 0);
         _assertHomeAgreesWithPolygon();
         _assertPositionsAreTheSupply();
     }
@@ -638,7 +639,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(token.awayBalanceOf(charlieSat), TWO);
         assertEq(token.awayBalanceOf(bobSat), 0);
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - TWO);
-        assertEq(boundCompliance.uncountedCreditOf(charlieSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(charlieSat)), 0);
         _assertHomeAgreesWithPolygon();
         _assertPositionsAreTheSupply();
     }
@@ -684,7 +685,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertTrue(held.shortCancel, "a short cancel");
         assertEq(uint8(held.status), uint8(ITickets.TicketStatus.OnHold), "still on hold");
         assertEq(polygonLite.mints(), mintsBefore, "no move out left");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), TWO, "the credit is back");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), TWO, "the credit is back");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
 
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SecondHalfNotOwed.selector, aliceId));
@@ -742,7 +743,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(held.moved, 1, "the rest stays on hold");
         assertTrue(held.shortCancel);
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - 1, "the part burned is back");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 1, "the part not burned is bob's credit again");
+        assertEq(
+            token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 1, "the part not burned is bob's credit again"
+        );
     }
 
     /// @notice A bring home of the cancel that expired unexecuted is owed: `cancelHold` sends the next one, for what
@@ -757,7 +760,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _relayAll(polygonGateway);
         ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
         assertTrue(held.secondHalfOwed, "owed");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR, "the credit is back");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR, "the credit is back");
 
         boundCompliance.cancelHold(ticketId, bobSat);
         ITickets.Ticket memory resent = boundCompliance.ticketOf(ticketId);
@@ -787,7 +790,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         ITickets.Ticket memory resent = boundCompliance.ticketOf(ticketId);
         assertEq(resent.half, held.half + 1, "a new bring home");
         assertEq(resent.amountMax, FOUR, "for what bob's credit allows now");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "the bring home takes bob's credit");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "the bring home takes bob's credit");
         _relayAll(polygonGateway);
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "the hold is over");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
@@ -870,7 +873,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         polygonGateway.relay(index);
 
         assertEq(boundCompliance.ticketOf(inventedId).fromIdentity, address(0), "nothing booked");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0);
     }
 
     /* ----- Receipts with no ticket, edge cases ----- */
@@ -947,7 +950,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertStatus(unknownId, ITickets.TicketStatus.OnHold, "booked on hold");
         assertEq(token.onHoldOf(unknownId), FOUR, "the amount is on hold");
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "it left alice's away balance");
-        assertEq(boundCompliance.uncountedCreditOf(aliceSat), FOUR, "and came back to her uncounted");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(aliceSat)), FOUR, "and came back to her uncounted");
     }
 
     function test_applyWaitingReceipt_reverts_when_theSenderCannotCoverAReceiptWithNoTicket() public {
@@ -1002,7 +1005,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.applyWaitingReceipt(MessageTypesLib.halfKeyOf(ticketId, 0), receipt);
 
         assertEq(token.onHoldOf(ticketId), FOUR);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), FOUR);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), FOUR);
     }
 
     /// @notice What one receipt with no ticket costs to deliver: its hash is written before it is booked.

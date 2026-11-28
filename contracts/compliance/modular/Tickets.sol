@@ -183,11 +183,6 @@ abstract contract Tickets is ITickets, ComplianceLedger {
     }
 
     /// @inheritdoc ITickets
-    function uncountedCreditOf(bytes calldata wallet) public view returns (uint256) {
-        return _validationStorage().uncountedCredit[WalletKeyLib.canonicalKey(wallet)];
-    }
-
-    /// @inheritdoc ITickets
     function statusOf(bytes32 ticketId) public view returns (TicketStatus) {
         TicketLib.ValidationStorage storage store = _validationStorage();
         require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));

@@ -22,11 +22,12 @@ All notable changes to this project will be documented in this file.
     `cancelTickets`, `sendSecondHalf`, `bringHome`, `cancelHold`, `closeByHand`, `applyWaitingReceipt`,
     `refuseWaitingReceipt`, `blockAwayChain`, `unblockAwayChain`, `setValidityWindows`, `setWaitingTime`,
     `setMeasuredTimes`, `setAskLimits`, `setAskLimitOf`, `setAsksPaused`, `setTicketLimits`, `receiveReceipt`, and
-    the views `ticketOf`, `waitingReceiptOf`, `uncountedCreditOf`, `isAwayChainBlocked`, `validityWindows`,
+    the views `ticketOf`, `waitingReceiptOf`, `isAwayChainBlocked`, `validityWindows`,
     `waitingTimeOf`, `measuredTimesOf`, `askLimits`, `askLimitOf`, `areAsksPaused`, `ticketLimitsOf`. On the token:
     `setReceiptRoute`, `closeReceiptRoute`, `setTicketRoute`, `replaceHostilePeer`, `sendOnTicketRoute`,
     `sendOnReceiptRoute`, `checkReceiptOrigin`, `putOnHold`, `burnOntoHold`, `finishMove`, `reserveForTicket`,
-    `releaseFromTicket`, and the views `awayBalanceOf`, `totalAwayBalance`, `onHoldOf`, `totalOnHold`,
+    `releaseFromTicket`, `setUncountedCredit`, and the views `awayBalanceOf`, `totalAwayBalance`, `onHoldOf`,
+    `totalOnHold`, `uncountedCreditOf` (by wallet key),
     `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. `totalSupply` is the native supply plus
     `totalAwayBalance` (away balances only) plus `totalOnHold`. On `TrustedGatewayRegistry`:
     `depthOf`, and `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for (zero is full
@@ -68,7 +69,7 @@ All notable changes to this project will be documented in this file.
     `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
     `waitingReceipts`, `receiptHashes`, `ticketLimits`, `blockedAwayChains`,
     `measuredTimes`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
-    `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
+    `identityAsks`, `openBringHome`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
     `erc3643.storage.TREXMessaging` (the token) keeps every field at its slot and appends the new ones: `routes`
     is read as `receiptRoutes` and `fastRoutes` as `ticketRoutes`, `pinnedRoutes`, `pinnedPeers` and
     `inboundPaused` stay in slots 5 to 7 unused, and `pins` (one pin per half), `awayReceiptBridges`,
@@ -76,7 +77,8 @@ All notable changes to this project will be documented in this file.
     `erc3643.storage.TREXToken` (the token) keeps its first six slots under new names (`bridgedBalance` as
     `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
     `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
-    `lastRecallId`, `openRecall`, `settledProofs`, `lastDelegationId` and `delegations` from slot 6. The new
+    `lastRecallId`, `openRecall`, `settledProofs`, `lastDelegationId` and `delegations` from slot 6, where it now
+    keeps `uncountedCredit`, each away wallet's uncounted credit. The new
     `erc3643.storage.AwayChainVolumeModule` belongs to a new module. `erc3643.storage.ComplianceLedger` keeps its
     fields and appends `onHoldForward` and `reservedFrom` at its end; `IComplianceLedger` gains `onHoldForwardOf`
     and `reservedFromOf`, so its interface id changes. `TREXCompliance`, `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are

@@ -101,6 +101,10 @@ library TokenLedgerLib {
         ///  compliance reserves at issuance and gives back when the ticket leaves its open row, a receipt or a
         ///  cancel.
         mapping(bytes32 walletKey => uint256) reservedForTickets;
+        /// @dev What each away wallet holds on its chain that home does not count for it yet: receipts with no ticket
+        ///  that named it as the receiver. Never part of its away balance, so never asked to move. Written by the
+        ///  compliance, which books those receipts.
+        mapping(bytes32 walletKey => uint256 amount) uncountedCredit;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXToken")) - 1)) & ~bytes32(uint256(0xff));

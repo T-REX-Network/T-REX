@@ -900,12 +900,6 @@ interface ITickets {
     /// @param reading What was read from the closed away chain.
     function closeByHand(bytes32 ticketId, bytes calldata receiver, AwayChainReading calldata reading) external;
 
-    /// @dev The uncounted credit of `wallet`: tokens it holds on its away chain that home does not count for it yet,
-    /// from receipts with no ticket that named it as the receiver. Never part of its away balance, so never asked to
-    /// move.
-    /// @param wallet ERC-7930 interoperable address of the away wallet.
-    function uncountedCreditOf(bytes calldata wallet) external view returns (uint256);
-
     /// @dev The two validity windows, zero until set, which blocks issuance.
     function validityWindows() external view returns (ValidityWindows memory);
 

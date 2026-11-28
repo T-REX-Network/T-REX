@@ -54,6 +54,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
@@ -376,7 +377,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), BALANCE - 95, "the sender's tokens left its wallet");
         assertEq(token.onHoldOf(unknown), 95, "and are on hold");
         assertEq(token.awayBalanceOf(bobSat), 0, "not counted for the receiver yet");
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 95);
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 95);
     }
 
     /// @notice While the token is stopped a good receipt is consumed and waits; once the token runs again, anyone

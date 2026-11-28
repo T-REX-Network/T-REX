@@ -10,6 +10,7 @@ import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.so
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
+import { WalletKeyLib } from "contracts/libraries/WalletKeyLib.sol";
 
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { CappedRecipientModule, RecordingModule } from "test/integration/mocks/CapabilityModules.sol";
@@ -125,7 +126,11 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertFalse(boundCompliance.isAwayChainBlocked(polygon), "the honest away chain is not blocked");
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.OnHold), "on hold with no destination");
         assertEq(token.onHoldOf(id), 95);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 95, "bob holds tokens home does not count for him yet");
+        assertEq(
+            token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)),
+            95,
+            "bob holds tokens home does not count for him yet"
+        );
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.HoldTaken(id);
@@ -136,7 +141,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         assertEq(boundCompliance.ticketOf(id).moved, 95);
         assertEq(token.awayBalanceOf(bobSat), 95);
         assertEq(token.awayBalanceOf(aliceSat), DELEGATED - 95);
-        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "now counted");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(bobSat)), 0, "now counted");
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
     }
 

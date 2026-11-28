@@ -141,13 +141,13 @@ library HoldLib {
         uint256 awayBalance = IToken(token).awayBalanceOf(receipt.from);
         uint256 carried = 0;
         if (amount > awayBalance) carried = amount - awayBalance;
-        if (carried != 0) _carryTheCredit(store, ticket, ticketId, carried);
+        if (carried != 0) _carryTheCredit(store, ticket, ticketId, carried, token);
         TicketLib.reserveTheHold(ticket);
 
         // Step 3: a receiver on the same away chain holds the tokens there.
         bool insideOneAwayChain = ticket.toChainKey == originChainKey;
         if (insideOneAwayChain) {
-            store.uncountedCredit[ticket.toKey] += amount;
+            _addUncountedCredit(token, ticket.toKey, amount);
             store.uncountedCreditFrom[ticket.toKey] = ticketId;
         }
         emit EventsLib.ReceiptWithoutTicket(ticketId, originChainKey, receipt.from, receipt.to, amount);
@@ -329,7 +329,7 @@ library HoldLib {
         // Effects and interactions: what the bring home took from the receiver's credit is back, since it burned
         // nothing; the records name the receivers' identities of now; then the moves the away token made, the earlier
         // one first.
-        if (aBringHomeIsOut) store.uncountedCredit[ticket.toKey] += ticket.amountMax;
+        if (aBringHomeIsOut) _addUncountedCredit(token, ticket.toKey, ticket.amountMax);
         ticket.toIdentity = receiverIdentity;
         if (carriesAnEarlierMove) {
             store.validations[ticket.carriedFrom].toIdentity = senderIdentity;
@@ -411,11 +411,12 @@ library HoldLib {
         TicketLib.ValidationStorage storage store,
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
-        uint256 carried
+        uint256 carried,
+        address token
     ) private {
         bytes32 senderKey = ticket.fromKey;
         bytes32 earlierHoldId = store.uncountedCreditFrom[senderKey];
-        store.uncountedCredit[senderKey] -= carried;
+        _takeUncountedCredit(token, senderKey, carried);
         ticket.carriedFrom = earlierHoldId;
         ticket.carriedAmount = carried;
         store.validations[earlierHoldId].carriedBy = ticketId;
@@ -429,14 +430,14 @@ library HoldLib {
         returns (uint256)
     {
         uint256 awayBalance = IToken(token).awayBalanceOf(wallet);
-        return awayBalance + _creditToCarry(store, WalletKeyLib.canonicalKey(wallet));
+        return awayBalance + _creditToCarry(store, WalletKeyLib.canonicalKey(wallet), token);
     }
 
     /// @dev The uncounted credit of a wallet a receipt with no ticket may carry: at most the latest money on hold that
     ///  gave it holds of its own, not what that hold itself carries, while that money is still on hold with no ticket,
     ///  none of its cancel's halves is out, and no other hold carries from it. Otherwise none, and the receipt waits.
     ///  A hold that owns nothing gives nothing: its close by hand would find nothing on hold to apply from.
-    function _creditToCarry(TicketLib.ValidationStorage storage store, bytes32 walletKey)
+    function _creditToCarry(TicketLib.ValidationStorage storage store, bytes32 walletKey, address token)
         private
         view
         returns (uint256)
@@ -446,7 +447,7 @@ library HoldLib {
         bool noHalfOut = !TicketLib.aBringHomeIsOut(earlierHold) && earlierHold.secondHalfToKey != earlierHold.fromKey;
         bool carriedByNone = earlierHold.carriedBy == bytes32(0);
         if (!stillHeldWithoutTicket || !noHalfOut || !carriedByNone) return 0;
-        uint256 credit = store.uncountedCredit[walletKey];
+        uint256 credit = IToken(token).uncountedCreditOf(walletKey);
         uint256 ownOnHold = earlierHold.moved - earlierHold.carriedAmount;
         if (credit > ownOnHold) credit = ownOnHold;
         return credit;
@@ -545,7 +546,7 @@ library HoldLib {
     ) private {
         // Effects
         bytes32 laterHoldId = ticket.carriedBy;
-        uint256 carriedByTheLaterHold = _endTheCarry(ticket);
+        uint256 carriedByTheLaterHold = _endTheCarry(ticket, token);
         TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
         ComplianceLedgerLib.movePosition(
             move.fromIdentity, move.toIdentity, move.fromWallet, move.toWallet, move.amountMax
@@ -560,12 +561,15 @@ library HoldLib {
     /// @dev The receiver's uncounted credit from this money on hold becomes counted, and a later hold that carried part
     ///  of it no longer carries: that part is its sender's own money now.
     /// @return carriedByTheLaterHold the part the later hold carried, which goes on its hold
-    function _endTheCarry(ITickets.Ticket storage ticket) private returns (uint256 carriedByTheLaterHold) {
+    function _endTheCarry(ITickets.Ticket storage ticket, address token)
+        private
+        returns (uint256 carriedByTheLaterHold)
+    {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 laterHoldId = ticket.carriedBy;
         ITickets.Ticket storage laterHold = store.validations[laterHoldId];
         carriedByTheLaterHold = laterHold.carriedAmount;
-        store.uncountedCredit[ticket.toKey] -= ticket.moved - carriedByTheLaterHold;
+        _takeUncountedCredit(token, ticket.toKey, ticket.moved - carriedByTheLaterHold);
         if (laterHoldId == bytes32(0)) return carriedByTheLaterHold;
         laterHold.carriedFrom = bytes32(0);
         laterHold.carriedAmount = 0;
@@ -604,7 +608,7 @@ library HoldLib {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         uint256 burned = receipt.amount;
         bytes32 receiverKey = ticket.toKey;
-        store.uncountedCredit[receiverKey] += ticket.amountMax - burned;
+        _addUncountedCredit(token, receiverKey, ticket.amountMax - burned);
         store.uncountedCreditFrom[receiverKey] = ticketId;
 
         bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired;
@@ -648,7 +652,7 @@ library HoldLib {
         uint256 ownBack = returned - creditBack;
 
         // Effects
-        if (creditBack != 0) _giveTheCarriedCreditBack(ticket, creditBack);
+        if (creditBack != 0) _giveTheCarriedCreditBack(ticket, creditBack, token);
         ticket.moved -= returned;
         ComplianceLedgerLib.releasePendingTotal(returned);
         bool nothingLeftOnHold = ticket.moved == 0;
@@ -665,13 +669,13 @@ library HoldLib {
     /// @dev Gives the sender back `amount` of the credit its money on hold carried. The earlier money on hold backs it
     ///  again, and is unlinked once nothing is carried; a cancel of it that came back short resumes, since credit it
     ///  could not burn is back on the wallet it burns from.
-    function _giveTheCarriedCreditBack(ITickets.Ticket storage ticket, uint256 amount) private {
+    function _giveTheCarriedCreditBack(ITickets.Ticket storage ticket, uint256 amount, address token) private {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 senderKey = ticket.fromKey;
         bytes32 earlierHoldId = ticket.carriedFrom;
         ITickets.Ticket storage earlierHold = store.validations[earlierHoldId];
 
-        store.uncountedCredit[senderKey] += amount;
+        _addUncountedCredit(token, senderKey, amount);
         store.uncountedCreditFrom[senderKey] = earlierHoldId;
         ticket.carriedAmount -= amount;
         if (ticket.carriedAmount == 0) {
@@ -760,9 +764,8 @@ library HoldLib {
         bytes calldata receiver,
         address token
     ) private {
-        TicketLib.ValidationStorage storage store = TicketLib.layout();
         bytes32 receiverKey = ticket.toKey;
-        uint256 credit = store.uncountedCredit[receiverKey];
+        uint256 credit = IToken(token).uncountedCreditOf(receiverKey);
         uint256 applied = ticket.moved;
         if (credit < applied) applied = credit;
         IModule.TransferContext memory move = TransferContextLib.settlement(
@@ -777,7 +780,7 @@ library HoldLib {
         );
 
         // Effects
-        store.uncountedCredit[receiverKey] = credit - applied;
+        IToken(token).setUncountedCredit(receiverKey, credit - applied);
         ticket.moved -= applied;
         ComplianceLedgerLib.releasePendingTotal(applied);
         bool nothingLeftOnHold = ticket.moved == 0;
@@ -826,6 +829,18 @@ library HoldLib {
     function _chainKeyOf(bytes calldata wallet) private pure returns (bytes32) {
         (bytes2 chainType, bytes memory chainReference,) = WalletKeyLib.parse(wallet);
         return MessageTypesLib.chainKey(chainType, chainReference);
+    }
+
+    /// @dev Adds `amount` to the uncounted credit of an away wallet, which the token keeps.
+    function _addUncountedCredit(address token, bytes32 walletKey, uint256 amount) private {
+        uint256 credit = IToken(token).uncountedCreditOf(walletKey);
+        IToken(token).setUncountedCredit(walletKey, credit + amount);
+    }
+
+    /// @dev Takes `amount` from the uncounted credit of an away wallet, which the token keeps.
+    function _takeUncountedCredit(address token, bytes32 walletKey, uint256 amount) private {
+        uint256 credit = IToken(token).uncountedCreditOf(walletKey);
+        IToken(token).setUncountedCredit(walletKey, credit - amount);
     }
 
 }
