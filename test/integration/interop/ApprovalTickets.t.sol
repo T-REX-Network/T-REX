@@ -369,18 +369,14 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MOVE_OUT));
     }
 
-    /// @notice A home wallet's move out the approver opened has no deadline for its first send: past its valid
-    ///         until it is not cancelled, and the first send still burns it onto hold and sends the move out.
+    /// @notice A home wallet's move out the approver opened has no deadline for its first send: until someone cancels
+    ///         it, the first send past its valid until still burns it onto hold and sends the move out.
     function test_sendTicket_movesOutAnApprovedHomeWallet_afterItsValidUntil() public {
         uint256 homeAmount = 100;
         bytes32 ticketId = _askFromAliceHome(homeAmount);
         _approve(ticketId, homeAmount);
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
         vm.warp(validUntil + POLYGON_WINDOW);
-
-        // No ask is ever sent for a home sender, and home's own chain has no waiting time.
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, validUntil));
-        boundCompliance.cancelTickets(_ids(ticketId));
         assertEq(token.balanceOf(alice), homeAmount, "nothing was burned");
 
         boundCompliance.sendTicket(ticketId, bobSat, "");

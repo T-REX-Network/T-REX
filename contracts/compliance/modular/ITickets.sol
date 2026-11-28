@@ -204,7 +204,8 @@ interface ITickets {
         /// opens it, or cancels it; past `validUntil`, `cancelTickets` cancels it.
         WaitingForApproval,
         /// Written, reserved and sent: waiting for its receipt. Or opened by the approver and not sent yet: anyone
-        /// sends it with `sendTicket`, at any time; `cancelTickets` cancels it only once an ask went unanswered.
+        /// sends it with `sendTicket`, at any time; `cancelTickets` cancels it only once an ask went unanswered, or,
+        /// for a home `from`, which never has an ask, past `validUntil`.
         Open,
         /// Its reservation released: refused by the approver, or cancelled once its receipt was overdue. A late
         /// receipt for a ticket that was sent is still applied as the move it is.
@@ -695,15 +696,16 @@ interface ITickets {
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
     /// - A move `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was sent
-    ///   for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop, the block of its
-    ///   away chain, a hostile change, for an away sender the open route of its away chain, and no receipt waiting
-    ///   that can be applied now (`ApplyWaitingReceiptFirst`) apply to it: a copy from a dropped home block may be
-    ///   held there.
+    ///   for it; otherwise reverts with `CancelNotDue`. So may a home `from`'s move the approver opened and nobody
+    ///   sent: nothing leaves for it before its first send, which burns and sends the move out, and it never has an
+    ///   ask. Of the rules below, only the token's stop, the block of its away chain, a hostile change, for an away
+    ///   sender the open route of its away chain, and no receipt waiting that can be applied now
+    ///   (`ApplyWaitingReceiptFirst`) apply to them: a copy from a dropped home block may be held there.
     /// - Each other id must be a move stored `Open`, sent or not; otherwise reverts with `TicketNotCancellable`. A
     ///   bring home is never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
     /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` at least one waiting time past
-    ///   that ask; otherwise reverts with `CancelNotDue`. A ticket the approver opened and nobody sent has no ask
-    ///   until its first send, made at or after `waitingEndsAt`, counts as one.
+    ///   that ask; otherwise reverts with `CancelNotDue`. A ticket from an away wallet the approver opened and nobody
+    ///   sent has no ask until its first send, made at or after `waitingEndsAt`, counts as one.
     /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits under the pause, so the
     ///   one that answers the ticket may be among them. This holds for a ticket `WaitingForApproval` too.
     /// - The sender's away chain not blocked; otherwise reverts with `AwayChainBlocked`: its receipts wait, and may

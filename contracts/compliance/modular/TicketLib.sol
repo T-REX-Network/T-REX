@@ -637,7 +637,8 @@ library TicketLib {
     ///  belong to the ask, and the ticket goes to the sender's chain. Sent at or after {waitingEndsAtOf}, it is also
     ///  the first ask for the receipt, so the ticket is cancelled only once that ask went unanswered. No receipt may
     ///  wait for it: one that came before the send answers no copy home sent, and is booked on hold once it can be. A
-    ///  home wallet's move out is burned onto hold and sent instead, as at a request with no approval module.
+    ///  home wallet's move out is burned onto hold and sent instead, as at a request with no approval module; until
+    ///  then it is cancelled once past its valid until, see {ITickets-cancelTickets}.
     function _sendTheApprovedTicket(
         ValidationStorage storage store,
         ITickets.Ticket storage ticket,
@@ -977,9 +978,10 @@ library TicketLib {
         }
     }
 
-    /// @dev Discards a move still `WaitingForApproval` once its deadline passed, for anyone, see
-    ///  {ITickets-cancelTickets}. Nothing was sent for it, so no honest receipt can be in flight. The reservation comes
-    ///  back. A ticket the approver opened is cancelled only once an ask for its receipt went unanswered.
+    /// @dev Discards a move still `WaitingForApproval`, or a home wallet's move the approver opened and nobody sent,
+    ///  once its deadline passed, for anyone, see {ITickets-cancelTickets}. Nothing was sent for it, so no honest
+    ///  receipt can be in flight. The reservation comes back. A ticket from an away wallet the approver opened is
+    ///  cancelled only once an ask for its receipt went unanswered.
     /// @param token the token the compliance is bound to
     function discardUnanswered(bytes32 ticketId, address token) internal {
         ITickets.Ticket storage ticket = layout().validations[ticketId];

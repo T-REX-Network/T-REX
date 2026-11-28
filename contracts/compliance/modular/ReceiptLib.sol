@@ -733,7 +733,8 @@ library ReceiptLib {
     /* ----- Cancel ----- */
 
     /// @dev Anyone may cancel: an `Open` ticket, sent or not, once an ask for its receipt went unanswered, see
-    ///  {_cancelDueAt}; a move waiting for approval once past `validUntil`. One refused id reverts the whole batch.
+    ///  {_cancelDueAt}; a move waiting for approval, or a home wallet's move the approver opened and nobody sent, once
+    ///  past `validUntil`. One refused id reverts the whole batch.
     ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
     ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
     ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
@@ -751,10 +752,14 @@ library ReceiptLib {
             // Nothing was sent for a move waiting for approval: anyone may cancel it once its deadline passed, and the
             // reservation comes back. A copy from a home block a reorg dropped may still be held by the sender's away
             // chain, so on a closed route only a read of that chain decides it, see {closeByHand}. Once the approver
-            // opened a ticket, it is cancelled only after an unanswered ask, as any open move is.
+            // opened a ticket from an away wallet, it is cancelled only after an unanswered ask, as any open move is.
+            // A home wallet's opened move leaves no copy anywhere until its first send burns it and sends the move out,
+            // and has no ask, so it is cancelled at its deadline too: its holder may have spent or frozen the tokens.
             bool waitingForApproval = ticket.status == ITickets.TicketStatus.WaitingForApproval;
-            if (waitingForApproval) {
-                (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+            (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
+            bool openedHomeMoveNeverSent =
+                fromHome && ticket.status == ITickets.TicketStatus.Open && TicketLib.neverSent(ticket);
+            if (waitingForApproval || openedHomeMoveNeverSent) {
                 if (!fromHome) _requireReceiptRouteOpen(token, ticket.fromChainKey);
                 _requireNoWaitingReceiptToApply(store, ticketId, ticket, token);
                 TicketLib.discardUnanswered(ticketId, token);

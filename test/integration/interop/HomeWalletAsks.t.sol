@@ -161,6 +161,60 @@ contract HomeWalletAsksWithApprovalTest is SecondHalvesSuiteTest {
         assertEq(token.getFrozenTokens(alice), frozenAfterTheAsk, "the frozen tokens stay at home");
     }
 
+    /// @notice A home wallet's opened move that can no longer be sent, because its holder spent the tokens, ends at
+    ///         its valid until like a move waiting for approval: nothing left for it, so anyone cancels it and the
+    ///         reservation against Bob and Alice comes back.
+    function test_cancelTickets_cancelsAnApprovedHomeMove_atItsValidUntil_whenTheHolderSpentTheTokens() public {
+        uint256 atHome = MINTED - ALICE_ON_A;
+        vm.prank(alice);
+        bytes32 id = boundCompliance.askToMove(aliceHome, bobOnB, MOVED, MOVED, "", _salt());
+        _approve(id, MOVED);
+        vm.prank(approver);
+        module.approveTransfer(
+            address(boundCompliance), keccak256("spend"), alice, charlie, atHome, uint64(block.timestamp + 1 days)
+        );
+        vm.prank(alice);
+        token.transfer(charlie, atHome);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RequestAboveBalance.selector, aliceHome, 0, MOVED));
+        boundCompliance.sendTicket(id, bobOnB, "");
+        uint64 validUntil = boundCompliance.ticketOf(id).validUntil;
+
+        vm.warp(validUntil - 1);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, validUntil));
+        boundCompliance.cancelTickets(_ids(id));
+
+        vm.warp(validUntil);
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.TicketCancelled(id);
+        vm.prank(charlie);
+        boundCompliance.cancelTickets(_ids(id));
+
+        _assertStatus(id, ITickets.TicketStatus.Cancelled);
+        assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "nothing kept for Bob");
+        assertEq(ledger.pendingOutOf(address(aliceIdentity)), 0, "nothing kept against Alice");
+    }
+
+    /// @notice The same for a home wallet frozen after the approver opened its move: the first send refuses the
+    ///         frozen wallet, and the move is cancelled at its valid until.
+    function test_cancelTickets_cancelsAnApprovedHomeMove_atItsValidUntil_whenTheWalletIsFrozen() public {
+        vm.prank(alice);
+        bytes32 id = boundCompliance.askToMove(aliceHome, bobOnB, MOVED, MOVED, "", _salt());
+        _approve(id, MOVED);
+        vm.prank(agent);
+        token.setAddressFrozen(alice, true);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.FrozenWallet.selector, alice));
+        boundCompliance.sendTicket(id, bobOnB, "");
+
+        vm.warp(boundCompliance.ticketOf(id).validUntil);
+        vm.prank(charlie);
+        boundCompliance.cancelTickets(_ids(id));
+
+        _assertStatus(id, ITickets.TicketStatus.Cancelled);
+        assertEq(ledger.pendingInOf(address(bobIdentity)), 0, "nothing kept for Bob");
+        assertEq(ledger.pendingOutOf(address(aliceIdentity)), 0, "nothing kept against Alice");
+        assertEq(token.balanceOf(alice), MINTED - ALICE_ON_A, "nothing burned");
+    }
+
     /// @notice A ticket waiting for approval reserves its maximum on the away wallet. A bring home asked meanwhile
     ///         is bounded by what is free, so it is refused for even one token; once approved, the ticket executes
     ///         the whole amount and no bring home ever burns those tokens.

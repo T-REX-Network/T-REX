@@ -195,8 +195,11 @@ only for a block. A zero answer is a refusal,
 which releases the reservation and ends the validation `Cancelled`; any other answer must lie inside
 `[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered is discarded past its
 deadline with `cancelTickets`, by anyone, since nothing was sent for it, unless a receipt for it waits and can be
-applied now (`ApplyWaitingReceiptFirst`): anyone applies it first with `applyWaitingReceipt`. An approved ticket is cancelled only once an
-ask for its receipt went unanswered, as any open ticket: a first send made at or after `waitingEndsAt` is that ask.
+applied now (`ApplyWaitingReceiptFirst`): anyone applies it first with `applyWaitingReceipt`. An approved ticket
+from an away wallet is cancelled only once an ask for its receipt went unanswered, as any open ticket: a first send
+made at or after `waitingEndsAt` is that ask. An approved move from a home wallet that nobody sent has no ask and
+nothing out for it, so it is discarded past its deadline as an unanswered request is: its holder may have spent or
+frozen the tokens, and the first send would then never go out.
 A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
 unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
 ticket's move. Home's own copy is the only honest one of an approved ticket: a first-half receipt on any other ask

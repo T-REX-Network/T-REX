@@ -65,7 +65,9 @@ All notable changes to this project will be documented in this file.
     unblocked, so it still goes out once that chain's route closed or its peer was replaced as hostile),
     counts a take of money on hold in the identity's asks per window (`AskLimitReached`), and refuses a spender on a
     home sender with `SpenderNotAllowed(spender, from, to, value)`, declared on `ITickets`. `cancelTickets` refuses a
-    ticket waiting for approval while a receipt for it waits and can be applied (`ApplyWaitingReceiptFirst`).
+    ticket waiting for approval while a receipt for it waits and can be applied (`ApplyWaitingReceiptFirst`), and
+    cancels a home wallet's move the approver opened and nobody sent once past its valid until, as a ticket waiting
+    for approval: it has no ask, and a holder that spent or froze the tokens left it unsendable.
     A bring home's burn receipt above the away wallet's away balance waits (`ReceiptWaiting`), as a ticket's receipt
     does, instead of reverting its delivery; anyone applies it with `applyWaitingReceipt` once the balance covers it.
     Unbinding the compliance from its token reverts `ValidationsPending` while the reserved total is above zero, as
