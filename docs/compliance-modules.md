@@ -6,15 +6,17 @@ write one.
 ## The four numbers the compliance keeps
 
 The token knows balances per wallet. One investor holds several wallets, here and on satellite chains,
-and every rule about distribution asks about the investor, not the wallet. So the compliance keeps four
+and every rule about distribution asks about the investor, not the wallet. So the compliance keeps these
 numbers itself, from the hooks the token already calls, and modules read them instead of rebuilding them:
 
 | View on the compliance | What it means |
 |---|---|
-| `positionOf(identity)` | what the identity owns in total: free, frozen and bridged, over every linked wallet |
-| `pendingInOf(identity)` | what open cross-chain validations promise to it |
-| `pendingOutOf(identity)` | what open cross-chain validations promise out of it |
-| `pendingOutOfWallet(walletKey)` | what open validations may still draw from one satellite wallet |
+| `positionOf(identity)` | what the identity owns in total: free, frozen, away and on hold, over every linked wallet |
+| `pendingInOf(identity)` | what open cross-chain tickets promise to it |
+| `pendingOutOf(identity)` | what open cross-chain tickets promise out of it |
+| `onHoldForwardOf(chainKey)` | money that left that away chain toward a receiver on another chain and is on hold, not done yet |
+| `reservedFromOf(chainKey)` | what the tickets open on that away chain reserve, at their maximum |
+| `ownerOf(wallet)` | the identity the ledger credited a native wallet to |
 
 They are declared in `IComplianceLedger`. Nothing outside the compliance writes them. A movement between
 two wallets of one identity changes none of them: relocating your own tokens is not a change of ownership.
@@ -176,9 +178,9 @@ resolving the route, narrowing the range by every rule and reserving it, but rec
 `WaitingForApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
 `approvalRequested`. A ticket that waits for an approver always travels the receipt route, at full finality: a home
 reorg short of finality could otherwise drop the approver's answer after the away token executed the ticket. The
-request's `validUntil`, the receipt route's validity window from now, is the deadline for the answer, for the first
-send and, once sent, the satellite's deadline: the time spent waiting comes out of the time to execute, so the rules
-are never older than one validity window when the satellite executes. The approvers' answer time is not measured on
+request's `validUntil`, the receipt route's validity window from now, is the deadline for the answer and the
+satellite's deadline: the time spent waiting comes out of the time to execute, so the rules are never older than one
+validity window when the satellite executes. The first send has no deadline of its own. The approvers' answer time is not measured on
 chain: the receipt route's validity window is sized off chain to cover it.
 
 Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
@@ -200,11 +202,11 @@ ledger: the second one sees the first one's pending amount, as it would see an i
 
 An `APPROVAL` module is bound, removed or filed again only while asks are paused for the whole token
 (`setAsksPaused(0, true)`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
-change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. Like every
-module change, it also waits until no ticket holds a reservation (`TicketsStillReserved`); only
-`forceRemoveModule` skips that wait. Unbinding the module turns new requests back into immediate issuances; the
-OWNER of the compliance can do it if the approvers stop answering, once the waiting requests were discarded past
-their deadline.
+change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. A module change
+does not wait for open tickets: a ticket keeps what was decided at its ask. Only unbinding the compliance from its
+token waits until no ticket holds a reservation (`TicketsStillReserved`). Unbinding the module turns new requests
+back into immediate issuances; the OWNER of the compliance can do it if the approvers stop answering, and the
+requests left waiting are discarded past their deadline.
 
 `AsyncApprovalModule` is the `APPROVAL` module that ships:
 
@@ -250,8 +252,8 @@ still report a move made on a home block that was dropped. `AwayChainVolumeModul
 make leave in a window, per compliance:
 
 - The compliance owner sets a limit per away chain with `setVolumeLimit(chainKey, limitPerWindow, window)`, through
-  `addAndSetModule` or `callModuleFunction` (so, like every module change, while no ticket holds a reservation). The
-  window is in seconds and must be positive (`ZeroDuration`); a new length also moves the end of the window running
+  `addAndSetModule` or `callModuleFunction`, at any time, open tickets included. Home's own key is refused
+  (`NotAnAwayChain`). The window is in seconds and must be positive (`ZeroDuration`); a new length also moves the end of the window running
   now. `VolumeLimitSet` says so; `volumeLimitOf(compliance, chainKey)` reads it. To lift a limit, set
   `type(uint256).max`. A chain with no limit set is neither limited nor counted.
 - `checkTransfer` reads the chain the money leaves from `data` and answers the room left on it in the current window,
