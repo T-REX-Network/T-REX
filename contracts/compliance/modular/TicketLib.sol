@@ -1191,7 +1191,8 @@ library TicketLib {
         bool anOpenBringHome =
             ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
         if (anOpenBringHome) return true;
-        bool burnsFromTheReceiver = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
+        bool burnsFromTheReceiver =
+            !ticket.written && ticket.secondHalfToKey == ticket.toKey && !ticket.cancelReturnsToTheSender;
         bool notAnswered = !ticket.secondHalfOwed && !ticket.shortCancel;
         return ticket.status == ITickets.TicketStatus.OnHold && burnsFromTheReceiver && notAnswered;
     }

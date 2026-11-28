@@ -450,8 +450,10 @@ library ReceiptLib {
         if (receipt.half == 0) return (false, ITickets.ReceiptRefusal.HalfNotSent);
         bool namesTheBurnedWallet = receipt.from.length != 0;
         if (!namesTheBurnedWallet) {
-            bool returnsWhatWasBurned =
-                ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.fromKey;
+            // A bring home's two wallets differ, so its wallet says where its half goes; a cancel's may be one wallet.
+            bool returnsToTheSender = ticket.cancelReturnsToTheSender;
+            if (ticket.written) returnsToTheSender = ticket.secondHalfToKey == ticket.fromKey;
+            bool returnsWhatWasBurned = ticket.status == ITickets.TicketStatus.OnHold && returnsToTheSender;
             if (!returnsWhatWasBurned) return (false, ITickets.ReceiptRefusal.WrongMoveOut);
             return _answersASecondHalf(ticket, originChainKey, receipt, ticket.fromKey);
         }

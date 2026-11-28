@@ -502,6 +502,31 @@ contract CloseByHandTest is HoldsSuiteTest {
         _assertHomeAgreesWithPolygon();
     }
 
+    /// @notice A wallet that moved to itself is both the cancel's receiver and its sender. While the cancel's bring
+    ///         home is out and burned nothing on the closed chain, its uncounted credit is applied as the move inside
+    ///         that chain it was: nothing is minted to its identity contract, since the wallet still holds the tokens.
+    function test_closeByHand_appliesTheCredit_whenAWalletMovedToItselfAndTheBringHomeIsOut() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, aliceSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _cancelHold(ticketId, aliceSat);
+        polygonGateway.drop(_nextUndelivered(polygonGateway)); // the bring home never reaches polygon
+        _closeEvmChain(token, POLYGON);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+        uint256 supplyBefore = token.totalSupply();
+
+        _closeByHand(ticketId, aliceSat, _reading(validUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the move inside polygon is applied");
+        assertEq(token.balanceOf(address(aliceIdentity)), 0, "nothing minted to alice's identity contract");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "alice is counted for what she holds");
+        assertEq(token.uncountedCreditOf(WalletKeyLib.canonicalKey(aliceSat)), 0, "her credit is counted");
+        assertEq(token.onHoldOf(ticketId), 0, "nothing left on hold");
+        assertEq(token.totalSupply(), supplyBefore, "the supply does not move");
+        _assertHomeAgreesWithPolygon();
+        _assertPositionsAreTheSupply();
+    }
+
     function test_closeByHand_keepsLastInFirstOut() public {
         (bytes32 aliceId, bytes32 bobId) = _bookTwoRelatedDroppedAsks();
         _closeEvmChain(token, POLYGON);

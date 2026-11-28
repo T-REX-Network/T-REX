@@ -50,7 +50,8 @@ All notable changes to this project will be documented in this file.
     bring homes go out, and every close by hand but the cancel of an open move runs. `closeReceiptRoute` on a closed
     route emits again. `cancelHold(ticketId)` only starts the cancel; `sendSecondHalf(ticketId, wallet)` sends every
     half of it, the first one included, and the cancel's `BRING_HOME` goes out even when the receiver's uncounted
-    credit is zero. `closeByHand` mints money on hold with no ticket whose tokens left the closed chain to the
+    credit is zero. The `Ticket` that `ticketOf` returns ends with `cancelReturnsToTheSender`, the cancel's stage:
+    a wallet that moved to itself is both the wallet the bring home burns and the one the return mints to. `closeByHand` mints money on hold with no ticket whose tokens left the closed chain to the
     sender's identity contract, after the carried part of an earlier hold. For money on hold with no ticket that moved
     inside the closed chain, once its cancel's bring home burned some of it and the `MOVE_OUT` of that part back to
     the sender is past its valid until on that chain's clock, or never left, `closeByHand` mints only what burned to

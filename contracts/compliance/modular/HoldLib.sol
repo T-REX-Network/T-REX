@@ -303,6 +303,7 @@ library HoldLib {
             return;
         }
         ticket.secondHalfToKey = ticket.fromKey;
+        ticket.cancelReturnsToTheSender = true;
         ticket.amountMax = ticket.moved;
         SecondHalfLib.takeANewHalf(ticket, ticketId);
     }
@@ -329,8 +330,9 @@ library HoldLib {
         TicketLib.ValidationStorage storage store = TicketLib.layout();
         ITickets.Ticket storage ticket = store.validations[ticketId];
         if (!_insideOneAwayChain(ticket)) return _closeTheReturnByHand(ticket, ticketId, awayClockTime, token);
-        bool returnsToTheSender = ticket.secondHalfToKey == ticket.fromKey;
-        if (returnsToTheSender) return _closeTheReturnOfWhatBurnedByHand(ticket, ticketId, awayClockTime, token);
+        if (ticket.cancelReturnsToTheSender) {
+            return _closeTheReturnOfWhatBurnedByHand(ticket, ticketId, awayClockTime, token);
+        }
 
         // Checks
         bool aBringHomeIsOut = _requireTheHoldCanBeClosedByHand(ticket, ticketId, awayClockTime);
@@ -457,7 +459,7 @@ library HoldLib {
     {
         ITickets.Ticket storage earlierHold = store.validations[store.uncountedCreditFrom[walletKey]];
         bool stillHeldWithoutTicket = !earlierHold.written && earlierHold.status == ITickets.TicketStatus.OnHold;
-        bool noHalfOut = !TicketLib.aBringHomeIsOut(earlierHold) && earlierHold.secondHalfToKey != earlierHold.fromKey;
+        bool noHalfOut = !TicketLib.aBringHomeIsOut(earlierHold) && !earlierHold.cancelReturnsToTheSender;
         bool carriedByNone = earlierHold.carriedBy == bytes32(0);
         if (!stillHeldWithoutTicket || !noHalfOut || !carriedByNone) return 0;
         uint256 credit = IToken(token).uncountedCreditOf(walletKey);
@@ -604,6 +606,7 @@ library HoldLib {
             return;
         }
         ticket.secondHalfToKey = ticket.fromKey;
+        ticket.cancelReturnsToTheSender = true;
         ticket.amountMax = ticket.moved;
         SecondHalfLib.takeANewHalf(ticket, ticketId);
         SecondHalfLib.sendTheLatestHalf(ticket, ticketId, ticket.fromWallet, token);
@@ -639,6 +642,7 @@ library HoldLib {
 
         ticket.amountMax = burned;
         ticket.secondHalfToKey = ticket.fromKey;
+        ticket.cancelReturnsToTheSender = true;
         ticket.newHalves = 0;
         SecondHalfLib.takeANewHalf(ticket, ticketId);
         SecondHalfLib.trySendInsideTheDelivery(ticket, ticketId, ticket.fromWallet, token);
@@ -673,6 +677,7 @@ library HoldLib {
         if (nothingLeftOnHold) TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
         if (!nothingLeftOnHold) {
             ticket.secondHalfToKey = ticket.toKey;
+            ticket.cancelReturnsToTheSender = false;
             ticket.shortCancel = true;
         }
 
@@ -784,6 +789,7 @@ library HoldLib {
         if (nothingLeftOnHold) TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
         if (!nothingLeftOnHold) {
             ticket.secondHalfToKey = ticket.toKey;
+            ticket.cancelReturnsToTheSender = false;
             ticket.secondHalfOwed = false;
             ticket.shortCancel = true;
         }

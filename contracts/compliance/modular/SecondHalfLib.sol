@@ -239,7 +239,8 @@ library SecondHalfLib {
         ITickets.Ticket storage ticket = store.validations[ticketId];
         // The bring home of a cancel of money on hold with no ticket is sent again while it is out, or sent anew once
         // it is owed, the first one included, for what the receiver's uncounted credit covers then.
-        bool aCancelsBringHome = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
+        bool aCancelsBringHome =
+            !ticket.written && ticket.secondHalfToKey == ticket.toKey && !ticket.cancelReturnsToTheSender;
         bool anOwedCancelsBringHome = aCancelsBringHome && ticket.secondHalfOwed;
         bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
         bool onHoldWithAHalf = onHold && (ticket.half != 0 || anOwedCancelsBringHome);

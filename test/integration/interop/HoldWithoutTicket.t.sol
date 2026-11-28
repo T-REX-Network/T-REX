@@ -887,6 +887,38 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertHomeAgreesWithPolygon();
     }
 
+    /// @notice A wallet that moved to itself is both the cancel's receiver and its sender. Once the bring home burned,
+    ///         the cancel's half is the move out back to the sender, by its stage and not by its wallet: when that move
+    ///         out expired unexecuted, the next half returns what burned, and is never a second bring home.
+    function test_sendSecondHalf_sendsTheReturnAgainAsAMoveOut_whenAWalletMovedToItself() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, aliceSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        _cancelHold(ticketId, aliceSat);
+        _relayNext(polygonGateway); // the bring home burns 4 on alice
+        _relayNext(polygonGateway); // its receipt sends the move out of 4 back to alice
+        assertEq(polygonLite.balanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "polygon burned 4");
+
+        vm.warp(boundCompliance.ticketOf(ticketId).secondHalfValidUntil);
+        _relayAll(polygonGateway);
+        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
+        assertTrue(held.secondHalfOwed, "the return is owed");
+
+        vm.expectEmit(true, true, false, true, address(boundCompliance));
+        emit EventsLib.SecondHalfSent(
+            ticketId, held.half + 1, polygon, aliceSat, FOUR, uint64(block.timestamp) + POLYGON_WINDOW
+        );
+        boundCompliance.sendSecondHalf(ticketId, aliceSat);
+        _relayAll(polygonGateway);
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the hold is over");
+        assertEq(polygonLite.balanceOf(aliceSat), ALICE_AWAY_BALANCE, "what burned is minted back on polygon");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE, "and counted at home");
+        assertEq(token.onHoldOf(ticketId), 0, "nothing left on hold");
+        _assertHomeAgreesWithPolygon();
+        _assertPositionsAreTheSupply();
+    }
+
     /// @notice Tokens that left the away chain have no receiver to burn from: the cancel's half is a move out back to
     ///         the sender, sent to her wallet.
     function test_cancelHold_owesTheMoveOutToTheSender_whenTheTokensLeftTheAwayChain() public {

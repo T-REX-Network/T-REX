@@ -347,6 +347,13 @@ interface ITickets {
         /// The ticket left for the away chain: written at its first send. A ticket waiting for approval, or opened
         /// and not sent yet, has none.
         bool sent;
+
+        /* ----- The stage of a cancel of money on hold with no ticket; last for the layout's sake ----- */
+
+        /// The cancel's latest half is the move out back to the sender, of what burned; false while its bring home
+        /// is out or owed. Its own field: a wallet that moved to itself is both the wallet the bring home burns and
+        /// the one the move out mints to.
+        bool cancelReturnsToTheSender;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
