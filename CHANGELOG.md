@@ -18,7 +18,8 @@ All notable changes to this project will be documented in this file.
     zero when the move names no spender, so the same ask mined again after a home reorg keeps its id; the `TICKET`
     carries the `kind` (0, a move) so the away token hashes it; the ask block hash names which
     copy the away token executed. `docs/satellite-lite.md` is the away token's contract.
-  - *New functions.* On the compliance: `askToMove`, `sendTicket` (an ask for the receipt, three at most),
+  - *New functions.* On the compliance: `askToMove`, `sendTicket` (the first send of an approved
+    ticket at any time, a resend before valid until, or an ask for the receipt, three at most),
     `cancelTickets`, `sendSecondHalf`, `bringHome`, `cancelHold`, `closeByHand`, `applyWaitingReceipt`,
     `refuseWaitingReceipt`, `blockAwayChain`, `unblockAwayChain`, `setValidityWindows`, `setWaitingTime`,
     `setMeasuredTimes`, `setAskLimits`, `setAskLimitOf`, `setAsksPaused`, `setTicketLimits`, `receiveReceipt`, and
@@ -35,6 +36,49 @@ All notable changes to this project will be documented in this file.
     use, and a distrusted bridge is never trusted again. Every money message, and every ticket on the receipt route,
     reads the receipt bridge's own `requestedFinality()` (`IRequestedFinality`) and reverts `WrongFinality` unless it
     is full finality; a receiving policy that admits less than full finality reverts `WrongFinality` too.
+    `setReceiptRoute(chainType, chainReference, bridge, awayChainSelector, awayReceiptBridge)` records the away
+    side the bridge's receiving policy is asked about, per away chain and bridge. `answerApproval` and `statusOf`
+    stay, on `ITickets`. On the compliance's ledger: `onHoldForwardOf(chainKey)` and `reservedFromOf(chainKey)`.
+  - *Interfaces.* `ITransferValidation` is replaced by `ITickets` (the `TransferValidation` contract by `Tickets`),
+    and `ISettlementHandler.handleSettlement` by `IReceiptHandler.receiveReceipt(originChainKey, bridge,
+    senderPeerKey, receipt)`. New: `IReceivingPolicy` (`getCCVsAndFinalityConfig`, a bridge's receiving policy) and
+    `IRequestedFinality` (`requestedFinality`, the finality a bridge requests for what it sends). `IComplianceLedger`,
+    `IToken`, `ITREXMessaging` and `ITrustedGatewayRegistry` change as listed here, so their interface ids change.
+    `IModularCompliance` loses `syncOwner`. The wire structs are `TicketMessage`, `ReceiptMessage`,
+    `MoveOutMessage` and `BringHomeMessage`; `SettlementNotification` and the delegation and recall bodies are gone.
+  - *Events.* New: `TicketWritten`, `TicketWaitingForApproval`, `TicketCancelled`, `TicketStillOpen`,
+    `ReceiptAsked`, `ReceiptReceived`, `ReceiptApplied`, `ReceiptDuplicate`, `ReceiptOnOlderTerms`,
+    `ReceiptRefused(ticketId, chainKey, amount, askBlockHash, reason)`, `ReceiptUnknown`, `ReceiptWaiting`,
+    `ReceiptWithoutTicket`, `WaitingReceiptApplied`, `WaitingReceiptRefused`, `SecondHalfSent`,
+    `SecondHalfNotSent`, `HalfPinned`, `HoldTaken`, `CancelHoldShort`, `ClosedByHand`, `MoveBreachedRule`,
+    `AwayChainBlockSet`, `AsksPausedSet`, `AskLimitsSet`, `AskLimitOfSet`, `TicketLimitsSet`, `ValidityWindowsSet`,
+    `WaitingTimeSet`, `MeasuredTimesSet`, `ReceiptRouteSet`, `ReceiptRouteClosed`, `TicketRouteSet`,
+    `FormerRouteKept`, `HostilePeerReplaced`, `VolumeLimitSet`. Changed: `TrustedGatewaySet(bridge, trusted,
+    depth)`. Deleted: `TransferValidationIssued`, `TransferValidationAwaitingApproval`, `ValidationResent`,
+    `ValidationDiscarded`, `ValidationResolved`, `ValidationSettled`, `ValidationLegConfirmed`, `ValidationOrphaned`,
+    `ValidationRoutePinned`, `ValidationIssuancePaused`, `ValidationIssuanceUnpaused`, `SettlementNotified`,
+    `SettlementDuplicate`, `SettlementRejected`, `SettlementParked`, `SettlementBodyDiverged`, `ParkedLegSettled`,
+    `ReplayedSettlement`, `LateReconciliation`, `ReconciliationWindowSet`, `DefaultValidityWindowSet`, `RouteSet`,
+    `FastRouteSet`, `InboundPaused`, `InboundUnpaused`, `InstructionResent`, `ReturnedInTransit`, `DelegatedOut`,
+    `RecallInstructed`, `RecallSettled`, `Recalled`, `BurnProofReceived`, `BurnProofDuplicate`, `ReplayedBurnProof`.
+  - *Errors.* New: `ApplyWaitingReceiptFirst`, `AskLimitReached`, `AsksNotPaused`, `AsksPaused`,
+    `AwayChainBlocked`, `AwayChainNotBlocked`, `AwayClockBeforeValidUntil`, `BelowMinimumAmount`,
+    `BridgeDistrusted`, `BridgeNotOnRoute`, `BridgeNotTrusted`, `BringHomeAlreadyOpen`, `CancelNotDue`,
+    `HeldReceiptBreaksItsTerms`, `HostileChangeNotOver`, `LaterHoldStillCarries`, `NoAsksLeft`, `NoNewHalfLeft`,
+    `NoWaitingReceipt`, `NotACrossChainMove`, `NotAReceiptBridge`, `NotAnAwayChain`,
+    `NotEnoughGasForTheSecondHalf`, `NotWaitingForApproval`, `ReceiptRouteNotClosed`, `RequestAboveBalance`,
+    `RouteChangedTooRecently`, `SecondHalfNotOwed`, `SendNotDue`, `TicketAlreadyWritten`, `TicketNotCancellable`,
+    `TicketsStillReserved`, `TooManyOpenTickets`, `UnknownTicket`, `ValidityWindowOutOfRange(duration,
+    mustBeAtMost)`, `WaitingTimeNotSet`, `WaitingTimeTooShort`, `WrongFinality(bridge, chainKey)`. Deleted:
+    `ChainInboundPaused`, `ChainNotPartOfValidation`, `DelegationMismatch`, `FastRouteIsFinalRoute`,
+    `GatewayIsFastRoute`, `GatewayNotPinned`, `GatewayNotRouted`, `GatewayNotTrusted`, `NothingInTransit`,
+    `ParkedLegAwaitsSettlement`, `ParkedLegNotSettleable`, `RecallAmountExceeded`, `RecallMismatch`,
+    `RecallNotPending`, `RecallPending`, `ReconciliationWindowNotSet`, `SenderNotOnSatellite`,
+    `SettlementAmountMismatch`, `TransitAmountMismatch`, `UnknownResendKind`, `UnknownValidation`,
+    `ValidationAlreadyRequested`, `ValidationAlreadyRouted`, `ValidationIssuancePaused`,
+    `ValidationNotAwaitingApproval`, `ValidationNotDiscardable`, `ValidationNotPubliclyDiscardable`,
+    `ValidationNotReleasable`, `ValidationNotStuck`, `ValidationNotYetResolvable`, `ValidationsPending`. The errors
+    that keep their name take a `ticketId` where they took a `validationId`, with the same types.
   - *Deleted functions.* `requestTransferValidation`, `resendValidation`, `discardExpiredValidations`,
     `resolveStuckValidation`, `settleParkedLeg`, `parkedLegOf`, `validationOf`, `handleSettlement`,
     `setReconciliationWindow`, `reconciliationWindowOf`, `setDefaultValidityWindow`, `defaultValidityWindow`,
@@ -66,14 +110,14 @@ All notable changes to this project will be documented in this file.
     included. Three ERC-7201 namespaces keep their strings and change their layout:
     `erc3643.storage.TransferValidation` (the compliance) is rewritten from its first slot: `defaultValidityWindow`,
     `reconciliationWindows`, `issuancePaused`, `awaitedTerms`, `parkedLegs` and `reportedLegs` are gone,
-    `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
-    `waitingReceipts`, `receiptHashes`, `ticketLimits`, `blockedAwayChains`,
-    `measuredTimes`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
-    `identityAsks`, `openBringHome`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
+    `validityWindows` takes slot 0 and `waitingTimes` slot 1, `validations` moved from slot 3 to slot 2 and holds the
+    reshaped `ITickets.Ticket` with its new status enum, and `waitingReceipts`, `receiptHashes`, `ticketLimits`,
+    `blockedAwayChains`, `measuredTimes`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
+    `identityAsks`, `openBringHome`, `uncountedCreditFrom`, `ticketRouteVolumes` and `asksPausedOn` are new.
     `erc3643.storage.TREXMessaging` (the token) keeps every field at its slot and appends the new ones: `routes`
     is read as `receiptRoutes` and `fastRoutes` as `ticketRoutes`, `pinnedRoutes`, `pinnedPeers` and
     `inboundPaused` stay in slots 5 to 7 unused, and `pins` (one pin per half), `awayReceiptBridges`,
-    `formerReceiptRoutes` and `hostileChangeEndsAt` follow from slot 9.
+    `formerReceiptRoutes` and `hostileChangedAt` follow from slot 9.
     `erc3643.storage.TREXToken` (the token) keeps its first six slots under new names (`bridgedBalance` as
     `awayBalance`, `totalBridged` as `totalAwayBalance`, `totalInTransit` as `totalOnHold`,
     `reservedForValidations` as `reservedForTickets`; `inTransit` is now keyed by ticket id), and drops `recalls`,
@@ -85,6 +129,13 @@ All notable changes to this project will be documented in this file.
     unchanged.
 
 ### Added
+
+- **`AwayChainVolumeModule`: a limit on what may leave one away chain in a window.** A `TRANSFER_CHECK` and
+  `AFTER` module, per compliance. The compliance owner sets `setVolumeLimit(chainKey, limitPerWindow, window)`
+  (`VolumeLimitSet`, read with `volumeLimitOf(compliance, chainKey)`); home's own key is refused. `checkTransfer`
+  answers the room left on the chain the money leaves, less the money on hold forward from it (`onHoldForwardOf`)
+  and less what its open tickets reserve (`reservedFromOf`); `afterTransfer` counts a move once, when it is done.
+  Its storage is the new `erc3643.storage.AwayChainVolumeModule` namespace. See `docs/compliance-modules.md`.
 
 - **Reorg-stable validation ids, parked legs, and the hash in the settlement.** A validation may now be
   attested to a satellite before the reference chain's finality. `validationId` is `bytes32`,
