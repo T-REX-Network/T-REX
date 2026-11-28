@@ -142,10 +142,10 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.startPrank(token);
-        _assertRejected(id, polygon, _leg(id, fromSat, "", 50));
-        _assertRejected(id, polygon, _leg(id, "", toSat, 50));
-        _assertRejected(id, polygon, _leg(id, fromSat, carolSat, 50));
-        _assertRejected(id, polygon, _leg(id, carolSat, toSat, 50));
+        _assertRejected(id, polygon, _leg(id, fromSat, "", 50), ITickets.ReceiptRefusal.WrongWallets);
+        _assertRejected(id, polygon, _leg(id, "", toSat, 50), ITickets.ReceiptRefusal.WrongWallets);
+        _assertRejected(id, polygon, _leg(id, fromSat, carolSat, 50), ITickets.ReceiptRefusal.WrongWallets);
+        _assertRejected(id, polygon, _leg(id, carolSat, toSat, 50), ITickets.ReceiptRefusal.WrongWallets);
         vm.stopPrank();
 
         _assertUntouched(id);
@@ -155,7 +155,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        _assertRejected(id, optimism, _leg(id, fromSat, toSat, 50));
+        _assertRejected(id, optimism, _leg(id, fromSat, toSat, 50), ITickets.ReceiptRefusal.WrongChain);
 
         _assertUntouched(id);
     }
@@ -204,9 +204,19 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = _issue();
 
         vm.prank(token);
-        _assertRejected(id, optimism, _legUnder(id, fromSat, toSat, 95, keccak256("not the issued body")));
+        _assertRejected(
+            id,
+            optimism,
+            _legUnder(id, fromSat, toSat, 95, keccak256("not the issued body")),
+            ITickets.ReceiptRefusal.WrongChain
+        );
         vm.prank(token);
-        _assertRejected(id, _evmChainKey(block.chainid), _legUnder(id, fromSat, toSat, 50, keccak256("another")));
+        _assertRejected(
+            id,
+            _evmChainKey(block.chainid),
+            _legUnder(id, fromSat, toSat, 50, keccak256("another")),
+            ITickets.ReceiptRefusal.WrongChain
+        );
 
         _assertUntouched(id);
         assertEq(mc.pendingInOf(bobId), 90, "still reserved");
@@ -298,7 +308,7 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
 
         vm.expectCall(token, abi.encodeWithSelector(IToken.finishMove.selector), 0);
         vm.prank(token);
-        _assertRejected(id, polygon, _leg(id, fromSat, toSat, 60));
+        _assertRejected(id, polygon, _leg(id, fromSat, toSat, 60), ITickets.ReceiptRefusal.AnotherBody);
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Done));
     }
@@ -438,7 +448,9 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = mc.askToMove(fromSat, nativeBob, 10, 40, "", _salt());
 
         vm.prank(token);
-        _assertRejected(id, _evmChainKey(block.chainid), _leg(id, fromSat, nativeBob, 40));
+        _assertRejected(
+            id, _evmChainKey(block.chainid), _leg(id, fromSat, nativeBob, 40), ITickets.ReceiptRefusal.WrongChain
+        );
 
         _assertUntouched(id);
     }
@@ -537,9 +549,14 @@ contract TicketsSettlementUnitTest is ModularComplianceBaseUnitTest {
     }
 
     /// @dev A bad receipt: refused, and the chain that sent it to be blocked. Runs under the caller's prank.
-    function _assertRejected(bytes32 id, bytes32 chainKey, MessageTypesLib.ReceiptMessage memory leg) private {
+    function _assertRejected(
+        bytes32 id,
+        bytes32 chainKey,
+        MessageTypesLib.ReceiptMessage memory leg,
+        ITickets.ReceiptRefusal reason
+    ) private {
         vm.expectEmit(true, true, false, true, address(mc));
-        emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.askBlockHash);
+        emit EventsLib.ReceiptRefused(id, chainKey, leg.amount, leg.askBlockHash, reason);
         mc.receiveReceipt(chainKey, BRIDGE, PEER_KEY, leg);
         assertTrue(mc.isAwayChainBlocked(chainKey), "the chain that sent it is blocked");
     }

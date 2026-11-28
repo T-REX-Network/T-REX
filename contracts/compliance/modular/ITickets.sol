@@ -97,7 +97,9 @@ interface ITickets {
     event WaitingReceiptApplied(bytes32 indexed halfKey, bytes32 indexed chainKey);
     event WaitingReceiptRefused(bytes32 indexed halfKey);
     event AwayChainBlockSet(bytes32 indexed chainKey, bool blocked);
-    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    event ReceiptRefused(
+        bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash, ReceiptRefusal reason
+    );
     event ReceiptOnOlderTerms(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 seenMax);
     event MoveBreachedRule(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount);
     event TicketLimitsSet(bytes32 indexed chainKey, uint256 perTicketCap, uint256 perWindowCap);
@@ -169,6 +171,26 @@ interface ITickets {
     error AwayClockBeforeValidUntil(bytes32 ticketId, uint64 awayClockTime, uint64 validUntil);
     error ReceiptRouteNotClosed(bytes32 chainKey);
 
+    /// @dev Why a receipt was refused as bad, announced in `ReceiptRefused`. The design's reasons first.
+    enum ReceiptRefusal {
+        /// A second, different body under one half, applied or waiting.
+        AnotherBody,
+        /// It comes from a chain that is not the one the half or the ticket went to, or its sender is not on it.
+        WrongChain,
+        /// It names wallets that are not the ticket's or the second half's, or a receiver that is not a wallet.
+        WrongWallets,
+        /// It names a half home never sent: above the ticket's latest half, or the latest one before it left.
+        HalfNotSent,
+        /// A move-out receipt different from its move out.
+        WrongMoveOut,
+        /// A bring-home receipt above its bring home, or for a half that cannot burn any more.
+        AboveTheBringHome,
+        /// A still open answer on home's own ask block hash with another valid until.
+        AnotherValidUntil,
+        /// An expired answer that still moved something.
+        ExpiredYetMoved
+    }
+
     /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
     /// same wallet and salt never share an id.
     enum TicketKind {
@@ -185,7 +207,7 @@ interface ITickets {
         /// opens it, or cancels it; past `validUntil`, `cancelTickets` cancels it.
         WaitingForApproval,
         /// Written, reserved and sent: waiting for its receipt. Or opened by the approver and not sent yet: anyone
-        /// sends it with `sendTicket`; past `validUntil` unsent, `cancelTickets` cancels it.
+        /// sends it with `sendTicket`, at any time; `cancelTickets` cancels it only once an ask went unanswered.
         Open,
         /// Its reservation released: refused by the approver, or cancelled once its receipt was overdue. A late
         /// receipt for a ticket that was sent is still applied as the move it is.

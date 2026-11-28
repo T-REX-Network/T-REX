@@ -134,7 +134,9 @@ contract LateReconciliationTest is InteropSuiteTest {
         uint256 replay = _liteSettles(polygonGateway, token, _settlement(late, aliceSat, bobSat, CAP - 1));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(late, polygon, CAP - 1, boundCompliance.ticketOf(late).askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            late, polygon, CAP - 1, boundCompliance.ticketOf(late).askBlockHash, ITickets.ReceiptRefusal.AnotherBody
+        );
         polygonGateway.relay(replay);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));

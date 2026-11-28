@@ -225,13 +225,13 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 wrongFrom = _liteSettles(polygonGateway, token, _settlement(id, carolSat, bobSat, 95));
         uint256 emptyTo = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, "", 95));
 
-        _relayRejected(polygonGateway, polygon, wrongTo, id, 95);
+        _relayRejected(polygonGateway, polygon, wrongTo, id, 95, ITickets.ReceiptRefusal.WrongWallets);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
-        _relayRejected(polygonGateway, polygon, wrongFrom, id, 95);
+        _relayRejected(polygonGateway, polygon, wrongFrom, id, 95, ITickets.ReceiptRefusal.WrongWallets);
         vm.prank(agent);
         boundCompliance.unblockAwayChain(polygon);
-        _relayRejected(polygonGateway, polygon, emptyTo, id, 95);
+        _relayRejected(polygonGateway, polygon, emptyTo, id, 95, ITickets.ReceiptRefusal.WrongWallets);
 
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
         assertEq(token.awayBalanceOf(aliceSat), BALANCE);
@@ -245,7 +245,7 @@ contract ValidationSettlementTest is InteropSuiteTest {
         bytes32 id = _issue(aliceSat, bobSat, 90, 100);
         uint256 index = _liteSettles(optimismGateway, token, _settlement(id, aliceSat, bobSat, 95));
 
-        _relayRejected(optimismGateway, optimism, index, id, 95);
+        _relayRejected(optimismGateway, optimism, index, id, 95, ITickets.ReceiptRefusal.WrongChain);
 
         assertFalse(boundCompliance.isAwayChainBlocked(polygon));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Open));
@@ -313,7 +313,9 @@ contract ValidationSettlementTest is InteropSuiteTest {
         uint256 replay = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 96));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash, ITickets.ReceiptRefusal.AnotherBody
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(replay);
@@ -483,11 +485,16 @@ contract ValidationSettlementTest is InteropSuiteTest {
 
     /// @dev Relays a leg carrying the issued ask block hash that fails the substantive gate: it is rejected,
     ///  consumed, and pauses the inbound of `chainKey`.
-    function _relayRejected(ERC7786GatewayMock gateway, bytes32 chainKey, uint256 index, bytes32 id, uint256 amount)
-        private
-    {
+    function _relayRejected(
+        ERC7786GatewayMock gateway,
+        bytes32 chainKey,
+        uint256 index,
+        bytes32 id,
+        uint256 amount,
+        ITickets.ReceiptRefusal reason
+    ) private {
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash);
+        emit EventsLib.ReceiptRefused(id, chainKey, amount, boundCompliance.ticketOf(id).askBlockHash, reason);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(chainKey, true);
         gateway.relay(index);

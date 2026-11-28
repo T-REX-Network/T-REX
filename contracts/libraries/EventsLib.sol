@@ -283,10 +283,16 @@ library EventsLib {
     event WaitingReceiptApplied(bytes32 indexed halfKey, bytes32 indexed chainKey);
     /// @notice The pauser deleted the receipt waiting under `halfKey` while its away chain was blocked.
     event WaitingReceiptRefused(bytes32 indexed halfKey);
-    /// @notice A bad receipt from `chainKey`: another body for a half that has one, from a chain that is not the
-    ///         sender's, for wallets that are not the ticket's, for a half never sent, or an expired answer that
-    ///         moved something. Nothing is applied, and the compliance blocks `chainKey`.
-    event ReceiptRefused(bytes32 indexed ticketId, bytes32 indexed chainKey, uint256 amount, bytes32 askBlockHash);
+    /// @notice A bad receipt from `chainKey`, refused for `reason`: another body for a half that has one, from a chain
+    ///         that is not the sender's, for wallets that are not the ticket's, for a half never sent, or an expired
+    ///         answer that moved something. Nothing is applied, and the compliance blocks `chainKey`.
+    event ReceiptRefused(
+        bytes32 indexed ticketId,
+        bytes32 indexed chainKey,
+        uint256 amount,
+        bytes32 askBlockHash,
+        ITickets.ReceiptRefusal reason
+    );
     /// @notice A receipt from `chainKey` answers a copy of the ticket from another home block, one a home reorg
     ///         dropped: it is applied as it happened, and blocks `chainKey` only above `requestedMax` or the away
     ///         chain's per-ticket cap. `seenMax` is the maximum of the copy the away token executed.

@@ -99,7 +99,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(optimismGateway, optimismLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(inventedId, optimism, FOUR, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            inventedId, optimism, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongChain
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(optimism, true);
         optimismGateway.relay(index);
@@ -120,7 +122,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(optimismGateway, optimismLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(inventedId, optimism, FOUR, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            inventedId, optimism, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongChain
+        );
         optimismGateway.relay(index);
 
         assertEq(token.onHoldOf(inventedId), 0, "nothing booked");
@@ -136,7 +140,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(inventedId, polygon, FOUR, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            inventedId, polygon, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongChain
+        );
         polygonGateway.relay(index);
 
         assertEq(token.onHoldOf(inventedId), 0, "nothing booked");
@@ -346,7 +352,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.askToMove(bobSat, bobHome, FOUR, FOUR, "", salt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(bobsId, polygon, FOUR, aliceAsSender.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            bobsId, polygon, FOUR, aliceAsSender.askBlockHash, ITickets.ReceiptRefusal.WrongWallets
+        );
         boundCompliance.applyWaitingReceipt(halfKey, aliceAsSender);
 
         assertEq(token.balanceOf(bob), 0, "bob is minted nothing at home");
@@ -873,7 +881,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(unknownId, polygon, FOUR, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            unknownId, polygon, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.ExpiredYetMoved
+        );
         polygonGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));
@@ -888,7 +898,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(ticketId, polygon, FOUR, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            ticketId, polygon, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongWallets
+        );
         polygonGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));
@@ -983,7 +995,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(inventedId, polygon, amount, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            inventedId, polygon, amount, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongWallets
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(index);

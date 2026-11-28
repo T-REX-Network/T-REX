@@ -285,7 +285,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
     function test_receiveReceipt_refusesABringHomeReceipt_forHalfZero() public {
         bytes32 id = _bringHome(BROUGHT);
 
-        _assertRefused(id, _burned(id, 0, BROUGHT));
+        _assertRefused(id, _burned(id, 0, BROUGHT), ITickets.ReceiptRefusal.HalfNotSent);
     }
 
     function test_receiveReceipt_refusesABringHomeReceipt_whenItNamesAReceiver() public {
@@ -293,13 +293,13 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         MessageTypesLib.ReceiptMessage memory receipt = _burned(id, 1, BROUGHT);
         receipt.to = aliceHome;
 
-        _assertRefused(id, receipt);
+        _assertRefused(id, receipt, ITickets.ReceiptRefusal.WrongWallets);
     }
 
     function test_receiveReceipt_refusesAMoveOutShapedReceipt_whileTheBringHomeIsOpen() public {
         bytes32 id = _bringHome(BROUGHT);
 
-        _assertRefused(id, _minted(id, 1, aliceOnA, BROUGHT));
+        _assertRefused(id, _minted(id, 1, aliceOnA, BROUGHT), ITickets.ReceiptRefusal.WrongMoveOut);
     }
 
     function test_receiveReceipt_refusesASecondBodyForTheSameHalf() public {
@@ -308,7 +308,7 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
         uint256 index = _liteSettles(polygonGateway, token, _burned(id, 1, BROUGHT - 1));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, polygon, BROUGHT - 1, bytes32(0));
+        emit EventsLib.ReceiptRefused(id, polygon, BROUGHT - 1, bytes32(0), ITickets.ReceiptRefusal.AnotherBody);
         polygonGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));
@@ -620,11 +620,13 @@ contract BringHomeTicketTest is SecondHalvesSuiteTest {
     }
 
     /// @dev A sends `receipt`: refused, A blocked, the bring home still open and reserved.
-    function _assertRefused(bytes32 id, MessageTypesLib.ReceiptMessage memory receipt) private {
+    function _assertRefused(bytes32 id, MessageTypesLib.ReceiptMessage memory receipt, ITickets.ReceiptRefusal reason)
+        private
+    {
         uint256 index = _liteSettles(polygonGateway, token, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, polygon, receipt.amount, bytes32(0));
+        emit EventsLib.ReceiptRefused(id, polygon, receipt.amount, bytes32(0), reason);
         polygonGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon), "A is blocked");

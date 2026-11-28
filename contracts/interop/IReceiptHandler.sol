@@ -102,7 +102,7 @@ interface IReceiptHandler {
     ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
     ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet
     ///   that is not the half's, a chain that is not the one that wallet is on, a sender named, or anything but a
-    ///   mint of the money on hold or a zero answer that the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`), nothing is applied,
+    ///   mint of the money on hold or a zero answer that the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`, with its reason), nothing is applied,
     ///   and the chain that sent it is blocked.
     /// - A receipt that cannot be applied yet: the token is stopped or its away chain is blocked; for the ticket's own
     ///   half, also the sender's away balance is below its amount. It waits (`ReceiptWaiting`), tagged with `bridge`

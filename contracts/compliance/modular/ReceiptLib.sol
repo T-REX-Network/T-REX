@@ -306,12 +306,13 @@ library ReceiptLib {
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
     ) private returns (bool refused) {
+        ITickets.ReceiptRefusal reason;
         if (withoutTicket) {
-            refused = _isBadReceiptWithoutTicket(store, halfKey, originChainKey, receipt);
+            (refused, reason) = _isBadReceiptWithoutTicket(store, halfKey, originChainKey, receipt);
         }
-        if (!withoutTicket) refused = _isBadReceipt(store, ticket, halfKey, originChainKey, receipt);
+        if (!withoutTicket) (refused, reason) = _isBadReceipt(store, ticket, halfKey, originChainKey, receipt);
         if (!refused) return false;
-        emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash, reason);
         TicketLib.blockAwayChain(originChainKey);
     }
 
@@ -320,29 +321,33 @@ library ReceiptLib {
     ///  still moved something, or, for a ticket home wrote, when it names other wallets. With no ticket to compare it
     ///  to, a receipt is held to the chain that holds its sender: no other away chain can move that sender's tokens.
     ///  A malformed wallet is refused here, not reverted: nothing may revert the delivery once it is admitted.
+    /// @return bad whether the receipt is bad
+    /// @return reason why, when it is
     function _isBadReceiptWithoutTicket(
         TicketLib.ValidationStorage storage store,
         bytes32 halfKey,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
-    ) private view returns (bool) {
-        bool anotherBodyApplied =
-            store.receiptHashes[halfKey] != bytes32(0);
+    ) private view returns (bool bad, ITickets.ReceiptRefusal reason) {
+        bool anotherBodyApplied = store.receiptHashes[halfKey] != bytes32(0);
         bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
+        if (anotherBodyApplied || anotherBodyWaiting) return (true, ITickets.ReceiptRefusal.AnotherBody);
         (bool fromIsAWallet, bytes2 fromChainType, bytes memory fromChainReference,) =
             WalletKeyLib.tryParse(receipt.from);
         bool fromTheSendersChain =
             fromIsAWallet && MessageTypesLib.chainKey(fromChainType, fromChainReference) == originChainKey;
+        if (!fromTheSendersChain) return (true, ITickets.ReceiptRefusal.WrongChain);
         (bool toIsAWallet,,,) = WalletKeyLib.tryParse(receipt.to);
+        if (!toIsAWallet) return (true, ITickets.ReceiptRefusal.WrongWallets);
         bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
-        bool namesItsWallets = fromTheSendersChain && toIsAWallet;
-        if (anotherBodyApplied || anotherBodyWaiting || !namesItsWallets || expiredYetMoved) return true;
+        if (expiredYetMoved) return (true, ITickets.ReceiptRefusal.ExpiredYetMoved);
 
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
-        if (!TicketLib.isRecorded(store, receipt.ticketId)) return false;
+        if (!TicketLib.isRecorded(store, receipt.ticketId)) return (false, reason);
         bool fromTheTicketsSender = keccak256(receipt.from) == ticket.fromKey;
         bool toTheTicketsReceiver = keccak256(receipt.to) == ticket.toKey;
-        return !fromTheTicketsSender || !toTheTicketsReceiver;
+        bool namesTheTicketsWallets = fromTheTicketsSender && toTheTicketsReceiver;
+        return (!namesTheTicketsWallets, ITickets.ReceiptRefusal.WrongWallets);
     }
 
     /// @dev A still open answer: the away token holds the ticket unexecuted, valid until `seenValidUntil`. It is not
@@ -368,7 +373,13 @@ library ReceiptLib {
         bool onHomesOwnCopy = receipt.askBlockHash == ticket.askBlockHash;
         bool echoesAnotherValidUntil = receipt.seenValidUntil != ticket.validUntil;
         if (onHomesOwnCopy && echoesAnotherValidUntil) {
-            emit EventsLib.ReceiptRefused(receipt.ticketId, originChainKey, receipt.amount, receipt.askBlockHash);
+            emit EventsLib.ReceiptRefused(
+                receipt.ticketId,
+                originChainKey,
+                receipt.amount,
+                receipt.askBlockHash,
+                ITickets.ReceiptRefusal.AnotherValidUntil
+            );
             TicketLib.blockAwayChain(originChainKey);
             return;
         }
@@ -390,22 +401,30 @@ library ReceiptLib {
     /// @dev A receipt home cannot take in: another body for a half that already has one, applied or waiting, or one
     ///  that does not answer the half it names, see {_answersTheTicket}, {_answersASecondHalf} and
     ///  {_answersTheBringHome}. The same body again never reaches here.
+    /// @return bad whether the receipt is bad
+    /// @return reason why, when it is
     function _isBadReceipt(
         TicketLib.ValidationStorage storage store,
         ITickets.Ticket storage ticket,
         bytes32 halfKey,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
-    ) private view returns (bool) {
-        bool anotherBodyApplied =
-            store.receiptHashes[halfKey] != bytes32(0);
+    ) private view returns (bool bad, ITickets.ReceiptRefusal reason) {
+        bool anotherBodyApplied = store.receiptHashes[halfKey] != bytes32(0);
         bool anotherBodyWaiting = store.waitingReceipts[halfKey].bodyHash != bytes32(0);
-        if (anotherBodyApplied || anotherBodyWaiting) return true;
+        if (anotherBodyApplied || anotherBodyWaiting) return (true, ITickets.ReceiptRefusal.AnotherBody);
         bool aBringHome = ticket.kind == ITickets.TicketKind.BRING_HOME;
         bool heldWithoutTicket = !ticket.written;
-        if (aBringHome || heldWithoutTicket) return !_answersTheBringHome(ticket, originChainKey, receipt);
-        if (receipt.half == 0) return !_answersTheTicket(ticket, originChainKey, receipt);
-        return !_answersASecondHalf(ticket, originChainKey, receipt, _walletTheHalfWentTo(ticket, receipt.half));
+        bool answers;
+        if (aBringHome || heldWithoutTicket) {
+            (answers, reason) = _answersTheBringHome(ticket, originChainKey, receipt);
+        } else if (receipt.half == 0) {
+            (answers, reason) = _answersTheTicket(ticket, originChainKey, receipt);
+        } else {
+            bytes32 halfWalletKey = _walletTheHalfWentTo(ticket, receipt.half);
+            (answers, reason) = _answersASecondHalf(ticket, originChainKey, receipt, halfWalletKey);
+        }
+        bad = !answers;
     }
 
     /// @dev The key of the wallet a move's second half went to: the receiver's for a half sent before close by hand
@@ -423,48 +442,59 @@ library ReceiptLib {
     ///  burn at most the half's amount for its latest half while it is out, or be a zero answer that a half it sent
     ///  expired unexecuted, the latest included once close by hand ended it. A burn for an older half would be a
     ///  second burn.
+    /// @return answers whether it answers such a half
+    /// @return reason why not, when it does not
     function _answersTheBringHome(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
-    ) private view returns (bool) {
-        if (receipt.half == 0) return false;
+    ) private view returns (bool answers, ITickets.ReceiptRefusal reason) {
+        if (receipt.half == 0) return (false, ITickets.ReceiptRefusal.HalfNotSent);
         bool namesTheBurnedWallet = receipt.from.length != 0;
         if (!namesTheBurnedWallet) {
             bool returnsWhatWasBurned =
                 ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.fromKey;
-            return returnsWhatWasBurned && _answersASecondHalf(ticket, originChainKey, receipt, ticket.fromKey);
+            if (!returnsWhatWasBurned) return (false, ITickets.ReceiptRefusal.WrongMoveOut);
+            return _answersASecondHalf(ticket, originChainKey, receipt, ticket.fromKey);
         }
         // A bring home burns from its away wallet; the cancel of money on hold, from the receiver on the same chain.
         bytes32 burnedWalletKey = ticket.fromKey;
         if (!ticket.written) burnedWalletKey = ticket.toKey;
         bool fromTheWalletsChain = originChainKey == ticket.fromChainKey;
+        if (!fromTheWalletsChain) return (false, ITickets.ReceiptRefusal.WrongChain);
         bool burnedTheHalfsWallet = keccak256(receipt.from) == burnedWalletKey;
         bool namesNoReceiver = receipt.to.length == 0;
+        bool namesItsWallets = burnedTheHalfsWallet && namesNoReceiver;
+        if (!namesItsWallets) return (false, ITickets.ReceiptRefusal.WrongWallets);
+        bool answersASentHalf = receipt.half <= ticket.half;
+        if (!answersASentHalf) return (false, ITickets.ReceiptRefusal.HalfNotSent);
 
         bool answersTheLatestHalf = TicketLib.aBringHomeIsOut(ticket) && receipt.half == ticket.half;
-        bool answersASentHalf = receipt.half <= ticket.half;
         bool executed = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
         bool burnedAtMostItsAmount = executed && receipt.amount <= ticket.amountMax;
         bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount == 0;
         bool burnedForTheLatestHalf = answersTheLatestHalf && burnedAtMostItsAmount;
-        bool aSentHalfExpired = answersASentHalf && expiredUnexecuted;
-        bool answersAHalfRightly = burnedForTheLatestHalf || aSentHalfExpired;
-        return fromTheWalletsChain && burnedTheHalfsWallet && namesNoReceiver && answersAHalfRightly;
+        bool answersAHalfRightly = burnedForTheLatestHalf || expiredUnexecuted;
+        return (answersAHalfRightly, ITickets.ReceiptRefusal.AboveTheBringHome);
     }
 
     /// @dev Whether a first-half receipt answers the ticket: from the chain the ticket went to, for the ticket's
     ///  wallets, and not an expired answer that still moved something.
+    /// @return answers whether it answers the ticket
+    /// @return reason why not, when it does not
     function _answersTheTicket(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt
-    ) private view returns (bool) {
+    ) private view returns (bool answers, ITickets.ReceiptRefusal reason) {
         bool fromTheChainTheTicketWentTo = originChainKey == ticket.fromChainKey;
+        if (!fromTheChainTheTicketWentTo) return (false, ITickets.ReceiptRefusal.WrongChain);
         bool fromTheTicketsSender = keccak256(receipt.from) == ticket.fromKey;
         bool toTheTicketsReceiver = keccak256(receipt.to) == ticket.toKey;
+        bool namesTheTicketsWallets = fromTheTicketsSender && toTheTicketsReceiver;
+        if (!namesTheTicketsWallets) return (false, ITickets.ReceiptRefusal.WrongWallets);
         bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
-        return fromTheChainTheTicketWentTo && fromTheTicketsSender && toTheTicketsReceiver && !expiredYetMoved;
+        return (!expiredYetMoved, ITickets.ReceiptRefusal.ExpiredYetMoved);
     }
 
     /// @dev Whether a receipt answers a second half home sent: the latest half, sent at least once, or an older one;
@@ -473,27 +503,34 @@ library ReceiptLib {
     ///  the half's own wallet, never off the ticket's sender, so a receiving chain's honest receipt never blocks it,
     ///  and another chain cannot answer its half. An older half can only answer zero: a mint of it would be a second
     ///  mint of one move.
+    /// @return answers whether it answers such a half
+    /// @return reason why not, when it does not
     function _answersASecondHalf(
         ITickets.Ticket storage ticket,
         bytes32 originChainKey,
         MessageTypesLib.ReceiptMessage calldata receipt,
         bytes32 halfWalletKey
-    ) private view returns (bool) {
+    ) private view returns (bool answers, ITickets.ReceiptRefusal reason) {
         bool toTheHalfsWallet = keccak256(receipt.to) == halfWalletKey;
-        if (!toTheHalfsWallet) return false;
+        if (!toTheHalfsWallet) return (false, ITickets.ReceiptRefusal.WrongWallets);
         bool fromTheChainTheHalfWentTo = _chainKeyOf(receipt.to) == originChainKey;
+        if (!fromTheChainTheHalfWentTo) return (false, ITickets.ReceiptRefusal.WrongChain);
         bool namesNoSender = receipt.from.length == 0;
+        if (!namesNoSender) return (false, ITickets.ReceiptRefusal.WrongWallets);
 
         bool latestHalfLeft = ticket.secondHalfSends != 0;
         bool answersTheLatestHalf = receipt.half == ticket.half && latestHalfLeft;
         bool answersAnOlderHalf = receipt.half < ticket.half;
+        bool answersASentHalf = answersTheLatestHalf || answersAnOlderHalf;
+        if (!answersASentHalf) return (false, ITickets.ReceiptRefusal.HalfNotSent);
+
         bool mintedTheHalf = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed
             && receipt.amount == TicketLib.amountOfTheLatestHalf(ticket);
         bool expiredUnexecuted = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount == 0;
         bool answersTheLatestHalfRightly = answersTheLatestHalf && (mintedTheHalf || expiredUnexecuted);
         bool answersAnOlderHalfRightly = answersAnOlderHalf && expiredUnexecuted;
         bool answersAHalfRightly = answersTheLatestHalfRightly || answersAnOlderHalfRightly;
-        return fromTheChainTheHalfWentTo && namesNoSender && answersAHalfRightly;
+        return (answersAHalfRightly, ITickets.ReceiptRefusal.WrongMoveOut);
     }
 
     /// @dev Applies a good receipt as it happened. A half of the cancel of money on hold with no ticket is
@@ -810,6 +847,7 @@ library ReceiptLib {
 
         // 1. What the away token stored is applied as if it had arrived; nothing is returned.
         if (reading.storedReceipt.amount != 0) {
+            TicketLib.requireAwayChainNotBlocked(chainKey);
             _applyTheStoredReceipt(ticketId, chainKey, reading.storedReceipt, token);
             emit EventsLib.ClosedByHand(ticketId, 0, reading.blockNumber, reading.awayClockTime);
             return;
@@ -839,7 +877,8 @@ library ReceiptLib {
 
     /// @dev The away chain a close by hand reads, once it is known: the chain of the ticket's latest half, or the
     ///  stored receipt's sender's for an id with no record. It must deliver no receipt, and nothing is decided under
-    ///  a stop, a block or a hostile change.
+    ///  a stop or a hostile change. A block is checked per case: an open move is cancelled on a closed route even
+    ///  while its chain is blocked.
     /// @return chainKey the away chain read
     function _requireTheChainIsClosed(bytes32 ticketId, ITickets.AwayChainReading calldata reading, address token)
         private
@@ -856,13 +895,13 @@ library ReceiptLib {
         bool routeClosed = ITREXMessaging(token).receiptRouteFor(chainKey) == address(0);
         require(routeClosed, ErrorsLib.ReceiptRouteNotClosed(chainKey));
         TicketLib.requireTokenRunning(token);
-        TicketLib.requireAwayChainNotBlocked(chainKey);
         TicketLib.requireNoHostileChange(token, chainKey);
     }
 
     /// @dev No receipt in the read. A receipt waiting at home for the latest half says otherwise, so it is read again
-    ///  instead. Then an open move, or one waiting for approval, is cancelled here, money on hold with no ticket is {HoldLib}'s, and any other
-    ///  half {SecondHalfLib}'s.
+    ///  instead. Then an open move, or one waiting for approval, is cancelled here, whether its chain is blocked or
+    ///  not. Money on hold with no ticket is {HoldLib}'s, and any other half {SecondHalfLib}'s, while neither the
+    ///  half's chain nor the sender's is blocked.
     /// @return returnedAmount what goes back to the sender
     function _closeOnTheAwayClock(
         bytes32 ticketId,
@@ -885,6 +924,8 @@ library ReceiptLib {
             _cancelOnTheClosedRoute(store, ticket, ticketId, reading, token);
             return 0;
         }
+        TicketLib.requireAwayChainNotBlocked(chainKey);
+        TicketLib.requireAwayChainNotBlocked(ticket.fromChainKey);
         if (!ticket.written) {
             HoldLib.closeHoldByHand(ticketId, receiver, reading.awayClockTime, token);
             return 0;

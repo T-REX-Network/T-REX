@@ -257,7 +257,7 @@ contract TicketClockTest is InteropSuiteTest {
         uint256 index = _queueStillOpen(homesAskBlockHash, anotherValidUntil);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, polygon, 0, homesAskBlockHash);
+        emit EventsLib.ReceiptRefused(id, polygon, 0, homesAskBlockHash, ITickets.ReceiptRefusal.AnotherValidUntil);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(index);

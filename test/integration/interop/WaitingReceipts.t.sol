@@ -182,7 +182,7 @@ contract WaitingReceiptsTest is InteropSuiteTest {
         uint256 index = _liteSettles(polygonBridge, token, another);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(ticketId, polygon, 45, another.askBlockHash);
+        emit EventsLib.ReceiptRefused(ticketId, polygon, 45, another.askBlockHash, ITickets.ReceiptRefusal.AnotherBody);
         polygonBridge.relay(index);
 
         assertEq(boundCompliance.waitingReceiptOf(ticketId).amount, 40, "the first receipt still waits");

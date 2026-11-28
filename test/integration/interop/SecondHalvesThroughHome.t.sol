@@ -192,7 +192,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         uint256 index = _liteSettles(baseGateway, token, forged);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, base, MOVED, bytes32(0));
+        emit EventsLib.ReceiptRefused(id, base, MOVED, bytes32(0), ITickets.ReceiptRefusal.WrongChain);
         baseGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(base), "C is blocked");
@@ -259,13 +259,13 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         MessageTypesLib.ReceiptMessage memory receipt = _minted(id, 1, bobOnB, MOVED);
         receipt.from = aliceOnA;
 
-        _assertRefusedByB(id, receipt);
+        _assertRefusedByB(id, receipt, ITickets.ReceiptRefusal.WrongWallets);
     }
 
     function test_receiveReceipt_refusesASecondHalfReceipt_whenItMintsLessThanTheMoneyOnHold() public {
         bytes32 id = _firstHalfLanded(MOVED);
 
-        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED - 1));
+        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED - 1), ITickets.ReceiptRefusal.WrongMoveOut);
     }
 
     function test_receiveReceipt_refusesASecondHalfReceipt_whenItMintsAnOlderHalf() public {
@@ -274,13 +274,13 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         boundCompliance.sendSecondHalf(id, bobOnB);
         assertEq(boundCompliance.ticketOf(id).half, 2);
 
-        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED));
+        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED), ITickets.ReceiptRefusal.AnotherBody);
     }
 
     function test_receiveReceipt_refusesASecondHalfReceipt_forAHalfNeverSent() public {
         bytes32 id = _firstHalfLanded(MOVED);
 
-        _assertRefusedByB(id, _minted(id, 2, bobOnB, MOVED));
+        _assertRefusedByB(id, _minted(id, 2, bobOnB, MOVED), ITickets.ReceiptRefusal.HalfNotSent);
     }
 
     function test_receiveReceipt_refusesASecondHalfReceipt_forTheLatestHalfWhoseSendWasCaught() public {
@@ -290,7 +290,7 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         vm.clearMockedCalls();
         assertEq(boundCompliance.ticketOf(id).secondHalfSends, 0, "half 1 never left");
 
-        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED));
+        _assertRefusedByB(id, _minted(id, 1, bobOnB, MOVED), ITickets.ReceiptRefusal.HalfNotSent);
     }
 
     /// @notice An older half's zero answer that comes again after a new half went changes nothing: that half is dead
@@ -822,11 +822,15 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
     }
 
     /// @dev B sends `receipt`: it is refused, B is blocked, and the money stays on hold for Bob.
-    function _assertRefusedByB(bytes32 id, MessageTypesLib.ReceiptMessage memory receipt) private {
+    function _assertRefusedByB(
+        bytes32 id,
+        MessageTypesLib.ReceiptMessage memory receipt,
+        ITickets.ReceiptRefusal reason
+    ) private {
         uint256 index = _liteSettles(optimismGateway, token, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, optimism, receipt.amount, bytes32(0));
+        emit EventsLib.ReceiptRefused(id, optimism, receipt.amount, bytes32(0), reason);
         optimismGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(optimism), "B is blocked");

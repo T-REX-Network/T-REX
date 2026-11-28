@@ -227,17 +227,17 @@ containment the operator also distrusts its bridge.
 
 | Broken rule | Reference-chain reaction |
 |---|---|
-| 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
+| 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused` (`AnotherBody`), consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
 | the receipt home holds for a half, delivered again byte for byte (a bridge redelivery, or the Lite resending its receipt) | `ReceiptDuplicate`, consumed, nothing applied, nothing blocked; a chain blocked over the first delivery and reopened stays open |
 | a first-half receipt for an id home has no record of, or for a ticket home never sent | put on hold under the sender with no destination (`ReceiptWithoutTicket`), nothing blocked; refused and the chain blocked when its sender is not on that chain or, for a ticket home wrote, its wallets are not the ticket's; taken by the ask mined again, or cancelled with `cancelHold` |
 | a second-half receipt for an id home has no record of | `ReceiptUnknown`, consumed, nothing written, nothing blocked |
 | a good receipt that cannot be applied yet: the token stopped, its away chain blocked, or the sender's away balance too low (for a receipt with no ticket, its away balance and the uncounted credit it may carry) | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
-| 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
-| 9: a move out's receipt from a chain the half was not sent to, naming a sender, minting another amount, or minting an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
+| 6: wrong wallets, a chain the ticket was not sent to, a half home never sent, or an expired answer that moved something | `ReceiptRefused` (`WrongWallets`, `WrongChain`, `HalfNotSent`, `ExpiredYetMoved`), consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
+| 9: a move out's receipt from a chain the half was not sent to, naming a sender, minting another amount, or minting an older half | `ReceiptRefused` (`WrongChain`, `WrongWallets`, `WrongMoveOut`, `HalfNotSent`, `AnotherBody`), consumed, nothing applied, the compliance blocks that away chain |
 | a move out's receipt with less gas left than home's send of a new half needs, where one is sent | reverts with `NotEnoughGasForTheSecondHalf` and stays deliverable: home asks for 550,000 gas left before that send |
 | a zero answer (`Expired`) that comes late for a half close by hand already decided, or for an older half, judged against the wallet that half was sent to | `ReceiptApplied`, consumed, nothing changes, nothing blocked |
 | 5: an amount outside the range, or other terms echoed, under home's own ask block hash; or, under another ask block hash, a copy above `requestedMax` or the per-ticket cap | applied as it happened, then the compliance blocks that away chain |
-| 10: a bring home's receipt from another chain, for another wallet, naming a receiver, burning more than the bring home's amount, or burning for an older half | `ReceiptRefused`, consumed, nothing applied, the compliance blocks that away chain |
+| 10: a bring home's receipt from another chain, for another wallet, naming a receiver, burning more than the bring home's amount, or burning for an older half | `ReceiptRefused` (`WrongChain`, `WrongWallets`, `AboveTheBringHome`, `HalfNotSent`), consumed, nothing applied, the compliance blocks that away chain |
 
 A receipt for a ticket home knows never reverts for what it carries: it is applied as it happened or refused, and
 consumed either way, see "Lanes". A receipt for an id home does not know blocks nobody: a first half is put on

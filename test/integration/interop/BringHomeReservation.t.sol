@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.30;
 
+import { ITickets } from "contracts/compliance/modular/ITickets.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
 import { EventsLib } from "contracts/libraries/EventsLib.sol";
 import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
@@ -158,7 +159,7 @@ contract BringHomeReservationTest is InteropSuiteTest {
 
         uint256 index = _liteSettles(polygonGateway, token, _bringHomeReceipt(bringHomeId, aliceSat, 201));
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(bringHomeId, polygon, 201, bytes32(0));
+        emit EventsLib.ReceiptRefused(bringHomeId, polygon, 201, bytes32(0), ITickets.ReceiptRefusal.AboveTheBringHome);
         polygonGateway.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));

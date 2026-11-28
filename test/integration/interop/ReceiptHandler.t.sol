@@ -113,7 +113,9 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         uint256 another = _liteSettles(polygonBridge, token, _settlement(ticketId, aliceOnPolygon, bobOnPolygon, 45));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(ticketId, polygon, 45, boundCompliance.ticketOf(ticketId).askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            ticketId, polygon, 45, boundCompliance.ticketOf(ticketId).askBlockHash, ITickets.ReceiptRefusal.AnotherBody
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonBridge.relay(another);
@@ -130,7 +132,7 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         uint256 index = _liteSettles(polygonBridge, token, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(ticketId, polygon, 40, receipt.askBlockHash);
+        emit EventsLib.ReceiptRefused(ticketId, polygon, 40, receipt.askBlockHash, ITickets.ReceiptRefusal.WrongWallets);
         polygonBridge.relay(index);
 
         assertTrue(boundCompliance.isAwayChainBlocked(polygon));

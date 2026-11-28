@@ -700,14 +700,31 @@ contract CloseByHandTest is HoldsSuiteTest {
         boundCompliance.closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
     }
 
-    function test_closeByHand_reverts_when_theChainIsBlocked() public {
+    /// @notice An open move on a closed route is cancelled from the read even while its chain is blocked: the closed
+    ///         route, not the block, decides who reads it.
+    function test_closeByHand_cancelsAnOpenMove_onAClosedAndBlockedChain() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, FOUR, FOUR);
         _closeEvmChain(token, POLYGON);
         _blockPolygon();
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
+
+        _closeByHand(ticketId, bobSat, _reading(validUntil + REORG_SLOT_SHIFT));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled on the away clock");
+        assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
+    }
+
+    /// @notice A second half is closed by hand only while the sender's chain is not blocked either: the money on
+    ///         hold may still go back there.
+    function test_closeByHand_reverts_when_theSendersChainIsBlocked_forASecondHalf() public {
+        bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(EIGHT);
+        _closeEvmChain(token, OPTIMISM);
+        _blockPolygon();
+        uint64 halfValidUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.AwayChainBlocked.selector, polygon));
-        boundCompliance.closeByHand(ticketId, bobSat, _reading(uint64(block.timestamp)));
+        boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(halfValidUntil));
     }
 
     function test_closeByHand_reverts_when_aHostileChangeRuns() public {

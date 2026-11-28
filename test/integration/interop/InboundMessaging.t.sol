@@ -171,7 +171,9 @@ contract InboundMessagingTest is InteropSuiteTest {
         // Not the issued wallets, under the issued ask block hash: the compliance rejects the leg and pauses the chain
         // that reported it. The delivery is consumed, nothing applied, the validation untouched.
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptRefused(ticketId, originChain, amount, leg.askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            ticketId, originChain, amount, leg.askBlockHash, ITickets.ReceiptRefusal.WrongWallets
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(originChain, true);
         routedGateway.relay(index);
@@ -453,7 +455,7 @@ contract InboundMessagingTest is InteropSuiteTest {
         _deliverWithZeroReceiveId(MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 100)));
 
         vm.expectEmit(true, true, false, true, compliance);
-        emit EventsLib.ReceiptRefused(bringHomeId, originChain, 60, bytes32(0));
+        emit EventsLib.ReceiptRefused(bringHomeId, originChain, 60, bytes32(0), ITickets.ReceiptRefusal.AnotherBody);
         _deliverWithZeroReceiveId(MessageTypesLib.encodeSettlement(_bringHomeReceipt(bringHomeId, 60)));
 
         assertTrue(boundCompliance.isAwayChainBlocked(originChain));

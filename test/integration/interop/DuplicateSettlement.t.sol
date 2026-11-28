@@ -83,7 +83,9 @@ contract DuplicateSettlementTest is InteropSuiteTest {
         uint256 conflicting = _liteSettles(polygonGateway, token, _settlement(id, aliceSat, bobSat, 96));
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash);
+        emit EventsLib.ReceiptRefused(
+            id, polygon, 96, boundCompliance.ticketOf(id).askBlockHash, ITickets.ReceiptRefusal.AnotherBody
+        );
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.AwayChainBlockSet(polygon, true);
         polygonGateway.relay(conflicting);
