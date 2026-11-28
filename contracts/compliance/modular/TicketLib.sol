@@ -686,7 +686,7 @@ library TicketLib {
     ///  {waitingEndsAtOf}, an ask for the receipt, at most `MAX_RECEIPT_ASKS` times; one send per waiting time either
     ///  way, see {_requireCanBeSentAgain}. A blocked sender's chain refuses it as it refuses an ask to move, and so do
     ///  a hostile change running on it, see {requireNoHostileChange}, and the token's own pause, see
-    ///  {requireTokenRunning}. The receiver's other away chain is held to the same block and hostile change only, see
+    ///  {requireTokenRunning}. The receiver's other away chain is held to the same block only, see
     ///  {_requireTheReceiversChainNotBlocked}.
     function _sendAgain(
         ITickets.Ticket storage ticket,
@@ -700,7 +700,7 @@ library TicketLib {
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
         requireNoHostileChange(token, chainKey);
-        _requireTheReceiversChainNotBlocked(token, chainKey, to);
+        _requireTheReceiversChainNotBlocked(chainKey, to);
 
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
@@ -800,14 +800,13 @@ library TicketLib {
         require(ITREXMessaging(token).isChainOpen(toChainKey), ErrorsLib.ChainNotOpen(toChainKey));
     }
 
-    /// @dev A copy sent again involves the receiver's other away chain only as a chain that must not be blocked or
-    ///  have a hostile change running. Its route may have been closed since the ask: the ask for the receipt still
-    ///  goes to the sender's chain, or the ticket could never be cancelled.
-    function _requireTheReceiversChainNotBlocked(address token, bytes32 firstChainKey, bytes calldata to) private view {
+    /// @dev A copy sent again involves the receiver's other away chain only as a chain that must not be blocked. Its
+    ///  route may have been closed since the ask, or its peer replaced as hostile: the copy and its answer travel
+    ///  between home and the sender's chain only, or the ticket could never be cancelled.
+    function _requireTheReceiversChainNotBlocked(bytes32 firstChainKey, bytes calldata to) private view {
         (bool toAnotherAwayChain, bytes32 toChainKey) = _receiversOtherAwayChain(firstChainKey, to);
         if (!toAnotherAwayChain) return;
         requireAwayChainNotBlocked(toChainKey);
-        requireNoHostileChange(token, toChainKey);
     }
 
     /// @dev The receiver's away chain, and whether it is another away chain than the one the move's first message

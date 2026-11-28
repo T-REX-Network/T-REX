@@ -12,8 +12,8 @@ import { HoldsSuiteTest } from "test/integration/helpers/HoldsSuiteTest.sol";
 
 /// @dev A move from one away chain to another involves both: Alice on Polygon to Bob on Optimism is refused while
 ///      Optimism is blocked, closed or under a hostile change, at the ask and at the first send of an approved ticket,
-///      as it would be for Polygon. An ask for the receipt goes to Polygon: it is refused while Optimism is blocked or
-///      under a hostile change, never because Optimism's route closed since the ask.
+///      as it would be for Polygon. A resend and an ask for the receipt go to Polygon: they are refused while Optimism
+///      is blocked, never because Optimism's route closed or its peer was replaced as hostile since the ask.
 contract ReceiversChainTest is HoldsSuiteTest {
 
     uint256 internal constant FOUR = 4;
@@ -133,16 +133,47 @@ contract ReceiversChainTest is HoldsSuiteTest {
         boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
     }
 
-    function test_sendTicket_reverts_when_aHostileChangeRunsOnTheReceiversAwayChainAtAnAskForTheReceipt() public {
+    /// @notice Optimism's peer is replaced as hostile after the ask. The ask for the receipt goes to Polygon, whose
+    ///         route and peer are untouched, and once it went unanswered for one waiting time anyone cancels the
+    ///         ticket, inside Optimism's freeze.
+    function test_sendTicket_asksForTheReceipt_whileAHostileChangeRunsOnTheReceiversAwayChain() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
-        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
-        vm.prank(deployer);
-        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")), true);
-        uint64 endsAt = token.hostileChangeEndsAt(optimism);
+        uint64 waitingTime = boundCompliance.waitingTimeOf(ticket.fromChainKey);
+        vm.warp(ticket.validUntil + waitingTime);
+        _replaceOptimismPeerAsHostile();
+        uint64 freezeEndsAt = token.hostileChangeEndsAt(optimism);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, optimism, endsAt));
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptAsked(ticketId, 1);
         boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
+
+        vm.warp(block.timestamp + waitingTime);
+        assertLt(block.timestamp, freezeEndsAt, "optimism is still frozen");
+        bytes32[] memory ticketIds = new bytes32[](1);
+        ticketIds[0] = ticketId;
+        boundCompliance.cancelTickets(ticketIds);
+        _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled after the unanswered ask");
+    }
+
+    /// @notice A lost ticket is sent again to Polygon before its valid until while Optimism's peer is replaced as
+    ///         hostile: nothing of it reaches Optimism. Possible only with a validity window longer than the waiting
+    ///         time.
+    function test_sendTicket_resendsALostTicket_whileAHostileChangeRunsOnTheReceiversAwayChain() public {
+        vm.prank(deployer);
+        boundCompliance.setValidityWindows(1 days, 1 days);
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
+        polygonGateway.drop(polygonGateway.queueLength() - 1);
+        ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
+        vm.warp(ticket.lastSentAt + boundCompliance.waitingTimeOf(ticket.fromChainKey));
+        assertLt(block.timestamp, ticket.validUntil, "before its valid until");
+        _replaceOptimismPeerAsHostile();
+
+        boundCompliance.sendTicket(ticketId, bobOptimismSat, "");
+        _relayAll(polygonGateway);
+
+        assertEq(polygonLite.storedTicketValidUntil(ticketId), ticket.validUntil, "polygon holds the copy");
+        assertEq(boundCompliance.ticketOf(ticketId).asksForReceipt, 0, "a resend is no ask");
     }
 
     /// @notice Optimism's route closes after the ask. The ask for the receipt still goes to Polygon, which owes it,
@@ -166,6 +197,12 @@ contract ReceiversChainTest is HoldsSuiteTest {
         ticketIds[0] = ticketId;
         boundCompliance.cancelTickets(ticketIds);
         _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled after the unanswered ask");
+    }
+
+    /// @dev Replaces the optimism peer as hostile: a hostile change runs on optimism from now.
+    function _replaceOptimismPeerAsHostile() private {
+        vm.prank(deployer);
+        token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("newOptimismAwayToken")), true);
     }
 
     /// @dev Alice on Polygon asks to move 4 to Bob on Optimism, and the approver opens the ticket. Not sent yet.

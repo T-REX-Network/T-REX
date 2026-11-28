@@ -752,9 +752,9 @@ interface ITickets {
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - The sender's chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - No hostile change may run on the sender's chain; otherwise reverts with `HostileChangeNotOver`.
-    /// - A receiver on another away chain: that chain not blocked, with no hostile change running; otherwise reverts
-    ///   with `AwayChainBlocked` or `HostileChangeNotOver`. Its route may have closed since the ask: the copy still
-    ///   goes to the sender's chain, so an unanswered ask can still cancel the ticket.
+    /// - A receiver on another away chain: that chain not blocked; otherwise reverts with `AwayChainBlocked`. Its
+    ///   route may have closed, or its peer been replaced as hostile, since the ask: the copy still goes to the
+    ///   sender's chain, so an unanswered ask can still cancel the ticket.
     /// - `to` must have the recorded key and `spender` must be the recorded spender; otherwise reverts with
     ///   `ValidationBodyMismatch`.
     ///
