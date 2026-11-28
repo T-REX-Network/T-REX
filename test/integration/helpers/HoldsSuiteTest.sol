@@ -50,8 +50,8 @@ abstract contract HoldsSuiteTest is InteropSuiteTest {
         optimismGateway = _newReceiptBridge(OPTIMISM);
 
         // The away tokens are the token's peers before the routes open: a peer set on an open route is a change.
-        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
-        optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
+        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway, polygonGateway);
+        optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway, optimismGateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)), false);

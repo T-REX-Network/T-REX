@@ -55,12 +55,14 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  * @notice An away token that follows every rule in `docs/satellite-lite.md`, so home can be run against the
  *  counterpart it assumes.
  *
- * One instance stands in for the away token of one away chain. It receives home's messages through that chain's
- * `ERC7786GatewayMock`, which the test registers as the token's peer for the chain, and answers through the same
- * gateway. It never talks to another away token: a move to another chain only burns here, and home sends the second
- * half.
+ * One instance stands in for the away token of one away chain, which the test registers as the token's peer for the
+ * chain. It has two receivers, each an `ERC7786GatewayMock`: the away ticket bridge, which delivers tickets only, and
+ * the away receipt bridge, which delivers tickets and every other message and sends every receipt. A suite that uses
+ * one bridge passes the same gateway twice. It never talks to another away token: a move to another chain only burns
+ * here, and home sends the second half.
  *
- * What it enforces: only its own gateway delivers (`msg.sender`), and only the home token is an author; the first copy
+ * What it enforces: only its two gateways deliver, told apart by `msg.sender`, and a move out or a bring home only
+ * through the away receipt bridge; only the home token is an author; the first copy
  * of a ticket is kept, and a copy whose valid until is further ahead of this chain's clock than `validUntilBound` is
  * ignored; a ticket is executed at most once, strictly before its valid until, inside its range, for its wallets, by
  * its sender or by its named spender within the allowance the sender gave; a later copy of a ticket is an ask for the
@@ -121,7 +123,10 @@ contract SatelliteLiteMock is IERC7786Recipient {
 
     uint256 public immutable chainId;
     address public immutable referenceToken;
-    ERC7786GatewayMock public immutable gateway;
+    /// @notice The away ticket bridge: it delivers tickets only.
+    ERC7786GatewayMock public immutable ticketGateway;
+    /// @notice The away receipt bridge: it delivers tickets and every other message, and carries every receipt.
+    ERC7786GatewayMock public immutable receiptGateway;
 
     /// @notice How far ahead of this chain's clock a ticket's valid until may be and still be held, in seconds: the
     ///  validity window plus the lag budget. A copy further ahead is ignored, so a forged far valid until is never held.
@@ -148,10 +153,16 @@ contract SatelliteLiteMock is IERC7786Recipient {
     uint256 public mints;
     uint256 public burns;
 
-    constructor(uint256 chainId_, address referenceToken_, ERC7786GatewayMock gateway_) {
+    constructor(
+        uint256 chainId_,
+        address referenceToken_,
+        ERC7786GatewayMock ticketGateway_,
+        ERC7786GatewayMock receiptGateway_
+    ) {
         chainId = chainId_;
         referenceToken = referenceToken_;
-        gateway = gateway_;
+        ticketGateway = ticketGateway_;
+        receiptGateway = receiptGateway_;
         validUntilBound = DEFAULT_VALID_UNTIL_BOUND;
         receiptResendWait = DEFAULT_RECEIPT_RESEND_WAIT;
         answerWindow = DEFAULT_ANSWER_WINDOW;
@@ -210,17 +221,21 @@ contract SatelliteLiteMock is IERC7786Recipient {
     }
 
     /// @inheritdoc IERC7786Recipient
+    /// @dev Rule 2: a ticket comes through either bridge; a move out or a bring home through the away receipt bridge
+    ///  only, so a message that moves value never rides the ticket bridge's shorter depth.
     function receiveMessage(bytes32 receiveId, bytes calldata sender, bytes calldata payload)
         external
         payable
         returns (bytes4)
     {
-        require(msg.sender == address(gateway), NotTheGateway(msg.sender));
+        bool fromTheReceiptBridge = msg.sender == address(receiptGateway);
+        bool fromTheTicketBridge = msg.sender == address(ticketGateway);
+        require(fromTheReceiptBridge || fromTheTicketBridge, NotTheGateway(msg.sender));
         if (receiveId != bytes32(0)) {
             require(!delivered[receiveId], AlreadyDelivered(receiveId));
             delivered[receiveId] = true;
         }
-        bytes memory homeToken = InteroperableAddress.formatEvmV1(gateway.originChainId(), referenceToken);
+        bytes memory homeToken = InteroperableAddress.formatEvmV1(receiptGateway.originChainId(), referenceToken);
         require(keccak256(sender) == keccak256(homeToken), NotTheReferenceToken(sender));
 
         (uint8 messageType, uint8 messageVersion, bytes memory body) = abi.decode(payload, (uint8, uint8, bytes));
@@ -228,8 +243,10 @@ contract SatelliteLiteMock is IERC7786Recipient {
         if (messageType == uint8(MessageTypesLib.Message.TICKET)) {
             _receiveTicket(MessageTypesLib.decodeValidation(body));
         } else if (messageType == uint8(MessageTypesLib.Message.MOVE_OUT)) {
+            require(fromTheReceiptBridge, NotTheGateway(msg.sender));
             _moveOut(MessageTypesLib.decodeMintInstruction(body));
         } else if (messageType == uint8(MessageTypesLib.Message.BRING_HOME)) {
+            require(fromTheReceiptBridge, NotTheGateway(msg.sender));
             _bringHome(MessageTypesLib.decodeBringHome(body));
         } else {
             revert UnexpectedMessage(messageType);
@@ -440,10 +457,11 @@ contract SatelliteLiteMock is IERC7786Recipient {
         });
     }
 
-    /// @dev Sends a receipt for `(messageType, halfKey)` and notes when, for the wait of {resendReceipt}.
+    /// @dev Rule 2a: sends a receipt for `(messageType, halfKey)` through the away receipt bridge, whichever bridge
+    ///  delivered what it answers, and notes when, for the wait of {resendReceipt}.
     function _send(uint8 messageType, bytes32 halfKey, MessageTypesLib.ReceiptMessage memory receipt) private {
         receiptSends[messageType][halfKey].lastSentAt = uint64(block.timestamp);
-        gateway.sendMessage(
+        receiptGateway.sendMessage(
             InteroperableAddress.formatEvmV1(block.chainid, referenceToken),
             MessageTypesLib.encodeSettlement(receipt),
             new bytes[](0)

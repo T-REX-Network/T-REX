@@ -75,7 +75,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
         polygonBridge = _newReceiptBridge(POLYGON);
-        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonBridge);
+        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonBridge, polygonBridge);
         liteEnvelope = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
         nextPeerEnvelope = InteroperableAddress.formatEvmV1(POLYGON, nextPeer);
 

@@ -34,7 +34,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
         polygonGateway = _newReceiptBridge(POLYGON);
-        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
+        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway, polygonGateway);
         vm.prank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         _openEvmChain(token, POLYGON, address(polygonGateway));
@@ -198,7 +198,8 @@ contract AwayTokenClockTest is InteropSuiteTest {
     /// @notice Every away token starts with its limits on: a valid until bound, a resend wait and an answer window,
     ///         none of them zero, so a forged far valid until is ignored with no setting changed.
     function test_constructor_startsWithEveryLimitOn() public {
-        SatelliteLiteMock freshAwayToken = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
+        SatelliteLiteMock freshAwayToken =
+            new SatelliteLiteMock(POLYGON, address(token), polygonGateway, polygonGateway);
 
         assertEq(freshAwayToken.validUntilBound(), freshAwayToken.DEFAULT_VALID_UNTIL_BOUND(), "the bound is on");
         assertGt(freshAwayToken.receiptResendWait(), 0, "resends are spaced");

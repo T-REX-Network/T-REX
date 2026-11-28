@@ -70,7 +70,7 @@ contract ReceiptHandlerRegressionsTest is InteropSuiteTest {
     function setUp() public override {
         super.setUp();
         polygonBridge = _newReceiptBridge(POLYGON);
-        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonBridge);
+        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonBridge, polygonBridge);
         vm.prank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         _openEvmChain(token, POLYGON, address(polygonBridge));

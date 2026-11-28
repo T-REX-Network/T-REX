@@ -190,7 +190,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         super.setUp();
         ledger = IComplianceLedger(address(boundCompliance));
         gateway = _newReceiptBridge(POLYGON);
-        lite = new SatelliteLiteMock(POLYGON, address(token), gateway);
+        lite = new SatelliteLiteMock(POLYGON, address(token), gateway, gateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(lite)), false);
         vm.stopPrank();

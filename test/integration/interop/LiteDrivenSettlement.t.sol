@@ -52,13 +52,17 @@ import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.so
 import { SatelliteLiteMock } from "test/integration/mocks/SatelliteLiteMock.sol";
 
 /// @dev The reference chain run against Lites that follow `docs/satellite-lite.md`: every inbound message is produced
-///      by a Lite acting on what the token sent it, never hand-built. Each gateway mock carries both directions of one
-///      chain and is the token's route there; each Lite is the token's registered peer.
+///      by a Lite acting on what the token sent it, never hand-built. Each receipt bridge mock carries both directions
+///      of one chain and is the token's receipt route there; each Lite is the token's registered peer. Polygon's Lite
+///      also has an away ticket bridge, which the token takes as its ticket route only where a test sets it.
 contract LiteDrivenSettlementTest is InteropSuiteTest {
 
     uint256 internal constant MINTED = 1000;
     uint256 internal constant DELEGATED = 500;
+    /// @dev The depth Polygon's ticket bridge waits for before it relays.
+    uint64 internal constant TICKET_DEPTH = 3;
 
+    ERC7786GatewayMock polygonTicketGateway;
     ERC7786GatewayMock polygonGateway;
     ERC7786GatewayMock optimismGateway;
     SatelliteLiteMock polygonLite;
@@ -71,12 +75,13 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
 
     function setUp() public override {
         super.setUp();
+        polygonTicketGateway = _newTicketBridge(POLYGON, TICKET_DEPTH);
         polygonGateway = _newReceiptBridge(POLYGON);
         optimismGateway = _newReceiptBridge(OPTIMISM);
 
         // Each away token is the token's peer before its route opens: a peer set on an open route is a change.
-        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonGateway);
-        optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway);
+        polygonLite = new SatelliteLiteMock(POLYGON, address(token), polygonTicketGateway, polygonGateway);
+        optimismLite = new SatelliteLiteMock(OPTIMISM, address(token), optimismGateway, optimismGateway);
         vm.startPrank(deployer);
         token.setPeer(polygon, InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite)), false);
         token.setPeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, address(optimismLite)), false);
@@ -129,6 +134,20 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     function _bringHome(uint256 amount) private returns (bytes32) {
         vm.prank(agent);
         return boundCompliance.bringHome(aliceSat, amount, alice, _salt());
+    }
+
+    function _setPolygonTicketRoute(address bridge) private {
+        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
+        vm.prank(deployer);
+        token.setTicketRoute(chainType, chainReference, bridge);
+    }
+
+    /// @dev Queues `payload`, as the token wrote it, on Polygon's away ticket bridge toward its Lite.
+    function _sendThroughTheTicketBridge(bytes memory payload) private returns (uint256 index) {
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonTicketGateway.sendMessage(recipient, payload, new bytes[](0));
+        index = _last(polygonTicketGateway);
     }
 
     function _execute(bytes32 id, uint256 amount) private {
@@ -320,6 +339,55 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     function test_receiveMessage_RevertWhen_NotDeliveredByItsGateway() public {
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NotTheGateway.selector, address(this)));
         polygonLite.receiveMessage(bytes32(0), "", "");
+    }
+
+    /* ----- Two receivers ----- */
+
+    /// @notice A ticket rides the ticket route through the away ticket bridge; the Lite holds it, executes it once and
+    ///         sends its receipt back through the away receipt bridge, which home takes it from.
+    function test_receiveMessage_holdsATicketFromTheTicketBridge_andAnswersThroughTheReceiptBridge() public {
+        _setPolygonTicketRoute(address(polygonTicketGateway));
+        uint256 receiptBridgeQueueBefore = polygonGateway.queueLength();
+        bytes32 id = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 100, 100);
+        assertEq(polygonTicketGateway.queueLength(), 1, "the ticket left on the ticket route");
+        assertEq(polygonGateway.queueLength(), receiptBridgeQueueBefore, "and not on the receipt route");
+
+        polygonTicketGateway.relay(0);
+        assertTrue(polygonLite.known(id), "the Lite holds the ticket the ticket bridge delivered");
+        _execute(id, 100);
+        _relayAll(polygonGateway);
+
+        assertEq(polygonTicketGateway.queueLength(), 1, "nothing went back through the ticket bridge");
+        assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done), "home applied the receipt");
+        assertEq(polygonLite.balanceOf(bobSat), 100, "the Lite moved the tokens once");
+    }
+
+    /// @notice Home's own move out, delivered through the away ticket bridge instead of the receipt bridge, is refused:
+    ///         a message that moves value comes only through the away receipt bridge. Through it, the same message
+    ///         mints.
+    function test_receiveMessage_reverts_when_aMoveOutComesThroughTheTicketBridge() public {
+        _moveOut(100);
+        uint256 moveOutIndex = _last(polygonGateway);
+        bytes memory moveOutPayload = polygonGateway.queuedMessage(moveOutIndex).payload;
+        uint256 ticketBridgeIndex = _sendThroughTheTicketBridge(moveOutPayload);
+
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NotTheGateway.selector, address(polygonTicketGateway)));
+        polygonTicketGateway.relay(ticketBridgeIndex);
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "nothing minted");
+
+        polygonGateway.relay(moveOutIndex);
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED + 100, "the receipt bridge's delivery mints");
+    }
+
+    /// @notice A bring home delivered through the away ticket bridge is refused, and burns nothing.
+    function test_receiveMessage_reverts_when_aBringHomeComesThroughTheTicketBridge() public {
+        _bringHome(100);
+        bytes memory bringHomePayload = polygonGateway.queuedMessage(_last(polygonGateway)).payload;
+        uint256 ticketBridgeIndex = _sendThroughTheTicketBridge(bringHomePayload);
+
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NotTheGateway.selector, address(polygonTicketGateway)));
+        polygonTicketGateway.relay(ticketBridgeIndex);
+        assertEq(polygonLite.balanceOf(aliceSat), DELEGATED, "nothing burned");
     }
 
     /* ----- Move out retries ----- */
