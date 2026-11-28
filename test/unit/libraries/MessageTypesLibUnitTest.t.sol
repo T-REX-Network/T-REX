@@ -259,6 +259,7 @@ contract MessageTypesLibUnitTest is Test {
 
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.TICKET));
         assertEq(back.ticketId, v.ticketId);
+        assertEq(back.kind, v.kind, "the kind travels");
         assertEq(back.from, v.from);
         assertEq(back.to, v.to);
         assertEq(back.spender, v.spender);
@@ -297,6 +298,7 @@ contract MessageTypesLibUnitTest is Test {
     function _validation(bytes memory spender) private pure returns (MessageTypesLib.TicketMessage memory) {
         return MessageTypesLib.TicketMessage({
             ticketId: bytes32(uint256(7)),
+            kind: 1,
             salt: bytes32(uint256(5)),
             from: hex"0001000001890114",
             to: hex"00010000010a0114",

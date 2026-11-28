@@ -112,6 +112,9 @@ library MessageTypesLib {
         /// home's ordering or clock, so the same ask mined again after a reorg keeps its id. Single-use: consumed on
         /// the away chain, keys the record at home.
         bytes32 ticketId;
+        /// What the ticket is for, `ITickets.TicketKind` as a number: 0 for a move, the only kind sent as a ticket.
+        /// Part of the id, so the away token hashes it with the other terms.
+        uint8 kind;
         /// The requester's nonce the id was built from. Carried so that the away chain, where the ticket is final,
         /// holds what it takes to ask again should a reorg drop the ask: an agent reads it off the away token and
         /// asks again under the same id.

@@ -66,7 +66,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);
 
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(ticketId, polygon);
         polygonGateway.relay(polygonGateway.queueLength() - 1);
@@ -661,8 +661,8 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(bobsHold.carriedFrom, bytes32(0), "no longer carries");
         assertEq(bobsHold.carriedAmount, 0);
 
-        polygonLite.resendReceipt(aliceId, 0);
-        polygonLite.resendReceipt(bobId, 0);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), aliceId);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), bobId);
         _relayAll(polygonGateway);
         assertEq(token.onHoldOf(bobId), TWO, "a receipt again adds nothing");
         assertEq(token.totalOnHold(), TWO);
@@ -706,7 +706,7 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertTrue(boundCompliance.ticketOf(aliceId).shortCancel, "alice's cancel came back short");
 
         // The away token sends Bob's lost receipt again, byte for byte.
-        polygonLite.resendReceipt(bobId, 0);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), bobId);
         _relayAll(polygonGateway);
         assertEq(boundCompliance.ticketOf(bobId).carriedFrom, aliceId, "bob's hold carries from alice's");
 

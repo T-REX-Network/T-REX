@@ -566,12 +566,24 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         uint8 latestHalf = boundCompliance.ticketOf(ticketId).half;
         if (latestHalf == 0) return;
         uint8 half = 1 + halfSeed % latestHalf;
-        try lite.resendReceipt(ticketId, half) { } catch { }
+        (uint8 messageType, bytes32 halfKey) = _receiptKeyOf(ticketId, half);
+        try lite.resendReceipt(messageType, halfKey) { } catch { }
     }
 
     /// @dev Has the away token send a stored receipt again, for the end of a run.
     function _resendStoredReceiptAtTheEnd(bytes32 ticketId, uint8 half) internal virtual {
-        try lite.resendReceipt(ticketId, half) { } catch { }
+        (uint8 messageType, bytes32 halfKey) = _receiptKeyOf(ticketId, half);
+        try lite.resendReceipt(messageType, halfKey) { } catch { }
+    }
+
+    /// @dev The key the away token keeps one half's receipt under: the ticket's own under `TICKET`, a half of a bring
+    ///  home under `BRING_HOME`, any other half under `MOVE_OUT`.
+    function _receiptKeyOf(bytes32 ticketId, uint8 half) internal view returns (uint8 messageType, bytes32 halfKey) {
+        halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
+        messageType = uint8(MessageTypesLib.Message.MOVE_OUT);
+        if (half == 0) messageType = uint8(MessageTypesLib.Message.TICKET);
+        bool aBringHome = boundCompliance.ticketOf(ticketId).kind == ITickets.TicketKind.BRING_HOME;
+        if (half != 0 && aBringHome) messageType = uint8(MessageTypesLib.Message.BRING_HOME);
     }
 
     /* ----- Internal: the end of a run ----- */
@@ -598,7 +610,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
                 _askForTheReceipt(i);
                 _cancel(ticketIds[i]);
             }
-            bool executedThere = lite.storedReceipt(ticketIds[i], 0).amount != 0;
+            bool executedThere = lite.storedReceipt(uint8(MessageTypesLib.Message.TICKET), ticketIds[i]).amount != 0;
             if (status == ITickets.TicketStatus.Cancelled && executedThere) {
                 _resendStoredReceiptAtTheEnd(ticketIds[i], 0);
             }
@@ -651,7 +663,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
 
     function _heldUnanswered(bytes32 ticketId) internal view returns (bool) {
         bool held = lite.known(ticketId);
-        bool answered = lite.answered(MessageTypesLib.halfKeyOf(ticketId, 0));
+        bool answered = lite.answered(uint8(MessageTypesLib.Message.TICKET), ticketId);
         return held && !answered;
     }
 
@@ -684,7 +696,9 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
     function _mintedOnTheAwayToken(bytes32 ticketId) internal view returns (bool) {
         uint8 latestHalf = boundCompliance.ticketOf(ticketId).half;
         for (uint8 half = 1; half <= latestHalf; half++) {
-            MessageTypesLib.ReceiptMessage memory receipt = lite.storedReceipt(ticketId, half);
+            bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
+            MessageTypesLib.ReceiptMessage memory receipt =
+                lite.storedReceipt(uint8(MessageTypesLib.Message.MOVE_OUT), halfKey);
             bool minted = receipt.answer == MessageTypesLib.ReceiptAnswer.Executed && receipt.amount != 0;
             if (minted) return true;
         }
@@ -696,7 +710,9 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         ITickets.Ticket memory bringHomeTicket = boundCompliance.ticketOf(ticketId);
         if (bringHomeTicket.status == ITickets.TicketStatus.Done) return 0;
         for (uint8 half = 1; half <= bringHomeTicket.half; half++) {
-            MessageTypesLib.ReceiptMessage memory receipt = lite.storedReceipt(ticketId, half);
+            bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
+            MessageTypesLib.ReceiptMessage memory receipt =
+                lite.storedReceipt(uint8(MessageTypesLib.Message.BRING_HOME), halfKey);
             if (receipt.answer == MessageTypesLib.ReceiptAnswer.Executed) burned += receipt.amount;
         }
     }
@@ -707,7 +723,8 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         ITickets.TicketStatus status = boundCompliance.ticketOf(ticketId).status;
         bool applied = status == ITickets.TicketStatus.OnHold || status == ITickets.TicketStatus.Done;
         if (applied) return 0;
-        MessageTypesLib.ReceiptMessage memory receipt = lite.storedReceipt(ticketId, 0);
+        MessageTypesLib.ReceiptMessage memory receipt =
+            lite.storedReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId);
         if (receipt.answer != MessageTypesLib.ReceiptAnswer.Executed) return 0;
         return receipt.amount;
     }

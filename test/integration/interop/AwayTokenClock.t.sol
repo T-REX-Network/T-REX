@@ -20,6 +20,9 @@ contract AwayTokenClockTest is InteropSuiteTest {
 
     uint256 internal constant MINTED = 1000;
     uint256 internal constant MOVED_OUT = 500;
+    uint8 internal constant TICKET_TYPE = uint8(MessageTypesLib.Message.TICKET);
+    uint8 internal constant MOVE_OUT_TYPE = uint8(MessageTypesLib.Message.MOVE_OUT);
+    uint8 internal constant BRING_HOME_TYPE = uint8(MessageTypesLib.Message.BRING_HOME);
 
     ERC7786GatewayMock internal polygonGateway;
     SatelliteLiteMock internal polygonLite;
@@ -136,7 +139,9 @@ contract AwayTokenClockTest is InteropSuiteTest {
         vm.warp(boundCompliance.ticketOf(ticketId).validUntil);
         _relayAll();
 
-        assertEq(uint8(polygonLite.storedReceipt(ticketId, 0).answer), uint8(MessageTypesLib.ReceiptAnswer.Expired));
+        assertEq(
+            uint8(polygonLite.storedReceipt(TICKET_TYPE, ticketId).answer), uint8(MessageTypesLib.ReceiptAnswer.Expired)
+        );
         assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
         assertEq(boundCompliance.ticketOf(ticketId).moved, 0);
         assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
@@ -153,7 +158,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.ValidationExpired.selector, ticketId));
         polygonLite.execute(ticketId, 40);
 
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(ticketId, polygon);
         polygonGateway.relay(_last());
@@ -191,6 +196,26 @@ contract AwayTokenClockTest is InteropSuiteTest {
 
     /* ----- The away token's own checks and limits ----- */
 
+    /// @notice The kind is one of the terms the id hashes: home's copy carries a move's kind and its id is the id the
+    ///  away token computes, while the same copy under another kind is refused.
+    function test_awayToken_hashesTheKind_andRefusesTheCopyUnderAnotherKind() public {
+        bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 50);
+        _relayAll();
+        MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
+        assertEq(heldCopy.kind, uint8(ITickets.TicketKind.MOVE), "home sends a move's kind");
+        assertEq(polygonLite.idOfTheTerms(heldCopy), ticketId, "both sides hash the kind alike");
+
+        MessageTypesLib.TicketMessage memory otherKind = heldCopy;
+        otherKind.kind = uint8(ITickets.TicketKind.BRING_HOME);
+        bytes32 idUnderTheOtherKind = polygonLite.idOfTheTerms(otherKind);
+        uint256 otherKindIndex = _queueCopyForLite(otherKind);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(SatelliteLiteMock.TicketIdMismatch.selector, ticketId, idUnderTheOtherKind)
+        );
+        polygonGateway.relay(otherKindIndex);
+    }
+
     /// @notice A ticket whose id is not the id of its own terms is refused: nobody puts other terms under a known id.
     function test_awayToken_refusesATicket_whenItsIdIsNotTheIdOfItsTerms() public {
         bytes32 forgedId = keccak256("a ticket home never wrote");
@@ -207,50 +232,55 @@ contract AwayTokenClockTest is InteropSuiteTest {
         assertFalse(polygonLite.known(forgedId), "never held");
     }
 
-    /// @notice Later copies of an executed ticket get its stored receipt six times at most; the seventh is consumed with
-    ///  nothing sent.
-    function test_awayToken_sendsNoAnswer_afterSixAnswersWithTheStoredReceipt() public {
+    /// @notice Later copies of an executed ticket get its stored receipt six times at most in one answer window; the
+    ///  seventh is consumed with nothing sent. Once the window ended, the next copy is answered again.
+    function test_awayToken_sendsNoAnswer_afterSixAnswersInOneWindow_andAnswersAgainInTheNextWindow() public {
+        uint64 window = 1 days;
+        polygonLite.setAnswerWindow(window);
         bytes32 ticketId = _askAndDeliver(10, 50);
         _execute(ticketId, 40);
         MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
-        uint8 answers = polygonLite.MAX_ANSWERS_PER_HALF();
+        uint64 windowStartedAt = uint64(block.timestamp);
+        uint8 answers = polygonLite.MAX_ANSWERS_PER_WINDOW();
         for (uint8 i = 0; i < answers; i++) {
             _deliverToLite(heldCopy);
         }
-        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
-        vm.prank(address(token));
-        polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(heldCopy), new bytes[](0));
+        uint256 seventhCopyIndex = _queueCopyForLite(heldCopy);
         uint256 queuedBeforeTheSeventh = polygonGateway.queueLength();
-        uint256 seventhCopyIndex = _last();
 
         vm.expectEmit(true, false, false, true, address(polygonLite));
-        emit SatelliteLiteMock.AnswerNotSent(ticketId, 0);
+        emit SatelliteLiteMock.AnswerNotSent(TICKET_TYPE, ticketId);
         polygonGateway.relay(seventhCopyIndex);
-
         assertEq(polygonGateway.queueLength(), queuedBeforeTheSeventh, "nothing sent");
+
+        vm.warp(windowStartedAt + window);
+        _deliverToLite(heldCopy);
+        bytes memory storedReceipt = MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(TICKET_TYPE, ticketId));
+        assertEq(polygonGateway.queuedMessage(_last()).payload, storedReceipt, "answered in the next window");
     }
 
     /// @notice Still open answers are not counted: after more of them than the limit, home's ask for the executed
     ///  ticket's receipt still gets the stored receipt.
     function test_awayToken_answersWithTheStoredReceipt_afterMoreStillOpenAnswersThanTheLimit() public {
+        polygonLite.setAnswerWindow(1 days);
         bytes32 ticketId = _askAndDeliver(10, 50);
         MessageTypesLib.TicketMessage memory heldCopy = polygonLite.ticketOf(ticketId);
-        uint8 answers = polygonLite.MAX_ANSWERS_PER_HALF();
+        uint8 answers = polygonLite.MAX_ANSWERS_PER_WINDOW();
         for (uint8 i = 0; i <= answers; i++) {
             _deliverToLite(heldCopy);
         }
-        (, uint8 answersSent,) = polygonLite.receiptSends(ticketId);
-        assertEq(answersSent, 0, "still open answers are not counted");
+        (,, uint8 answersInWindow,) = polygonLite.receiptSends(TICKET_TYPE, ticketId);
+        assertEq(answersInWindow, 0, "still open answers are not counted");
         _execute(ticketId, 40);
 
         _deliverToLite(heldCopy);
 
-        bytes memory storedReceipt = MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(ticketId, 0));
+        bytes memory storedReceipt = MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(TICKET_TYPE, ticketId));
         assertEq(polygonGateway.queuedMessage(_last()).payload, storedReceipt, "the stored receipt is sent again");
     }
 
-    /// @notice Anyone may ask for a stored receipt again three times, the waits doubling from the set wait.
-    function test_resendReceipt_waitsTwiceAsLongEachTime_andStopsAfterThreeResends() public {
+    /// @notice Anyone may ask for a stored receipt again three times, each one the same set wait after the last send.
+    function test_resendReceipt_waitsTheSameWaitEachTime_andStopsAfterThreeResends() public {
         uint64 wait = 10 minutes;
         polygonLite.setReceiptResendWait(wait);
         bytes32 ticketId = _askAndDeliver(10, 50);
@@ -258,26 +288,73 @@ contract AwayTokenClockTest is InteropSuiteTest {
         uint64 sentAt = uint64(block.timestamp);
 
         vm.expectRevert(
-            abi.encodeWithSelector(SatelliteLiteMock.ReceiptResendTooSoon.selector, ticketId, 0, sentAt + wait)
+            abi.encodeWithSelector(
+                SatelliteLiteMock.ReceiptResendTooSoon.selector, TICKET_TYPE, ticketId, sentAt + wait
+            )
         );
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
         vm.warp(sentAt + wait);
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
 
-        uint64 secondAllowedAt = sentAt + wait + 2 * wait;
+        uint64 secondAllowedAt = sentAt + 2 * wait;
         vm.warp(secondAllowedAt - 1);
         vm.expectRevert(
-            abi.encodeWithSelector(SatelliteLiteMock.ReceiptResendTooSoon.selector, ticketId, 0, secondAllowedAt)
+            abi.encodeWithSelector(
+                SatelliteLiteMock.ReceiptResendTooSoon.selector, TICKET_TYPE, ticketId, secondAllowedAt
+            )
         );
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
         vm.warp(secondAllowedAt);
-        polygonLite.resendReceipt(ticketId, 0);
-        vm.warp(secondAllowedAt + 4 * wait);
-        polygonLite.resendReceipt(ticketId, 0);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
+        vm.warp(secondAllowedAt + wait);
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
 
         vm.warp(block.timestamp + 100 days);
-        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NoReceiptResendLeft.selector, ticketId, 0));
-        polygonLite.resendReceipt(ticketId, 0);
+        vm.expectRevert(abi.encodeWithSelector(SatelliteLiteMock.NoReceiptResendLeft.selector, TICKET_TYPE, ticketId));
+        polygonLite.resendReceipt(TICKET_TYPE, ticketId);
+    }
+
+    /// @notice Neither rate can be turned off: a wait or a window of zero is refused.
+    function test_setReceiptResendWait_and_setAnswerWindow_revert_when_setToZero() public {
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        polygonLite.setReceiptResendWait(0);
+        vm.expectRevert(ErrorsLib.ZeroValue.selector);
+        polygonLite.setAnswerWindow(0);
+    }
+
+    /// @notice A move out's and a bring home's receipt under one half key are two receipts: each is stored, read and
+    ///  sent again under its own message type.
+    function test_resendReceipt_keepsAMoveOutAndABringHomeOfOneHalfKeyApart() public {
+        bytes32 ticketId = keccak256("one half key, two types");
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, 1);
+        uint64 validUntil = uint64(block.timestamp) + 1 hours;
+        _deliverHalfToLite(
+            MessageTypesLib.encode(
+                MessageTypesLib.Message.MOVE_OUT,
+                abi.encode(
+                    MessageTypesLib.MoveOutMessage({
+                        ticketId: ticketId, half: 1, toWallet: bobSat, amount: 7, validUntil: validUntil
+                    })
+                )
+            )
+        );
+        _deliverHalfToLite(
+            MessageTypesLib.encode(
+                MessageTypesLib.Message.BRING_HOME,
+                abi.encode(
+                    MessageTypesLib.BringHomeMessage({
+                        ticketId: ticketId, half: 1, wallet: bobSat, amount: 3, validUntil: validUntil
+                    })
+                )
+            )
+        );
+
+        assertEq(polygonLite.storedReceipt(MOVE_OUT_TYPE, halfKey).amount, 7, "the move out minted 7");
+        assertEq(polygonLite.storedReceipt(BRING_HOME_TYPE, halfKey).amount, 3, "the bring home burned 3");
+        polygonLite.resendReceipt(BRING_HOME_TYPE, halfKey);
+        bytes memory bringHomeReceipt =
+            MessageTypesLib.encodeSettlement(polygonLite.storedReceipt(BRING_HOME_TYPE, halfKey));
+        assertEq(polygonGateway.queuedMessage(_last()).payload, bringHomeReceipt, "the bring home's receipt again");
     }
 
     /* ----- Helpers ----- */
@@ -301,6 +378,7 @@ contract AwayTokenClockTest is InteropSuiteTest {
     {
         return MessageTypesLib.TicketMessage({
             ticketId: forgedId,
+            kind: uint8(ITickets.TicketKind.MOVE),
             salt: bytes32(0),
             from: aliceSat,
             to: bobSat,
@@ -319,6 +397,23 @@ contract AwayTokenClockTest is InteropSuiteTest {
         bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
         vm.prank(address(token));
         polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(copy), new bytes[](0));
+        polygonGateway.relay(_last());
+    }
+
+    /// @dev Queues a ticket copy for Polygon's away token, authored by home's token, undelivered.
+    /// @return index its place in the gateway's queue
+    function _queueCopyForLite(MessageTypesLib.TicketMessage memory copy) private returns (uint256 index) {
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonGateway.sendMessage(recipient, MessageTypesLib.encodeValidation(copy), new bytes[](0));
+        index = _last();
+    }
+
+    /// @dev Delivers an encoded half to Polygon's away token, authored by home's token.
+    function _deliverHalfToLite(bytes memory payload) private {
+        bytes memory recipient = InteroperableAddress.formatEvmV1(POLYGON, address(polygonLite));
+        vm.prank(address(token));
+        polygonGateway.sendMessage(recipient, payload, new bytes[](0));
         polygonGateway.relay(_last());
     }
 

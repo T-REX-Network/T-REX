@@ -376,6 +376,7 @@ contract ReorgRecoveryTest is InteropSuiteTest {
         uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         body = MessageTypesLib.TicketMessage({
             ticketId: _ticketId(aliceSat, to, "", amountMin, requestedMax, salt),
+            kind: uint8(ITickets.TicketKind.MOVE),
             salt: salt,
             from: aliceSat,
             to: to,

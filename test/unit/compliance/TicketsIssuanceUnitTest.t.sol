@@ -820,6 +820,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         return MessageTypesLib.TicketMessage({
             ticketId: id,
+            kind: uint8(ITickets.TicketKind.MOVE),
             salt: salt,
             from: from,
             to: to,

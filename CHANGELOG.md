@@ -14,8 +14,9 @@ All notable changes to this project will be documented in this file.
     home burns an away wallet's tokens to bring them home. Every message carries version 2; any other version is
     refused on both sides. Away tokens never talk to each other: a move between two away chains is a ticket to the
     sender's chain, the money on hold at home, then a `MOVE_OUT` to the receiver, or back to the sender when the
-    rules refuse the receiver. A ticket id is built from the whole request, with a spender key of zero when the move
-    names no spender, so the same ask mined again after a home reorg keeps its id; the ask block hash names which
+    rules refuse the receiver. A ticket id is built from the whole request, its kind included, with a spender key of
+    zero when the move names no spender, so the same ask mined again after a home reorg keeps its id; the `TICKET`
+    carries the `kind` (0, a move) so the away token hashes it; the ask block hash names which
     copy the away token executed. `docs/satellite-lite.md` is the away token's contract.
   - *New functions.* On the compliance: `askToMove`, `sendTicket` (an ask for the receipt, three at most),
     `cancelTickets`, `sendSecondHalf`, `bringHome`, `cancelHold`, `closeByHand`, `applyWaitingReceipt`,

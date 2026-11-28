@@ -150,6 +150,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         copy = MessageTypesLib.TicketMessage({
             ticketId: id,
+            kind: uint8(ITickets.TicketKind.MOVE),
             salt: salt,
             from: aliceSat,
             to: bobSat,
@@ -419,7 +420,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.drop(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
-        polygonLite.resendReceipt(id, 1);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.BRING_HOME), MessageTypesLib.halfKeyOf(id, 1));
         polygonGateway.relay(_last(polygonGateway));
 
         assertEq(token.balanceOf(alice), MINTED - DELEGATED + 200);
@@ -435,7 +436,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         polygonGateway.drop(_last(polygonGateway));
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open), "still waiting");
 
-        polygonLite.resendReceipt(id, 0);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), id);
         polygonGateway.relay(_last(polygonGateway));
 
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Done));
@@ -450,7 +451,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         _execute(id, 50);
         _relayAll(polygonGateway);
 
-        polygonLite.resendReceipt(id, 0);
+        polygonLite.resendReceipt(uint8(MessageTypesLib.Message.TICKET), id);
         uint256 resent = _last(polygonGateway);
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptDuplicate(id, polygon);

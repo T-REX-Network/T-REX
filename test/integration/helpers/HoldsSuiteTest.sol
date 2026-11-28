@@ -153,6 +153,7 @@ abstract contract HoldsSuiteTest is InteropSuiteTest {
         uint64 validUntil = uint64(block.timestamp) + VALIDITY_WINDOW;
         return MessageTypesLib.TicketMessage({
             ticketId: _ticketId(from, to, "", amount, amount, salt),
+            kind: uint8(ITickets.TicketKind.MOVE),
             salt: salt,
             from: from,
             to: to,

@@ -559,7 +559,8 @@ contract CrossChainFaultsInvariants is DelegationRecallInvariants {
     }
 
     function _resendStoredReceipt(bytes32 ticketId, uint8 half) internal {
-        try lite.resendReceipt(ticketId, half) {
+        (uint8 messageType, bytes32 halfKey) = _receiptKeyOf(ticketId, half);
+        try lite.resendReceipt(messageType, halfKey) {
             satelliteLog.push(
                 SatelliteAction({
                     kind: SatelliteActionKind.Resend,

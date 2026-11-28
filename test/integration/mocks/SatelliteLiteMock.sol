@@ -68,9 +68,10 @@ import { ERC7786GatewayMock } from "./ERC7786GatewayMock.sol";
  * open answer before; a first copy that arrives at or after its valid until is answered with a stored zero receipt;
  * a move out mints and a bring home burns `min(amount, balance)` once per half, strictly before the half's valid
  * until, and a half that arrives later is answered with a stored zero receipt; a repeated half is answered with its
- * stored receipt. Every receipt is kept per half and can be sent again byte for byte. A ticket whose id is not the id
- * of its own terms is refused. Answers that send a stored receipt again are limited per half, and so are the resends
- * anyone asks for, apart from them, with a wait that doubles; a still open answer is not counted.
+ * stored receipt. Every receipt is kept under the type of the message it answers and its half key, and can be sent
+ * again byte for byte. A ticket whose id is not the id of its own terms, its kind included, is refused. Answers that
+ * send a stored receipt again are limited per half to a count in each answer window, and the resends anyone asks for,
+ * apart from them, to a quota spaced by one fixed wait; a still open answer is not counted.
  */
 contract SatelliteLiteMock is IERC7786Recipient {
 
@@ -84,26 +85,29 @@ contract SatelliteLiteMock is IERC7786Recipient {
     error NotTheExecutor(bytes32 ticketId, address caller);
     error AllowanceTooLow(bytes32 ticketId, uint256 allowance, uint256 amount);
     error InsufficientBalance(bytes wallet, uint256 balance, uint256 amount);
-    error NoStoredReceipt(bytes32 ticketId, uint8 half);
+    error NoStoredReceipt(uint8 messageType, bytes32 halfKey);
     error UnexpectedMessage(uint8 messageType);
     error TicketIdMismatch(bytes32 ticketId, bytes32 idOfTheTerms);
-    error ReceiptResendTooSoon(bytes32 ticketId, uint8 half, uint64 resendAllowedAt);
-    error NoReceiptResendLeft(bytes32 ticketId, uint8 half);
+    error ReceiptResendTooSoon(uint8 messageType, bytes32 halfKey, uint64 resendAllowedAt);
+    error NoReceiptResendLeft(uint8 messageType, bytes32 halfKey);
 
-    /// @notice An ask for a half's receipt came after the half used its answers: nothing was sent.
-    event AnswerNotSent(bytes32 indexed ticketId, uint8 half);
+    /// @notice An ask for a half's receipt came after the half used its answers of the current answer window: nothing
+    ///  was sent.
+    event AnswerNotSent(uint8 messageType, bytes32 indexed halfKey);
 
-    /// @notice The most answers per half that send its stored receipt again, to later copies of a ticket or repeats of
-    ///  a half: home sends at most three asks for a ticket's receipt and three sends of a half, so six cover home and a
-    ///  redelivery of each. The first send of a receipt and a still open answer are not counted.
-    uint8 public constant MAX_ANSWERS_PER_HALF = 6;
+    /// @notice The most answers per half in one answer window that send its stored receipt again, to later copies of a
+    ///  ticket or repeats of a half: home sends at most three asks for a ticket's receipt and three sends of a half, so
+    ///  six cover home and a redelivery of each. The first send of a receipt and a still open answer are not counted.
+    uint8 public constant MAX_ANSWERS_PER_WINDOW = 6;
     /// @notice The most resends per half anyone may ask for with {resendReceipt}, counted apart from the answers.
     uint8 public constant MAX_RECEIPT_RESENDS = 3;
 
-    /// @dev When a half's receipt was last sent, and what was sent for it beyond its first send.
+    /// @dev When a half's receipt was last sent, and what was sent for it beyond its first send: the answers of the
+    ///  answer window that started at `answerWindowStartedAt`, and the resends.
     struct ReceiptSends {
         uint64 lastSentAt;
-        uint8 answersSent;
+        uint64 answerWindowStartedAt;
+        uint8 answersInWindow;
         uint8 resendsSent;
     }
 
@@ -114,17 +118,22 @@ contract SatelliteLiteMock is IERC7786Recipient {
     /// @notice How far ahead of this chain's clock a ticket's valid until may be and still be held, in seconds: the
     ///  validity window plus the lag budget. A copy further ahead is ignored, so a forged far valid until is never held.
     uint64 public validUntilBound;
-    /// @notice The wait before the first resend of a receipt, in seconds; the second waits two, the third four.
+    /// @notice The wait between two sends of one half's receipt before {resendReceipt} sends it again, in seconds.
+    ///  Never set back to zero; a deployment sets it.
     uint64 public receiptResendWait;
+    /// @notice The window, in seconds, over which a half's answers are counted against `MAX_ANSWERS_PER_WINDOW`.
+    ///  Never set back to zero; a deployment sets it.
+    uint64 public answerWindow;
 
     mapping(bytes32 receiveId => bool isDelivered) public delivered;
     /// @dev The first copy of each ticket, the only one ever executed.
     mapping(bytes32 ticketId => MessageTypesLib.TicketMessage firstCopy) internal _tickets;
     mapping(bytes32 ticketId => bool isHeld) public known;
-    /// @dev A half is answered once: its receipt is kept under its half key, and its bytes are what a repeat gets.
-    mapping(bytes32 halfKey => MessageTypesLib.ReceiptMessage receipt) internal _receipts;
-    mapping(bytes32 halfKey => bool isAnswered) public answered;
-    mapping(bytes32 halfKey => ReceiptSends sends) public receiptSends;
+    /// @dev A half is answered once: its receipt is kept under the type of the message it answers and its half key,
+    ///  and its bytes are what a repeat gets. A ticket's own receipt is kept under `TICKET` and the ticket id.
+    mapping(uint8 messageType => mapping(bytes32 halfKey => MessageTypesLib.ReceiptMessage receipt)) internal _receipts;
+    mapping(uint8 messageType => mapping(bytes32 halfKey => bool isAnswered)) public answered;
+    mapping(uint8 messageType => mapping(bytes32 halfKey => ReceiptSends sends)) public receiptSends;
     mapping(bytes32 walletKey => uint256 balance) internal _balances;
     mapping(bytes32 walletKey => mapping(address spender => uint256 allowance)) public allowances;
 
@@ -143,9 +152,16 @@ contract SatelliteLiteMock is IERC7786Recipient {
         validUntilBound = bound;
     }
 
-    /// @notice Sets the wait before the first resend of a receipt.
+    /// @notice Sets the wait between two sends of a receipt before a resend; zero is refused, so the rate stays.
     function setReceiptResendWait(uint64 wait) external {
+        require(wait != 0, ErrorsLib.ZeroValue());
         receiptResendWait = wait;
+    }
+
+    /// @notice Sets the window over which a half's answers are counted; zero is refused, so the rate stays.
+    function setAnswerWindow(uint64 window) external {
+        require(window != 0, ErrorsLib.ZeroValue());
+        answerWindow = window;
     }
 
     /// @notice The caller, a wallet on this chain, lets `spender` execute its tickets up to `amount`.
@@ -167,15 +183,20 @@ contract SatelliteLiteMock is IERC7786Recipient {
         return _tickets[ticketId].validUntil;
     }
 
-    /// @notice The receipt stored for one half, all zero when the half was never answered.
-    function storedReceipt(bytes32 ticketId, uint8 half) external view returns (MessageTypesLib.ReceiptMessage memory) {
-        return _receipts[MessageTypesLib.halfKeyOf(ticketId, half)];
+    /// @notice The receipt stored for one half of one message type, all zero when that half was never answered.
+    function storedReceipt(uint8 messageType, bytes32 halfKey)
+        external
+        view
+        returns (MessageTypesLib.ReceiptMessage memory)
+    {
+        return _receipts[messageType][halfKey];
     }
 
     /// @notice Whether the ticket was executed.
     function consumed(bytes32 ticketId) external view returns (bool) {
-        MessageTypesLib.ReceiptMessage storage receipt = _receipts[ticketId];
-        return answered[ticketId] && receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
+        uint8 ticketType = uint8(MessageTypesLib.Message.TICKET);
+        MessageTypesLib.ReceiptMessage storage receipt = _receipts[ticketType][ticketId];
+        return answered[ticketType][ticketId] && receipt.answer == MessageTypesLib.ReceiptAnswer.Executed;
     }
 
     /// @inheritdoc IERC7786Recipient
@@ -211,7 +232,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
         require(known[ticketId], UnknownTicket(ticketId));
         MessageTypesLib.TicketMessage storage ticket = _tickets[ticketId];
         require(block.timestamp < ticket.validUntil, ValidationExpired(ticketId));
-        require(!answered[ticketId], ValidationConsumed(ticketId));
+        require(!answered[uint8(MessageTypesLib.Message.TICKET)][ticketId], ValidationConsumed(ticketId));
         require(ticket.amountMin <= amount && amount <= ticket.amountMax, AmountOutOfRange(ticketId, amount));
         _spendAsExecutor(ticket, ticketId, amount);
 
@@ -220,28 +241,30 @@ contract SatelliteLiteMock is IERC7786Recipient {
         if (receiverOnThisChain) _balances[keccak256(ticket.to)] += amount;
         if (!receiverOnThisChain) burns += amount;
 
-        _answer(ticketId, 0, _ticketReceipt(ticket, amount, MessageTypesLib.ReceiptAnswer.Executed));
+        _answer(
+            uint8(MessageTypesLib.Message.TICKET),
+            ticketId,
+            _ticketReceipt(ticket, amount, MessageTypesLib.ReceiptAnswer.Executed)
+        );
     }
 
-    /// @notice Sends the stored receipt of one half again, byte for byte, for anyone: at most `MAX_RECEIPT_RESENDS`
-    ///  times, the first one `receiptResendWait` after the half's last send, each next one after twice the wait before.
-    function resendReceipt(bytes32 ticketId, uint8 half) external {
-        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
-        require(answered[halfKey], NoStoredReceipt(ticketId, half));
-        ReceiptSends storage sends = receiptSends[halfKey];
-        require(sends.resendsSent < MAX_RECEIPT_RESENDS, NoReceiptResendLeft(ticketId, half));
-        uint64 wait = receiptResendWait * uint64(2) ** sends.resendsSent;
-        uint64 resendAllowedAt = sends.lastSentAt + wait;
-        require(block.timestamp >= resendAllowedAt, ReceiptResendTooSoon(ticketId, half, resendAllowedAt));
+    /// @notice Sends the stored receipt of one half of one message type again, byte for byte, for anyone: at most
+    ///  `MAX_RECEIPT_RESENDS` times, each one `receiptResendWait` after the half's last send.
+    function resendReceipt(uint8 messageType, bytes32 halfKey) external {
+        require(answered[messageType][halfKey], NoStoredReceipt(messageType, halfKey));
+        ReceiptSends storage sends = receiptSends[messageType][halfKey];
+        require(sends.resendsSent < MAX_RECEIPT_RESENDS, NoReceiptResendLeft(messageType, halfKey));
+        uint64 resendAllowedAt = sends.lastSentAt + receiptResendWait;
+        require(block.timestamp >= resendAllowedAt, ReceiptResendTooSoon(messageType, halfKey, resendAllowedAt));
 
         sends.resendsSent += 1;
-        _send(halfKey, _receipts[halfKey]);
+        _send(messageType, halfKey, _receipts[messageType][halfKey]);
     }
 
-    /// @notice The id of a ticket's terms, as home builds it, see {TicketLib-ticketIdOf}.
+    /// @notice The id of a ticket's terms, as home builds it, see {TicketLib-ticketIdOf}, under the copy's own kind.
     function idOfTheTerms(MessageTypesLib.TicketMessage memory copy) public pure returns (bytes32) {
         return TicketLib.ticketIdOf(
-            ITickets.TicketKind.MOVE,
+            ITickets.TicketKind(copy.kind),
             WalletKeyLib.canonicalKey(copy.from),
             WalletKeyLib.canonicalKey(copy.to),
             TicketLib.spenderKeyOf(copy.spender),
@@ -258,6 +281,7 @@ contract SatelliteLiteMock is IERC7786Recipient {
     ///  receipt: the stored receipt, a stored zero receipt once valid until passed, or a still open answer before.
     function _receiveTicket(MessageTypesLib.TicketMessage memory copy) private {
         bytes32 ticketId = copy.ticketId;
+        uint8 ticketType = uint8(MessageTypesLib.Message.TICKET);
         bool tooFarAhead = copy.validUntil > block.timestamp && copy.validUntil - block.timestamp > validUntilBound;
         if (tooFarAhead) return;
         bytes32 termsId = idOfTheTerms(copy);
@@ -270,8 +294,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
             return;
         }
 
-        if (answered[ticketId]) {
-            if (_mayAnswer(ticketId, 0)) _send(ticketId, _receipts[ticketId]);
+        if (answered[ticketType][ticketId]) {
+            if (_mayAnswer(ticketType, ticketId)) _send(ticketType, ticketId, _receipts[ticketType][ticketId]);
             return;
         }
         MessageTypesLib.TicketMessage storage firstCopy = _tickets[ticketId];
@@ -280,14 +304,15 @@ contract SatelliteLiteMock is IERC7786Recipient {
             return;
         }
         // Not counted: home gives its ask back on each still open answer, so it must hear every one.
-        _send(ticketId, _ticketReceipt(firstCopy, 0, MessageTypesLib.ReceiptAnswer.StillOpen));
+        _send(ticketType, ticketId, _ticketReceipt(firstCopy, 0, MessageTypesLib.ReceiptAnswer.StillOpen));
     }
 
-    /// @dev Rule 9: mints once per half, strictly before the half's valid until.
+    /// @dev Rule 9: mints once per `(MOVE_OUT, halfKey)`, strictly before the half's valid until.
     function _moveOut(MessageTypesLib.MoveOutMessage memory moveOut) private {
+        uint8 moveOutType = uint8(MessageTypesLib.Message.MOVE_OUT);
         bytes32 halfKey = MessageTypesLib.halfKeyOf(moveOut.ticketId, moveOut.half);
-        if (answered[halfKey]) {
-            if (_mayAnswer(moveOut.ticketId, moveOut.half)) _send(halfKey, _receipts[halfKey]);
+        if (answered[moveOutType][halfKey]) {
+            if (_mayAnswer(moveOutType, halfKey)) _send(moveOutType, halfKey, _receipts[moveOutType][halfKey]);
             return;
         }
         uint256 minted;
@@ -299,17 +324,17 @@ contract SatelliteLiteMock is IERC7786Recipient {
             mints += minted;
         }
         _answer(
-            moveOut.ticketId,
-            moveOut.half,
-            _halfReceipt(moveOut.ticketId, moveOut.half, "", moveOut.toWallet, minted, answer)
+            moveOutType, halfKey, _halfReceipt(moveOut.ticketId, moveOut.half, "", moveOut.toWallet, minted, answer)
         );
     }
 
-    /// @dev Rule 10: burns `min(amount, balance)` once per half, strictly before the half's valid until.
+    /// @dev Rule 10: burns `min(amount, balance)` once per `(BRING_HOME, halfKey)`, strictly before the half's valid
+    ///  until.
     function _bringHome(MessageTypesLib.BringHomeMessage memory bringHome) private {
+        uint8 bringHomeType = uint8(MessageTypesLib.Message.BRING_HOME);
         bytes32 halfKey = MessageTypesLib.halfKeyOf(bringHome.ticketId, bringHome.half);
-        if (answered[halfKey]) {
-            if (_mayAnswer(bringHome.ticketId, bringHome.half)) _send(halfKey, _receipts[halfKey]);
+        if (answered[bringHomeType][halfKey]) {
+            if (_mayAnswer(bringHomeType, halfKey)) _send(bringHomeType, halfKey, _receipts[bringHomeType][halfKey]);
             return;
         }
         uint256 burned;
@@ -323,33 +348,42 @@ contract SatelliteLiteMock is IERC7786Recipient {
             burns += burned;
         }
         _answer(
-            bringHome.ticketId,
-            bringHome.half,
+            bringHomeType,
+            halfKey,
             _halfReceipt(bringHome.ticketId, bringHome.half, bringHome.wallet, "", burned, answer)
         );
     }
 
     function _answerExpired(bytes32 ticketId) private {
-        _answer(ticketId, 0, _ticketReceipt(_tickets[ticketId], 0, MessageTypesLib.ReceiptAnswer.Expired));
+        _answer(
+            uint8(MessageTypesLib.Message.TICKET),
+            ticketId,
+            _ticketReceipt(_tickets[ticketId], 0, MessageTypesLib.ReceiptAnswer.Expired)
+        );
     }
 
-    /// @dev Rule 7: stores the receipt under its half and sends it.
-    function _answer(bytes32 ticketId, uint8 half, MessageTypesLib.ReceiptMessage memory receipt) private {
-        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, half);
-        _receipts[halfKey] = receipt;
-        answered[halfKey] = true;
-        _send(halfKey, receipt);
+    /// @dev Rule 7: stores the receipt under its message type and half key, and sends it.
+    function _answer(uint8 messageType, bytes32 halfKey, MessageTypesLib.ReceiptMessage memory receipt) private {
+        _receipts[messageType][halfKey] = receipt;
+        answered[messageType][halfKey] = true;
+        _send(messageType, halfKey, receipt);
     }
 
-    /// @dev Counts an answer that sends a stored receipt again, to a later copy or a repeated half; past
-    ///  `MAX_ANSWERS_PER_HALF` nothing is sent, and the delivery is consumed.
-    function _mayAnswer(bytes32 ticketId, uint8 half) private returns (bool) {
-        ReceiptSends storage sends = receiptSends[MessageTypesLib.halfKeyOf(ticketId, half)];
-        if (sends.answersSent >= MAX_ANSWERS_PER_HALF) {
-            emit AnswerNotSent(ticketId, half);
+    /// @dev Counts an answer that sends a stored receipt again, to a later copy or a repeated half, in the half's
+    ///  current answer window; a window that ended starts a new one at this answer. Past `MAX_ANSWERS_PER_WINDOW`
+    ///  nothing is sent, and the delivery is consumed.
+    function _mayAnswer(uint8 messageType, bytes32 halfKey) private returns (bool) {
+        ReceiptSends storage sends = receiptSends[messageType][halfKey];
+        bool windowEnded = block.timestamp >= sends.answerWindowStartedAt + answerWindow;
+        if (windowEnded) {
+            sends.answerWindowStartedAt = uint64(block.timestamp);
+            sends.answersInWindow = 0;
+        }
+        if (sends.answersInWindow >= MAX_ANSWERS_PER_WINDOW) {
+            emit AnswerNotSent(messageType, halfKey);
             return false;
         }
-        sends.answersSent += 1;
+        sends.answersInWindow += 1;
         return true;
     }
 
@@ -395,9 +429,9 @@ contract SatelliteLiteMock is IERC7786Recipient {
         });
     }
 
-    /// @dev Sends a receipt for `halfKey` and notes when, for the wait of {resendReceipt}.
-    function _send(bytes32 halfKey, MessageTypesLib.ReceiptMessage memory receipt) private {
-        receiptSends[halfKey].lastSentAt = uint64(block.timestamp);
+    /// @dev Sends a receipt for `(messageType, halfKey)` and notes when, for the wait of {resendReceipt}.
+    function _send(uint8 messageType, bytes32 halfKey, MessageTypesLib.ReceiptMessage memory receipt) private {
+        receiptSends[messageType][halfKey].lastSentAt = uint64(block.timestamp);
         gateway.sendMessage(
             InteroperableAddress.formatEvmV1(block.chainid, referenceToken),
             MessageTypesLib.encodeSettlement(receipt),

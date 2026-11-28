@@ -11,7 +11,7 @@ reference chain against it.
 
 | Direction | Type | Body | What the Lite does |
 |---|---|---|---|
-| in | `TICKET` | `TicketMessage { ticketId, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId`; a later copy is an ask for the receipt, see rule 3 |
+| in | `TICKET` | `TicketMessage { ticketId, kind, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId`; `kind` is hashed into the id with the other terms, and home sends only a move (`kind` 0) as a ticket; a later copy is an ask for the receipt, see rule 3 |
 | in | `MOVE_OUT` | `MoveOutMessage { ticketId, half, toWallet, amount, validUntil }` | the second half of a move: mints `amount` to `toWallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
 | in | `BRING_HOME` | `BringHomeMessage { ticketId, half, wallet, amount, validUntil }` | the half of a bring home: burns `min(amount, balance)` of `wallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
 | out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, askBlockHash, seenMax, seenValidUntil, half, answer }` | one per ticket it executed, echoing the copy it executed under: its `askBlockHash`, its `amountMax` as `seenMax` and its `validUntil` as `seenValidUntil`; `half` is 0 and `answer` is `Executed`. One per move out it answered: `half` is the move out's, `from` is empty, `to` is `toWallet`, the ticket fields are zero, and either `amount` is the move out's and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired`. One per bring home half it answered: `half` is the bring home's, `from` is `wallet`, `to` is empty, the ticket fields are zero, and either `amount` is what it burned, possibly 0, and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired` |
@@ -58,8 +58,9 @@ other chain, and blocks that chain.
 ### Transport
 
 1. **Act on each delivery once.** A gateway may redeliver; the Lite dedupes on a nonzero receive id, and also on
-   the operation id, since a resend arrives under a new receive id: `ticketId` for a validation, see rule 3 for
-   what a second body under a known id means, and the half of rules 9 and 10. A zero receive id names
+   the operation id, since a resend arrives under a new receive id: `ticketId` for a ticket, see rule 3 for
+   what a second body under a known id means, and `(type, halfKey)` for a move out or a bring home, rules 9 and 10,
+   where `halfKey` is `ticketId` for half 0 and `keccak256(abi.encode(ticketId, half))` otherwise. A zero receive id names
    no delivery (ERC-7786 allows it) and is never recorded, or the first one would refuse every later message.
 2. **Accept only the reference token as author**, through its own gateway; never act on a message from another away
    token.
@@ -88,11 +89,12 @@ other chain, and blocks that chain.
    copy's valid until has passed, or with a still open answer before. A first copy that arrives at or after its
    valid until is answered with a stored zero receipt and never executed. The receipt echoes the copy held, and the
    reference chain tells which one it was. A ticket whose `ticketId` is not the id of its own terms (the formula
-   above, with `kind` 0) is refused (`TicketIdMismatch`) and never held, so nobody puts other terms under a known id.
-   Answers that send a stored receipt again, to later copies or repeated halves, are limited to six per half
-   (`MAX_ANSWERS_PER_HALF`): home sends at most three asks for a ticket's receipt and three sends of a half, so six
-   cover home and a redelivery of each; past the limit the delivery is consumed and nothing is sent
-   (`AnswerNotSent`). The first send of a stored receipt is not counted, and neither is a still open answer: home
+   above, under the copy's own `kind`) is refused (`TicketIdMismatch`) and never held, so nobody puts other terms under a known id.
+   Answers that send a stored receipt again, to later copies or repeated halves, are rate limited per half: six in
+   each answer window (`MAX_ANSWERS_PER_WINDOW`, `answerWindow`), not six for ever. Home sends at most three asks for
+   a ticket's receipt and three sends of a half, so six cover home and a redelivery of each; past the limit the
+   delivery is consumed and nothing is sent (`AnswerNotSent`), and the next window answers again. The window is set
+   at deployment, and its setter refuses zero. The first send of a stored receipt is not counted, and neither is a still open answer: home
    gives its ask back on each one, so it must hear every one, and counting them would use up the answers home needs
    once the ticket executed or passed its valid until.
 4. Execute strictly before `validUntil`.
@@ -101,10 +103,12 @@ other chain, and blocks that chain.
 7. Report every ticket it executed, exactly once, echoing the copy it executed under (`askBlockHash`, `seenMax`,
    `seenValidUntil`) with `answer` `Executed`, and both wallets. A report lost on the way may be sent again byte for
    byte: the reference chain keeps one receipt per half, recognises the same one again and changes nothing; another
-   receipt for a half that already has one blocks the Lite's chain. Anyone may ask the Lite to send a stored receipt
-   again (`resendReceipt(ticketId, half)`), at most three times per half (`MAX_RECEIPT_RESENDS`), the first one
-   `receiptResendWait` after its last send, the next after two waits, the next after four: every send is paid from
-   the bridge's fee balance. The resends are counted apart from the answers of rule 3, so a resend by anyone never
+   receipt for a half that already has one blocks the Lite's chain. The Lite keeps one receipt per `(type, halfKey)`
+   and exposes it (`storedReceipt(type, halfKey)`), where `type` is the message the receipt answers: `TICKET` for a
+   ticket's own receipt, `MOVE_OUT` or `BRING_HOME` for a half. Anyone may ask the Lite to send a stored receipt
+   again (`resendReceipt(type, halfKey)`), at most three times per half (`MAX_RECEIPT_RESENDS`), each one a flat
+   `receiptResendWait` after the last send of that receipt: every send is paid from the bridge's fee balance. The wait
+   is set at deployment, and its setter refuses zero. The resends are counted apart from the answers of rule 3, so a resend by anyone never
    uses up the answers home needs.
 
 ### Instructions
@@ -112,12 +116,12 @@ other chain, and blocks that chain.
 Rule 8, the two-leg invariant, is gone: a receiving Lite no longer mints on the sending Lite's burn message. It
 mints on home's move out only (rule 9), and never acts on a message from another away token (rule 2).
 
-9. **A move out mints at most once per half**, keyed by `(ticketId, half)`, strictly before the half's `validUntil` on
+9. **A move out mints at most once per half**, keyed by `(MOVE_OUT, halfKey)`, strictly before the half's `validUntil` on
    the Lite's own clock, and answers with one receipt for that half. A move out that arrives at or after its
    `validUntil`, never executed, is answered with a zero receipt (`Expired`), stored, and that half is never executed
    afterwards: home then sends a new half. The same half again is answered with the stored receipt, byte for byte.
    Home already holds the amount on hold; a Lite that mints twice has inflated its chain.
-10. **A bring home burns at most once per half**, keyed by `(ticketId, half)`, strictly before the half's `validUntil`
+10. **A bring home burns at most once per half**, keyed by `(BRING_HOME, halfKey)`, strictly before the half's `validUntil`
     on the Lite's own clock. The Lite burns `min(amount, balance)`, down to zero, and answers with one receipt for that
     half naming the burned wallet. A bring home that arrives at or after its `validUntil`, never executed, is answered
     with a zero receipt (`Expired`), stored, and that half is never executed afterwards. The same half again is

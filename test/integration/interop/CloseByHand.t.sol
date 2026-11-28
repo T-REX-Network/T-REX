@@ -33,8 +33,10 @@ contract CloseByHandTest is HoldsSuiteTest {
         // The receipt optimism sent back is lost.
         optimismGateway.drop(optimismGateway.queueLength() - 1);
         _closeEvmChain(token, OPTIMISM);
-        MessageTypesLib.ReceiptMessage memory stored =
-            optimismLite.storedReceipt(ticketId, boundCompliance.ticketOf(ticketId).half);
+        MessageTypesLib.ReceiptMessage memory stored = optimismLite.storedReceipt(
+            uint8(MessageTypesLib.Message.MOVE_OUT),
+            MessageTypesLib.halfKeyOf(ticketId, boundCompliance.ticketOf(ticketId).half)
+        );
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptApplied(ticketId, optimism, EIGHT);
@@ -56,7 +58,11 @@ contract CloseByHandTest is HoldsSuiteTest {
         optimismGateway.drop(optimismGateway.queueLength() - 1);
         _closeEvmChain(token, OPTIMISM);
         ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
-        ITickets.AwayChainReading memory reading = _readingWith(optimismLite.storedReceipt(ticketId, held.half));
+        ITickets.AwayChainReading memory reading = _readingWith(
+            optimismLite.storedReceipt(
+                uint8(MessageTypesLib.Message.MOVE_OUT), MessageTypesLib.halfKeyOf(ticketId, held.half)
+            )
+        );
         reading.awayClockTime = held.secondHalfValidUntil + 1 days;
 
         _closeByHand(ticketId, bobOptimismSat, reading);
@@ -93,7 +99,11 @@ contract CloseByHandTest is HoldsSuiteTest {
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.WaitingReceiptApplied(halfKey, optimism);
-        _closeByHand(ticketId, bobOptimismSat, _readingWith(optimismLite.storedReceipt(ticketId, half)));
+        _closeByHand(
+            ticketId,
+            bobOptimismSat,
+            _readingWith(optimismLite.storedReceipt(uint8(MessageTypesLib.Message.MOVE_OUT), halfKey))
+        );
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "applied, nothing returned");
         assertEq(token.awayBalanceOf(bobOptimismSat), EIGHT);
@@ -109,7 +119,9 @@ contract CloseByHandTest is HoldsSuiteTest {
         emit EventsLib.ReceiptWithoutTicket(ticketId, polygon, aliceSat, bobSat, FOUR);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.ClosedByHand(ticketId, 0, uint64(block.number), uint64(block.timestamp));
-        _closeByHand(ticketId, bobSat, _readingWith(polygonLite.storedReceipt(ticketId, 0)));
+        _closeByHand(
+            ticketId, bobSat, _readingWith(polygonLite.storedReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId))
+        );
 
         _assertStatus(ticketId, ITickets.TicketStatus.OnHold, "booked on hold");
         assertEq(token.onHoldOf(ticketId), FOUR);
@@ -126,7 +138,15 @@ contract CloseByHandTest is HoldsSuiteTest {
         polygonGateway.drop(polygonGateway.queueLength() - 1);
         _closeEvmChain(token, POLYGON);
 
-        _closeByHand(ticketId, aliceHome, _readingWith(polygonLite.storedReceipt(ticketId, 1)));
+        _closeByHand(
+            ticketId,
+            aliceHome,
+            _readingWith(
+                polygonLite.storedReceipt(
+                    uint8(MessageTypesLib.Message.BRING_HOME), MessageTypesLib.halfKeyOf(ticketId, 1)
+                )
+            )
+        );
 
         _assertStatus(ticketId, ITickets.TicketStatus.Done, "brought home");
         assertEq(token.balanceOf(alice), broughtHome, "minted at home");
@@ -139,7 +159,8 @@ contract CloseByHandTest is HoldsSuiteTest {
         bytes32 ticketId = _executedTicketWhoseReceiptIsLost(FOUR);
         trustedGatewayRegistry.setTrustedGateway(address(polygonGateway), false, 0);
         assertFalse(token.isChainOpen(polygon), "a distrusted bridge carries nothing");
-        MessageTypesLib.ReceiptMessage memory stored = polygonLite.storedReceipt(ticketId, 0);
+        MessageTypesLib.ReceiptMessage memory stored =
+            polygonLite.storedReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId);
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ReceiptRouteNotClosed.selector, polygon));
@@ -332,7 +353,8 @@ contract CloseByHandTest is HoldsSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));
         boundCompliance.cancelTickets(ids);
 
-        ITickets.AwayChainReading memory honestRead = _readingWith(polygonLite.storedReceipt(ticketId, 0));
+        ITickets.AwayChainReading memory honestRead =
+            _readingWith(polygonLite.storedReceipt(uint8(MessageTypesLib.Message.TICKET), ticketId));
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         boundCompliance.closeByHand(ticketId, bobSat, honestRead);

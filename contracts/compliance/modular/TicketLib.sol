@@ -536,6 +536,7 @@ library TicketLib {
             ticketId,
             MessageTypesLib.TicketMessage({
                 ticketId: ticketId,
+                kind: uint8(ITickets.TicketKind.MOVE),
                 salt: salt,
                 from: from,
                 to: to,
@@ -636,6 +637,7 @@ library TicketLib {
             ticketId,
             MessageTypesLib.TicketMessage({
                 ticketId: ticketId,
+                kind: uint8(ticket.kind),
                 salt: ticket.salt,
                 from: ticket.fromWallet,
                 to: to,
@@ -673,6 +675,7 @@ library TicketLib {
 
         MessageTypesLib.TicketMessage memory rebuilt = MessageTypesLib.TicketMessage({
             ticketId: ticketId,
+            kind: uint8(ticket.kind),
             salt: ticket.salt,
             from: ticket.fromWallet,
             to: to,

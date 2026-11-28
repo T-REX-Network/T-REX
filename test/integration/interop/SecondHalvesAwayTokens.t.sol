@@ -129,7 +129,8 @@ contract SecondHalvesAwayTokensTest is InteropSuiteTest {
         _relayAll(optimismGateway);
 
         assertEq(optimismLite.mints(), 0, "nothing minted at or after valid until");
-        MessageTypesLib.ReceiptMessage memory stored = optimismLite.storedReceipt(id, 1);
+        MessageTypesLib.ReceiptMessage memory stored =
+            optimismLite.storedReceipt(uint8(MessageTypesLib.Message.MOVE_OUT), MessageTypesLib.halfKeyOf(id, 1));
         assertEq(uint8(stored.answer), uint8(MessageTypesLib.ReceiptAnswer.Expired));
         assertTrue(boundCompliance.ticketOf(id).secondHalfOwed, "a new half is owed");
 
