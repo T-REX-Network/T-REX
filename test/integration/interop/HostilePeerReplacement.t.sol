@@ -247,7 +247,7 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         uint64 endsAt = _replaceThePeer();
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
 
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + boundCompliance.waitingTimeOf(issued.fromChainKey));
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endsAt));
         boundCompliance.sendTicket(ticketId, bobOnPolygon, "");
 

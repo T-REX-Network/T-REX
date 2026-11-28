@@ -474,14 +474,14 @@ contract WaitingReceiptsTest is InteropSuiteTest {
     /// @dev Asks for the receipt of `ticketId` at its first due time, one waiting time after its valid until.
     function _askForTheReceipt(bytes32 ticketId) private {
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + boundCompliance.waitingTimeOf(issued.fromChainKey));
         boundCompliance.sendTicket(ticketId, bobOnPolygon, "");
     }
 
     /// @dev Past the waiting time of the last ask for the receipt: a cancel is due.
     function _warpPastThePublicCancel(bytes32 ticketId) private {
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        uint256 cancelAt = uint256(issued.lastSentAt) + issued.waitingTime + 1;
+        uint256 cancelAt = uint256(issued.lastSentAt) + boundCompliance.waitingTimeOf(issued.fromChainKey) + 1;
         if (block.timestamp < cancelAt) vm.warp(cancelAt);
     }
 

@@ -432,7 +432,6 @@ library SecondHalfLib {
         ticket.amountMax = amount;
         ticket.requestedMax = amount;
         ticket.validUntil = validUntil;
-        ticket.waitingTime = waitingTime;
         ticket.stopWaitingAt = validUntil + 4 * waitingTime;
         ticket.fromChainKey = chainKey;
         ticket.toChainKey = _chainKeyOf(_homeEnvelopeOf(homeWallet));

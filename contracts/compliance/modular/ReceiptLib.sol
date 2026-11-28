@@ -790,7 +790,7 @@ library ReceiptLib {
         askedAfterTheReceiptWasDue = anAskStands && sentAfterTheReceiptWasDue;
         uint64 askedAt = waitingEndsAt;
         if (askedAfterTheReceiptWasDue) askedAt = ticket.lastSentAt;
-        dueAt = askedAt + ticket.waitingTime;
+        dueAt = askedAt + TicketLib.layout().waitingTimes[ticket.fromChainKey];
     }
 
     /* ----- Close by hand ----- */

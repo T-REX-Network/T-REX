@@ -214,7 +214,6 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         ITickets.Ticket memory record = mc.ticketOf(bytes32(uint256(1)));
         assertEq(record.askBlockHash, bytes32(0));
         assertEq(record.validUntil, 0);
-        assertEq(record.waitingTime, 0);
     }
 
 }

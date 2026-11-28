@@ -186,10 +186,10 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
     ///  until, then lets one more waiting time pass with no answer: from then on anyone may cancel it.
     function _askAndLetTheAskGoUnanswered(bytes32 ticketId, bytes memory to, bytes memory spender) internal {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
-        uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
+        uint64 firstAskDueAt = ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey);
         if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
         boundCompliance.sendTicket(ticketId, to, spender);
-        vm.warp(block.timestamp + ticket.waitingTime + 1);
+        vm.warp(block.timestamp + boundCompliance.waitingTimeOf(ticket.fromChainKey) + 1);
     }
 
     /// @dev Cancels the open ticket `ticketId` the only way a sent ticket is cancelled: an ask for its receipt that

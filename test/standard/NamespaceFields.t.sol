@@ -414,7 +414,6 @@ contract NamespaceFieldsTest is Test {
         ticket.amountMin = 22;
         ticket.amountMax = 23;
         ticket.validUntil = 24;
-        ticket.waitingTime = 25;
         ticket.fromChainKey = bytes32(uint256(26));
         ticket.toChainKey = bytes32(uint256(27));
         ticket.fromKey = bytes32(uint256(28));
@@ -454,8 +453,7 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(entry, 0)), 21, "validations.askBlockHash");
         assertEq(_word(_field(entry, 1)), 22, "validations.amountMin");
         assertEq(_word(_field(entry, 2)), 23, "validations.amountMax");
-        // validUntil fills bytes 0 to 7, waitingTime bytes 8 to 15.
-        assertEq(_word(_field(entry, 3)), 24 | (25 << 64), "validations.validUntil and waitingTime");
+        assertEq(_word(_field(entry, 3)), 24, "validations.validUntil");
         assertEq(_word(_field(entry, 4)), 26, "validations.fromChainKey");
         assertEq(_word(_field(entry, 5)), 27, "validations.toChainKey");
         assertEq(_word(_field(entry, 6)), 28, "validations.fromKey");

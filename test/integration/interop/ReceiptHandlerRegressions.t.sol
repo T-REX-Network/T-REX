@@ -108,10 +108,10 @@ contract ReceiptHandlerRegressionsTest is InteropSuiteTest {
         uint256 receiptInFlight = polygonBridge.queueLength() - 1;
 
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + boundCompliance.waitingTimeOf(issued.fromChainKey));
         boundCompliance.sendTicket(ticketId, bobSat, "");
         _closeEvmChain(token, POLYGON);
-        vm.warp(block.timestamp + issued.waitingTime + 1);
+        vm.warp(block.timestamp + boundCompliance.waitingTimeOf(issued.fromChainKey) + 1);
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ChainNotOpen.selector, polygon));

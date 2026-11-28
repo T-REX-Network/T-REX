@@ -367,9 +367,8 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
         vm.warp(validUntil + POLYGON_WINDOW);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, validUntil + 2 * POLYGON_WINDOW)
-        );
+        // No ask is ever sent for a home sender, and home's own chain has no waiting time.
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, validUntil));
         boundCompliance.cancelTickets(_ids(ticketId));
         assertEq(token.balanceOf(alice), homeAmount, "nothing was burned");
 

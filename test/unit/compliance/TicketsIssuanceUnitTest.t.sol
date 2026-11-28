@@ -705,14 +705,13 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
 
         ITickets.Ticket memory record = mc.ticketOf(id);
         assertEq(record.validUntil, 1_700_000_000 + VALIDITY_WINDOW);
-        assertEq(record.waitingTime, POLYGON_WINDOW);
         assertEq(record.stopWaitingAt, 1_700_000_000 + VALIDITY_WINDOW + 4 * POLYGON_WINDOW);
         assertEq(record.fromChainKey, polygon);
         assertEq(record.toChainKey, polygon);
 
-        // A later change of the windows never moves the deadline of an outstanding validation.
+        // A later change of the waiting time never moves the time home stops waiting, fixed at the ask.
         mc.setWaitingTime(polygon, 2 hours);
-        assertEq(mc.ticketOf(id).waitingTime, POLYGON_WINDOW);
+        assertEq(mc.ticketOf(id).stopWaitingAt, 1_700_000_000 + VALIDITY_WINDOW + 4 * POLYGON_WINDOW);
     }
 
     /// @notice A ticket's waiting time is the sender's away chain's: that chain owes its receipt.
@@ -723,7 +722,7 @@ contract TicketsIssuanceUnitTest is ModularComplianceBaseUnitTest {
         bytes32 id = mc.askToMove(fromSat, nativeBob, 10, 40, "", _salt());
 
         ITickets.Ticket memory record = mc.ticketOf(id);
-        assertEq(record.waitingTime, POLYGON_WINDOW);
+        assertEq(record.stopWaitingAt, record.validUntil + 4 * POLYGON_WINDOW);
         assertEq(record.fromChainKey, polygon);
         assertEq(record.toChainKey, referenceChain);
     }

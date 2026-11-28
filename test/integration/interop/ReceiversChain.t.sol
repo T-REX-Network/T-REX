@@ -89,7 +89,7 @@ contract ReceiversChainTest is HoldsSuiteTest {
     function test_sendTicket_reverts_when_theReceiversAwayChainIsBlockedAtAnAskForTheReceipt() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(ticketId);
-        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
         vm.prank(agent);
         boundCompliance.blockAwayChain(optimism);
 

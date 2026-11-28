@@ -120,7 +120,7 @@ contract TicketRouteCapsTest is InteropSuiteTest {
         assertFalse(ticket.onReceiptRoute);
         trustedGatewayRegistry.setTrustedGateway(address(ticketBridge), false, 0);
 
-        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
         boundCompliance.sendTicket(ticketId, bobSat, "");
 
         assertEq(ticketBridge.queueLength(), 1, "only the first send went on the ticket bridge");

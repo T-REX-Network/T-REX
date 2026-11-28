@@ -150,13 +150,12 @@ contract TicketClockTest is InteropSuiteTest {
         bytes memory bobOnOptimism = _linkSatelliteWallet(bobIdentity, OPTIMISM, makeAccount("bobOnOptimism"));
         bytes32 crossChainId = _requestValidation(address(aliceIdentity), aliceSat, bobOnOptimism, 10, ASKED_MAX);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(crossChainId);
-        assertEq(ticket.waitingTime, POLYGON_WINDOW, "the sender's chain's waiting time");
 
         uint64 askedAt = ticket.validUntil + POLYGON_WINDOW;
         vm.warp(askedAt);
         boundCompliance.sendTicket(crossChainId, bobOnOptimism, "");
 
-        uint64 cancelableAt = askedAt + POLYGON_WINDOW + 1;
+        uint64 cancelableAt = askedAt + POLYGON_WINDOW;
         assertLt(cancelableAt, askedAt + OPTIMISM_WINDOW, "before the receiver's chain's waiting time is over");
         vm.warp(cancelableAt);
         boundCompliance.cancelTickets(_ids(crossChainId));
@@ -164,19 +163,30 @@ contract TicketClockTest is InteropSuiteTest {
         assertEq(uint8(boundCompliance.statusOf(crossChainId)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
-    /// @notice The waiting time is kept on the ticket at its ask: raising the setting afterwards moves neither the
-    ///         asks nor the cancel of a ticket already out.
-    function test_cancelTime_IsFixedAtTheAsk_WhenTheWaitingTimeChangesLater() public {
+    /// @notice The waiting time is read when the ticket is asked for and cancelled: raising the setting afterwards
+    ///         moves both the ask and the cancel of a ticket already out.
+    function test_cancelTickets_movesWithTheWaitingTime_whenTheSettingChangesAfterTheAsk() public {
         uint64 raisedWaitingTime = 3 hours;
         vm.prank(deployer);
         boundCompliance.setWaitingTime(polygon, raisedWaitingTime);
-        assertEq(boundCompliance.ticketOf(id).waitingTime, POLYGON_WINDOW, "the ticket keeps its own");
+        uint64 raisedAskDueAt = validUntil + raisedWaitingTime;
 
         vm.warp(firstAskDueAt);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, raisedAskDueAt));
         boundCompliance.sendTicket(id, bobSat, "");
-        vm.warp(firstAskDueAt + POLYGON_WINDOW + 1);
+
+        vm.warp(raisedAskDueAt);
+        boundCompliance.sendTicket(id, bobSat, "");
+        uint64 raisedCancelDueAt = raisedAskDueAt + raisedWaitingTime;
+
+        vm.warp(raisedAskDueAt + POLYGON_WINDOW);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, raisedCancelDueAt));
         boundCompliance.cancelTickets(_ids(id));
 
+        vm.warp(raisedCancelDueAt);
+        vm.prank(stranger);
+        boundCompliance.cancelTickets(_ids(id));
         assertEq(uint8(boundCompliance.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 

@@ -219,7 +219,7 @@ contract TicketAndReceiptRoutesTest is InteropSuiteTest {
     function test_sendTicket_sendsOnTheTicketRouteAgain() public {
         bytes32 id = _issue();
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
-        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
 
         vm.prank(address(aliceIdentity));
         boundCompliance.sendTicket(id, bobSat, "");

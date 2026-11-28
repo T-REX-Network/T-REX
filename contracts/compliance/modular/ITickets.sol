@@ -217,9 +217,6 @@ interface ITickets {
         uint256 amountMax;
         /// The away token's hard deadline: no execution at or after it.
         uint64 validUntil;
-        /// The waiting time of the sender's away chain at the ask, kept so a later change of the setting does not
-        /// move a ticket already out: the asks for the receipt and the cancel count in it.
-        uint64 waitingTime;
         /// `from`'s away chain, keyed as `MessageTypesLib.chainKey` computes it.
         bytes32 fromChainKey;
         /// Same for `to`'s chain; home's own key for a home wallet.
@@ -542,8 +539,8 @@ interface ITickets {
     function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external;
 
     /// @dev Sets the waiting time of the away chain `chainKey`: one waiting time after valid until anyone may ask for
-    /// a ticket's receipt, and one more after an unanswered ask anyone may cancel it. Kept on each ticket at its ask,
-    /// so a later change never moves a ticket already out.
+    /// a ticket's receipt, and one more after an unanswered ask anyone may cancel it. Read at every send and cancel,
+    /// so a change moves the asks and the cancel of tickets already out; `stopWaitingAt` stays the one of the ask.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
@@ -666,7 +663,7 @@ interface ITickets {
 
     /// @dev Cancels overdue tickets in a batch, for anyone: releases their reservations, so the next ask is computed as
     /// if they never happened. An open ticket is cancelled only once an ask for its receipt, sent at or after
-    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), has gone
+    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the sender's chain's waiting time), has gone
     /// unanswered for one more waiting time: the away token answers an ask with its stored receipt, a zero receipt,
     /// or a still open answer, so an executed ticket is not cancelled over one lost or late message. A receipt that
     /// lands after the cancel is still applied as the move it is. The batch is atomic: one refused id reverts the
@@ -718,7 +715,7 @@ interface ITickets {
     ///
     /// Otherwise a copy of an open ticket that left: sends the ticket again, byte for byte, through the bridge the
     /// first send pinned. Before `validUntil`, a resend of a lost ticket, which counts as no ask. At or after
-    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), an ask for the
+    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the sender's chain's waiting time), an ask for the
     /// receipt, `MAX_RECEIPT_ASKS` at most: the away token answers a later copy with the receipt it stored, a zero
     /// receipt when the ticket expired unexecuted, or a still open answer. One send per waiting time either way. The
     /// copy goes to the sender's chain, read from the record.

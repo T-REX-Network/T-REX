@@ -404,7 +404,6 @@ library HoldLib {
         ticket.amountMax = receipt.seenMax;
         ticket.seenValidUntil = receipt.seenValidUntil;
         ticket.askBlockHash = receipt.askBlockHash;
-        ticket.waitingTime = waitingTime;
         ticket.stopWaitingAt = uint64(block.timestamp) + 4 * waitingTime;
         if (ticket.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = ticket.stopWaitingAt;
     }

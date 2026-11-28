@@ -206,7 +206,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
         assertEq(uint8(_status(id)), uint8(ITickets.TicketStatus.Open));
 
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
-        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
         vm.prank(makeAddr("anyone"));
         boundCompliance.sendTicket(id, bobSat, "");
         polygonGateway.relay(_last(polygonGateway));
@@ -226,7 +226,7 @@ contract LiteDrivenSettlementTest is InteropSuiteTest {
     function test_sendTicket_isAnsweredExpired_whenTheAwayTokenNeverExecuted() public {
         bytes32 id = _issueAndDeliver(bobSat, 10, 50);
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
-        vm.warp(ticket.validUntil + ticket.waitingTime);
+        vm.warp(ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey));
         boundCompliance.sendTicket(id, bobSat, "");
 
         polygonGateway.relay(_last(polygonGateway));

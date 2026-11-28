@@ -44,7 +44,7 @@ contract ValidationTokenPauseTest is InteropSuiteTest {
     /// @dev Asks for the receipt of `id`, at its first due time when that is still ahead.
     function _resend(bytes32 id) private {
         ITickets.Ticket memory ticket = boundCompliance.ticketOf(id);
-        uint64 firstAskDueAt = ticket.validUntil + ticket.waitingTime;
+        uint64 firstAskDueAt = ticket.validUntil + boundCompliance.waitingTimeOf(ticket.fromChainKey);
         if (block.timestamp < firstAskDueAt) vm.warp(firstAskDueAt);
         boundCompliance.sendTicket(id, bobSat, "");
     }

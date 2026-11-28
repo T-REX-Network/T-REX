@@ -733,7 +733,7 @@ library TicketLib {
         anAsk = block.timestamp >= waitingEndsAt;
         bool aResend = block.timestamp < ticket.validUntil;
         require(anAsk || aResend, ErrorsLib.SendNotDue(ticketId, waitingEndsAt));
-        uint64 oneWaitingTimeAfterTheLastSend = ticket.lastSentAt + ticket.waitingTime;
+        uint64 oneWaitingTimeAfterTheLastSend = ticket.lastSentAt + layout().waitingTimes[ticket.fromChainKey];
         require(
             block.timestamp >= oneWaitingTimeAfterTheLastSend,
             ErrorsLib.SendNotDue(ticketId, oneWaitingTimeAfterTheLastSend)
@@ -741,12 +741,12 @@ library TicketLib {
         if (anAsk) require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
     }
 
-    /// @dev The later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time: from then on the receipt
-    ///  is overdue and may be asked for.
+    /// @dev The later of `validUntil` and `seenValidUntil`, plus the sender's away chain's waiting time, read now: from
+    ///  then on the receipt is overdue and may be asked for. A change of the setting moves it for tickets already out.
     function waitingEndsAtOf(ITickets.Ticket storage ticket) internal view returns (uint64) {
         uint64 latestValidUntil = ticket.validUntil;
         if (ticket.seenValidUntil > latestValidUntil) latestValidUntil = ticket.seenValidUntil;
-        return latestValidUntil + ticket.waitingTime;
+        return latestValidUntil + layout().waitingTimes[ticket.fromChainKey];
     }
 
     /// @dev The waiting time of the chain the move's first message goes to. The token must be running, and that chain
@@ -987,7 +987,6 @@ library TicketLib {
         stored.amountMin = draft.amountMin;
         stored.amountMax = draft.amountMax;
         stored.validUntil = draft.validUntil;
-        stored.waitingTime = draft.waitingTime;
         stored.stopWaitingAt = draft.validUntil + 4 * draft.waitingTime;
         stored.fromChainKey = draft.fromChainKey;
         stored.toChainKey = draft.toChainKey;

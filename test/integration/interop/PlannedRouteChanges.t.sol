@@ -222,7 +222,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
 
         ERC7786GatewayMock nextBridge = _changeRoute();
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + POLYGON_WINDOW);
         boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(nextBridge.queueLength(), 0, "the ask went out on the former pair");
         _relayAll(polygonBridge);
@@ -231,7 +231,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobSat), 40, "home agrees with the away token");
         assertEq(polygonLite.balanceOf(bobSat), 40);
 
-        vm.warp(block.timestamp + 2 * issued.waitingTime);
+        vm.warp(block.timestamp + 2 * POLYGON_WINDOW);
         vm.prank(anyone);
         vm.expectRevert(
             abi.encodeWithSelector(ErrorsLib.TicketNotCancellable.selector, ticketId, uint8(ITickets.TicketStatus.Done))
@@ -433,7 +433,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         _changePeer();
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
 
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + POLYGON_WINDOW);
         uint256 askIndex = polygonBridge.queueLength();
         boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(polygonBridge.queuedMessage(askIndex).recipient, liteEnvelope, "the ask goes to the former peer");
@@ -472,7 +472,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
         uint256 formerQueueLength = polygonBridge.queueLength();
 
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + POLYGON_WINDOW);
         boundCompliance.sendTicket(ticketId, bobSat, "");
 
         assertEq(polygonBridge.queueLength(), formerQueueLength, "nothing went through the distrusted bridge");
@@ -541,7 +541,7 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         _changeRoute();
         bytes32 ticketId = _ask(10, 50);
         ITickets.Ticket memory issued = boundCompliance.ticketOf(ticketId);
-        vm.warp(issued.validUntil + issued.waitingTime);
+        vm.warp(issued.validUntil + POLYGON_WINDOW);
         boundCompliance.sendTicket(ticketId, bobSat, "");
         MessageTypesLib.ReceiptMessage memory receipt = _formerPairReceiptWaitingUnderABlock(ticketId, 40);
 
