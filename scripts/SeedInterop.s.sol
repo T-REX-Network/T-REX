@@ -252,8 +252,9 @@ contract SeedInterop is Script {
 
     /// @dev OpenZeppelin's sizing for Base with a monitored on-call time of 30 minutes: tickets on the ticket route
     ///  need a validity window above 6.2 minutes, tickets at full finality above 24.6 minutes, and the waiting time
-    ///  must be above 91.4 minutes; these are sized off chain. The measured times are set first: the waiting time is
-    ///  checked against their full finality delivery plus clock lead.
+    ///  must be above 91.4 minutes; these are sized off chain. The ticket route runs at full finality until the
+    ///  rollout gates are live and during a health gate trip, so every ticket gets 25 minutes. The measured times are
+    ///  set first: the waiting time is checked against their full finality delivery plus clock lead.
     function _ensureWindows() internal {
         if (compliance.measuredTimesOf(chainKey).fullFinalityDelivery == 0) {
             compliance.setMeasuredTimes(
@@ -262,8 +263,8 @@ contract SeedInterop is Script {
             console.log("Measured times set for the satellite chain, from OpenZeppelin's Base sizing");
         }
         if (compliance.validityWindows().onTicketRoute == 0) {
-            compliance.setValidityWindows(15 minutes, 25 minutes);
-            console.log("Validity windows set to 15 minutes on the ticket route, 25 minutes on the receipt route");
+            compliance.setValidityWindows(25 minutes, 25 minutes);
+            console.log("Validity windows set to 25 minutes on the ticket route and on the receipt route");
         }
         if (compliance.waitingTimeOf(chainKey) == 0) {
             compliance.setWaitingTime(chainKey, 95 minutes);

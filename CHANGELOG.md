@@ -132,7 +132,9 @@ All notable changes to this project will be documented in this file.
     OpenZeppelin asks for with no number given (the staleness the product accepts). The other sizing
     conditions (OpenZeppelin's shortest validity window 372 s and shortest waiting time 5,485 s, its clock lag of
     120 s with the reorg slot shift inside it) are checked off chain. Validity windows
-    (`setValidityWindows`): 15 minutes on the ticket route, 25 minutes on the receipt route. Waiting time per away
+    (`setValidityWindows`): 25 minutes for every ticket, on the ticket route and on the receipt route. The ticket
+    route's window must cover a delivery at full finality (above 24.6 minutes on Base) whenever the ticket bridge can
+    run at full finality: before the rollout gates are live, and during a health gate trip. Waiting time per away
     chain (`setWaitingTime`): 95 minutes. OpenZeppelin gives no values for the ask limits (`setAskLimits`: open
     tickets and asks per identity, the ask window, the smallest amount) or the ticket caps (`setTicketLimits`: per
     ticket and per window); `scripts/SeedInterop.s.sol` shows example values. A receipt whose delivery sends a second

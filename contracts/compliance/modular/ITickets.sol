@@ -378,7 +378,8 @@ interface ITickets {
 
     /// @dev The two validity windows: a ticket is valid until the ask's time plus the window of the route it travels.
     struct ValidityWindows {
-        /// For a ticket on the ticket route, sent before the home chain's finality.
+        /// For a ticket on the ticket route. It must cover a delivery at full finality whenever the ticket bridge
+        /// can run at full finality: before the rollout gates are live, and during a health gate trip.
         uint64 onTicketRoute;
         /// For a ticket on the receipt route, sent at full finality, which takes longer to arrive.
         uint64 onReceiptRoute;
@@ -549,9 +550,11 @@ interface ITickets {
     function answerApproval(bytes32 ticketId, uint256 approvedMax) external;
 
     /// @dev Sets the two validity windows: a ticket is valid until the ask's time plus the window of the route it
-    /// travels. A ticket at full finality takes longer to arrive, so it needs the longer window. A ticket that waits
-    /// for an approver travels the receipt route, and its answer and first send come out of that window too: the
-    /// approvers' answer time is not measured on chain, so `onReceiptRoute` is sized off chain to cover it.
+    /// travels. A ticket at full finality takes longer to arrive, so it needs the longer window. The ticket route's
+    /// bridge runs at full finality before the rollout gates are live and during a health gate trip, so
+    /// `onTicketRoute` covers that delivery whenever it can. A ticket that waits for an approver travels the receipt
+    /// route, and its answer and first send come out of that window too: the approvers' answer time is not measured
+    /// on chain, so `onReceiptRoute` is sized off chain to cover it.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
