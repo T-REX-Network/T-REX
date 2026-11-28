@@ -47,8 +47,8 @@ All notable changes to this project will be documented in this file.
     second change inside that window drops the older pair, so changes are planned four waiting times apart, which the
     token does not check. A hostile replacement (`true`) keeps no former pair and freezes asks, ticket sends, asks for
     receipts and cancels for that chain for four waiting times (`hostileChangeEndsAt`); receipts land, halves and
-    bring homes go out, and every close by hand but the cancel of an open move runs. `closeReceiptRoute` on a closed
-    route emits again. `cancelHold(ticketId)` only starts the cancel; `sendSecondHalf(ticketId, wallet)` sends every
+    bring homes go out, and every close by hand but the cancel of an open move or of one waiting for approval runs.
+    `closeReceiptRoute` on a closed route emits again. `cancelHold(ticketId)` only starts the cancel; `sendSecondHalf(ticketId, wallet)` sends every
     half of it, the first one included, and the cancel's `BRING_HOME` goes out even when the receiver's uncounted
     credit is zero. The `Ticket` that `ticketOf` returns ends with `cancelReturnsToTheSender`, the cancel's stage:
     a wallet that moved to itself is both the wallet the bring home burns and the one the return mints to. `closeByHand` mints money on hold with no ticket whose tokens left the closed chain to the

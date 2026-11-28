@@ -14,7 +14,7 @@ reference chain against it.
 | in | `TICKET` | `TicketMessage { ticketId, kind, salt, from, to, spender, amountMin, amountMax, requestedMax, token, validUntil, askBlockHash }` | stores the first copy under `ticketId`; `kind` is hashed into the id with the other terms, and home sends only a move (`kind` 0) as a ticket; a later copy is an ask for the receipt, see rule 3 |
 | in | `MOVE_OUT` | `MoveOutMessage { ticketId, half, toWallet, amount, validUntil }` | the second half of a move: mints `amount` to `toWallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
 | in | `BRING_HOME` | `BringHomeMessage { ticketId, half, wallet, amount, validUntil }` | the half of a bring home: burns `min(amount, balance)` of `wallet` once per half, strictly before the half's `validUntil`, then answers with a `RECEIPT` for that half |
-| out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, askBlockHash, seenMax, seenValidUntil, half, answer }` | one per ticket it executed, echoing the copy it executed under: its `askBlockHash`, its `amountMax` as `seenMax` and its `validUntil` as `seenValidUntil`; `half` is 0 and `answer` is `Executed`. One per move out it answered: `half` is the move out's, `from` is empty, `to` is `toWallet`, the ticket fields are zero, and either `amount` is the move out's and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired`. One per bring home half it answered: `half` is the bring home's, `from` is `wallet`, `to` is empty, the ticket fields are zero, and either `amount` is what it burned, possibly 0, and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired` |
+| out | `RECEIPT` | `ReceiptMessage { ticketId, from, to, amount, askBlockHash, seenMax, seenValidUntil, half, answer }` | one per ticket it executed, echoing the copy it executed under: its `askBlockHash`, its `amountMax` as `seenMax` and its `validUntil` as `seenValidUntil`; `half` is 0 and `answer` is `Executed`. One per ticket it answered without executing it, echoing the copy it holds the same way: `half` is 0, `amount` is 0, and `answer` is `Expired` (a first copy that arrives at or after its valid until, or a later copy after it) or `StillOpen` (a later copy before it). One per move out it answered: `half` is the move out's, `from` is empty, `to` is `toWallet`, the ticket fields are zero, and either `amount` is the move out's and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired`. One per bring home half it answered: `half` is the bring home's, `from` is `wallet`, `to` is empty, the ticket fields are zero, and either `amount` is what it burned, possibly 0, and `answer` is `Executed`, or `amount` is 0 and `answer` is `Expired` |
 
 Every message carries the envelope version 2 (`MessageTypesLib.VERSION`); a message of any other version is refused,
 on both sides.
@@ -28,11 +28,11 @@ issued the ticket, names the copy: two copies of one ask mined in two blocks sha
 `answer` says why a receipt says what it says, so a receipt of amount zero says why it is zero: `Executed` (the
 copy echoed was executed, for `amount`, possibly zero), `Expired` (never executed and past its valid until) or
 `StillOpen` (never executed, still before its valid until). A Lite reports `Executed` for every ticket it executed;
-home reads the other two once it asks a Lite for a receipt. A still open answer is not an answer to an ask: home
-raises the ticket's `seenValidUntil` up to its valid until plus the chain's full finality delivery and clock lead, and
-cancels only after an ask went unanswered for one waiting time. A still open answer on home's own ask block hash must
-echo home's own valid until: one echoing another is refused (`ReceiptRefused`, `AnotherValidUntil`), nothing is
-applied, and the compliance blocks that away chain. The Lite must ignore a ticket whose valid until is
+home reads the other two whenever a later copy, or a first copy that arrived expired, is answered. A still open
+answer is not an answer to an ask: home raises the ticket's `seenValidUntil` up to its valid until plus the chain's
+full finality delivery and clock lead, and cancels only after an ask went unanswered for one waiting time. A still
+open answer on home's own ask block hash must echo home's own valid until: one echoing another is refused
+(`ReceiptRefused`, `AnotherValidUntil`), nothing is applied, and the compliance blocks that away chain. The Lite must ignore a ticket whose valid until is
 further ahead of its own clock than its valid until bound, so a forged far valid until is never held. The bound is
 a setting of each away token, set per chain to home's longer validity window plus that chain's lag budget. Raise it
 on every away token first, and only then raise a validity window at home (`setValidityWindows`): an away token
