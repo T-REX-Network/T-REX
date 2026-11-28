@@ -62,8 +62,12 @@ pragma solidity 0.8.30;
 interface ITrustedGatewayRegistry {
 
     /// @dev Trusts a reviewed bridge at the depth, in blocks, it really waits for before it relays, or distrusts it.
-    /// Zero is full finality: a token takes a receipt route, and every message it receives, only from a trusted
-    /// bridge at depth zero. A provider with no depth setting is recorded at the depth it really has.
+    /// Zero is full finality: a token takes its receipt route, and every money message and receipt, only from a
+    /// trusted bridge at depth zero. A ticket rides the ticket route at that bridge's own depth, which the token does
+    /// not check. A provider with no depth setting is recorded at the depth it really has.
+    ///
+    /// A receipt bridge's receiving policy is immutable at full finality for every source, so a token never needs to
+    /// know which away bridge sent a receipt: whichever sent it, it was sent at full finality.
     ///
     /// The registry is shared, so a depth set again applies to every token on the network at once: a token reads the
     /// depth on every use. A distrusted bridge is never trusted again; a repaired bridge is deployed at a new address.

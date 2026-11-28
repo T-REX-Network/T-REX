@@ -32,8 +32,11 @@ All notable changes to this project will be documented in this file.
     `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. `totalSupply` is the native supply plus
     `totalAwayBalance` (away balances only) plus `totalOnHold`. On `TrustedGatewayRegistry`:
     `depthOf`, which never reverts (an unknown bridge reads zero, so a caller asks `isTrusted` first), and
-    `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for (zero is full finality). A receipt bridge is a bridge trusted at depth zero; a depth may be set again and is read on every
-    use, and a distrusted bridge is never trusted again. Every money message, and every ticket on the receipt route,
+    `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for. Zero is full finality: a token
+    takes its receipt route, and every money message and receipt, only from a trusted bridge at depth zero. A ticket
+    rides the ticket route at that bridge's own depth, which the token does not check. A depth may be set again and
+    is read on every use, and a distrusted bridge is never trusted again. A receipt bridge's receiving policy is
+    immutable at full finality for every source, so home never needs to know which away bridge sent a receipt. Every money message, and every ticket on the receipt route,
     reads the receipt bridge's own `requestedFinality()` (`IRequestedFinality`) and reverts `WrongFinality` unless it
     is full finality; a receiving policy that admits less than full finality reverts `WrongFinality` too.
     `setReceiptRoute(chainType, chainReference, bridge, awayChainSelector, awayReceiptBridge)` records the away
@@ -48,10 +51,17 @@ All notable changes to this project will be documented in this file.
     route emits again. `cancelHold(ticketId)` only starts the cancel; `sendSecondHalf(ticketId, wallet)` sends every
     half of it, the first one included, and the cancel's `BRING_HOME` goes out even when the receiver's uncounted
     credit is zero. `closeByHand` mints money on hold with no ticket whose tokens left the closed chain to the
-    sender's identity contract, after the carried part of an earlier hold. `askToMove` is refused while asks are
+    sender's identity contract, after the carried part of an earlier hold. For money on hold with no ticket that moved
+    inside the closed chain, once its cancel's bring home burned some of it and the `MOVE_OUT` of that part back to
+    the sender is past its valid until on that chain's clock, or never left, `closeByHand` mints only what burned to
+    the sender's identity contract and keeps the rest on hold, short. With no stored receipt in the read, a receipt
+    waiting at home on the closed route no longer holds `closeByHand` (no `ApplyWaitingReceiptFirst` there): the away
+    chain's own clock decides. `askToMove` is refused while asks are
     paused on the sender's or the receiver's chain (`setAsksPaused(chainKey, ...)` covers both), checks that the chain
     its first message goes to is open at the ask, also when an approval module is bound (`ChainNotOpen`), needs a
-    waiting time on a receiver's other away chain (`WaitingTimeNotSet`, checked again at every send of the ticket),
+    receiver's other away chain unblocked, under no hostile change, with a waiting time and open (`WaitingTimeNotSet`
+    and `ChainNotOpen` checked again at the first send of an approved ticket; a resend or an ask for the receipt
+    needs that chain only unblocked and under no hostile change, so it still goes out once that chain's route closed),
     counts a take of money on hold in the identity's asks per window (`AskLimitReached`), and refuses a spender on a
     home sender with `SpenderNotAllowed(spender, from, to, value)`, declared on `ITickets`. `cancelTickets` refuses a
     ticket waiting for approval while a receipt for it waits and can be applied (`ApplyWaitingReceiptFirst`).
@@ -115,7 +125,8 @@ All notable changes to this project will be documented in this file.
     waiting receipt are open to anyone.
   - *Settings, with OpenZeppelin's values for Base.* Measured times per away chain (`setMeasuredTimes`): clock lead
     30 s, full finality delivery 1,148 s, reorg slot shift 60 s. On chain, a waiting time must be at least one hour
-    and above the full finality delivery plus the clock lead; a validity window at most one day. The other sizing
+    and above the full finality delivery plus the clock lead; a validity window at most one day, the ceiling
+    OpenZeppelin asks for with no number given (the staleness the product accepts). The other sizing
     conditions (OpenZeppelin's shortest validity window 372 s and shortest waiting time 5,485 s, its clock lag of
     120 s with the reorg slot shift inside it) are checked off chain. Validity windows
     (`setValidityWindows`): 15 minutes on the ticket route, 25 minutes on the receipt route. Waiting time per away
@@ -149,6 +160,13 @@ All notable changes to this project will be documented in this file.
     fields and appends `onHoldForward` and `reservedFrom` at its end; `IComplianceLedger` gains `onHoldForwardOf`
     and `reservedFromOf`, so its interface id changes. `TREXCompliance`, `TREXEligibility`, `TREXIdentityRegistryStorage`, `TREXAccessManager` and the other modules' namespaces are
     unchanged.
+  - *Docs and the away token the tests run against.* `docs/satellite-lite.md` names the `AnotherValidUntil` refusal
+    (a still open answer on home's own ask block hash echoing another valid until: nothing applied, its chain
+    blocked) and why home need not know a receipt's away bridge. `docs/compliance-modules.md` states `DELEGATION`
+    as told at Done with both identities, the position moving when they differ, and a bring home whose funded home
+    wallet the ledger counts under another identity as sent back to the away wallet, not refused. The test
+    `SatelliteLiteMock` has two receivers, an away ticket bridge and an away receipt bridge, takes a `MOVE_OUT` or a
+    `BRING_HOME` only from the receipt bridge and sends every receipt through it; its constructor takes both.
 
 ### Added
 
