@@ -83,7 +83,6 @@ contract ComplianceLibrariesAbiUnitTest is Test {
         assertEq(ITickets.ReceiptWithoutTicket.selector, EventsLib.ReceiptWithoutTicket.selector);
         assertEq(ITickets.ReceiptUnknown.selector, EventsLib.ReceiptUnknown.selector);
         assertEq(ITickets.HoldTaken.selector, EventsLib.HoldTaken.selector);
-        assertEq(ITickets.HoldCancelled.selector, EventsLib.HoldCancelled.selector);
         assertEq(ITickets.CancelHoldShort.selector, EventsLib.CancelHoldShort.selector);
         assertEq(ITickets.ClosedByHand.selector, EventsLib.ClosedByHand.selector);
     }

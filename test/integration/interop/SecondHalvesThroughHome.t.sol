@@ -581,15 +581,26 @@ contract SecondHalvesThroughHomeTest is SecondHalvesSuiteTest {
         boundCompliance.sendSecondHalf(id, bobOnB);
     }
 
-    function test_sendSecondHalf_reverts_while_aHostilePeerChangeRuns() public {
-        bytes32 id = _firstHalfLanded(MOVED);
-        vm.warp(_secondSendDueAt(id));
+    /// @notice A hostile change freezes asks and cancels, not halves: an owed half goes out while it runs, pinned to
+    ///         the replacement peer.
+    function test_sendSecondHalf_sendsAnOwedHalf_whileAHostilePeerChangeRuns() public {
+        bytes32 id = _askAToB(MOVED);
+        uint256 index = _liteSettles(polygonGateway, token, _settlement(id, aliceOnA, bobOnB, MOVED));
+        _bSendsFail();
+        polygonGateway.relay(index);
+        vm.clearMockedCalls();
+        bytes memory replacementPeer = InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer"));
         vm.prank(deployer);
-        token.replaceHostilePeer(optimism, InteroperableAddress.formatEvmV1(OPTIMISM, makeAddr("replacementPeer")));
-        uint64 endsAt = token.hostileChangeEndsAt(optimism);
+        token.replaceHostilePeer(optimism, replacementPeer);
+        assertGt(token.hostileChangeEndsAt(optimism), block.timestamp, "the hostile change runs");
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, optimism, endsAt));
         boundCompliance.sendSecondHalf(id, bobOnB);
+
+        ITickets.Ticket memory sent = boundCompliance.ticketOf(id);
+        assertEq(sent.secondHalfSends, 1, "the half went out");
+        assertFalse(sent.secondHalfOwed, "nothing owed");
+        (, bytes32 pinnedPeerKey) = token.pinOf(MessageTypesLib.halfKeyOf(id, 1));
+        assertEq(pinnedPeerKey, keccak256(replacementPeer), "pinned to the replacement peer");
     }
 
     /* ----- Forward refused, so the money goes back ----- */

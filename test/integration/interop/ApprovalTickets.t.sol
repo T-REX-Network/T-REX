@@ -618,9 +618,10 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, stopWaitingAt));
         boundCompliance.cancelHold(ticketId, bobSat);
 
+        uint256 heldAmount = boundCompliance.ticketOf(ticketId).moved;
         vm.warp(stopWaitingAt);
-        vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.HoldCancelled(ticketId);
+        vm.expectEmit(true, true, false, false, address(boundCompliance));
+        emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, heldAmount, 0);
         vm.prank(stranger);
         boundCompliance.cancelHold(ticketId, bobSat);
     }

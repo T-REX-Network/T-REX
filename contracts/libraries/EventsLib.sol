@@ -215,8 +215,6 @@ library EventsLib {
     event ReceiptUnknown(bytes32 indexed halfKey, bytes32 indexed chainKey);
     /// @notice The ask mined again took the money on hold with no ticket under `ticketId`.
     event HoldTaken(bytes32 indexed ticketId);
-    /// @notice The cancel of the money on hold with no ticket under `ticketId` started.
-    event HoldCancelled(bytes32 indexed ticketId);
     /// @notice The cancel of the money on hold under `ticketId` burned `missing` less than it holds: that rest stays
     ///         on hold under the sender until carried credit comes back to the receiver, or a human acts.
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);

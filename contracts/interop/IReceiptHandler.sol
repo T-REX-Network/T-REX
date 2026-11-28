@@ -91,8 +91,8 @@ interface IReceiptHandler {
     ///   the id, when its sender is not on the chain that sent it, when its receiver is not a well formed wallet, or,
     ///   for a ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
     ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
-    ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt, or one from a
-    ///   wallet to itself, ends the id `Done`; any other puts its amount on hold under the sender with no destination,
+    ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt ends the id
+    ///   `Done`; any other puts its amount on hold under the sender with no destination,
     ///   gives uncounted credit to a receiver on the same away chain, and blocks nobody (`ReceiptWithoutTicket`). For a
     ///   ticket home wrote, a receipt that moved something is first held to that ticket's terms: one that breaks them
     ///   blocks its chain and is still booked. The same ask mined again takes it; otherwise anyone cancels it with

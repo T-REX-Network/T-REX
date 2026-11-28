@@ -106,8 +106,8 @@ library HoldLib {
     /* ----- A receipt with no ticket ----- */
 
     /// @dev See {IReceiptHandler-receiveReceipt}: books a good first-half receipt that no ticket home sent answers,
-    ///  once {canBeBookedNow} holds and its hash is written. A receipt that moved nothing, or moved tokens from a wallet
-    ///  to itself, ends the id `Done`, so it can never be asked. Any other puts its amount on hold under the sender with
+    ///  once {canBeBookedNow} holds and its hash is written. A receipt that moved nothing ends the id `Done`, so it can
+    ///  never be asked. Any other puts its amount on hold under the sender with
     ///  no destination, and gives uncounted credit to a receiver on the same away chain. A ticket home wrote and never
     ///  sent gives back what its ask reserved first: no copy of home's was executed, so it is never applied as a move.
     /// @param token the token the compliance is bound to
@@ -366,11 +366,9 @@ library HoldLib {
 
     /* ----- Private: booking ----- */
 
-    /// @dev Whether a receipt moved nothing at home's level: nothing at all, or from a wallet to itself.
+    /// @dev Whether a receipt moved nothing: a zero answer.
     function _movesNothing(MessageTypesLib.ReceiptMessage calldata receipt) private pure returns (bool) {
-        bool nothingMoved = receipt.amount == 0;
-        bool toItself = keccak256(receipt.from) == keccak256(receipt.to);
-        return nothingMoved || toItself;
+        return receipt.amount == 0;
     }
 
     /// @dev Writes a record for an id home has no record of: the wallets and identities the receipt names. The sender's
@@ -405,7 +403,6 @@ library HoldLib {
         ticket.seenValidUntil = receipt.seenValidUntil;
         ticket.askBlockHash = receipt.askBlockHash;
         ticket.stopWaitingAt = uint64(block.timestamp) + 4 * waitingTime;
-        if (ticket.stopWaitingAt > store.latestStopWaitingAt) store.latestStopWaitingAt = ticket.stopWaitingAt;
     }
 
     /// @dev The sender spent `carried` more than its away balance: that much of its uncounted credit, which the latest
@@ -583,7 +580,6 @@ library HoldLib {
     function _cancel(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata receiver, address token) private {
         bytes32 laterHoldId = ticket.carriedBy;
         require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
-        if (ticket.secondHalfToKey == bytes32(0)) emit EventsLib.HoldCancelled(ticketId);
 
         if (_insideOneAwayChain(ticket)) {
             _sendTheBringHome(ticket, ticketId, receiver, token);

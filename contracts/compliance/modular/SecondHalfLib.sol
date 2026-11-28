@@ -252,7 +252,6 @@ library SecondHalfLib {
         // The receipt that sent the money on hold came from the sender's chain: nothing goes out on its word while
         // that chain is blocked.
         TicketLib.requireAwayChainNotBlocked(ticket.fromChainKey);
-        TicketLib.requireNoHostileChange(token, chainKey);
 
         if (ticket.secondHalfOwed) {
             // A half whose send failed never left: it goes under its own number. A dead half is replaced.

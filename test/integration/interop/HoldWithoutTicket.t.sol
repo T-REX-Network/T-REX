@@ -473,8 +473,8 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         polygonGateway.relay(receiptIndex);
         rules.setAllow(false);
 
-        vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.HoldCancelled(ticketId);
+        vm.expectEmit(true, true, false, false, address(boundCompliance));
+        emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, FOUR, 0);
         _askAgain(aliceSat, bobSat, FOUR, salt);
         assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "the bring home takes bob's credit");
 
@@ -569,8 +569,8 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         boundCompliance.cancelHold(ticketId, bobSat);
 
         vm.warp(stopWaitingAt);
-        vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.HoldCancelled(ticketId);
+        vm.expectEmit(true, true, false, false, address(boundCompliance));
+        emit EventsLib.SecondHalfSent(ticketId, 1, polygon, bobSat, FOUR, 0);
         boundCompliance.cancelHold(ticketId, bobSat);
 
         // The bring home burns 4 on bob, the move out mints 4 to alice, and its receipt ends the hold.
@@ -908,19 +908,22 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertStatus(ticketId, ITickets.TicketStatus.WaitingForApproval, "the ticket is untouched");
     }
 
-    function test_receiveReceipt_endsTheIdDone_whenTheReceiptMovedTokensToTheSameWallet() public {
+    /// @notice Only a zero answer moves nothing: a receipt from a wallet to itself is booked like any other, on hold
+    ///         under the sender with the same wallet's uncounted credit.
+    function test_receiveReceipt_booksOnHold_whenTheReceiptMovedTokensToTheSameWallet() public {
         bytes32 unknownId = keccak256("from a wallet to itself");
         MessageTypesLib.ReceiptMessage memory receipt = _receiptWithNoTicket(unknownId, aliceSat, aliceSat, FOUR);
 
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptApplied(unknownId, polygon, 0);
+        emit EventsLib.ReceiptWithoutTicket(unknownId, polygon, aliceSat, aliceSat, FOUR);
         polygonGateway.relay(index);
 
-        _assertStatus(unknownId, ITickets.TicketStatus.Done, "nothing moved at home's level");
-        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
-        assertEq(token.onHoldOf(unknownId), 0);
+        _assertStatus(unknownId, ITickets.TicketStatus.OnHold, "booked on hold");
+        assertEq(token.onHoldOf(unknownId), FOUR, "the amount is on hold");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "it left alice's away balance");
+        assertEq(boundCompliance.uncountedCreditOf(aliceSat), FOUR, "and came back to her uncounted");
     }
 
     function test_applyWaitingReceipt_reverts_when_theSenderCannotCoverAReceiptWithNoTicket() public {

@@ -120,7 +120,6 @@ interface ITickets {
     );
     event ReceiptUnknown(bytes32 indexed halfKey, bytes32 indexed chainKey);
     event HoldTaken(bytes32 indexed ticketId);
-    event HoldCancelled(bytes32 indexed ticketId);
     event CancelHoldShort(bytes32 indexed ticketId, uint256 missing);
     event ClosedByHand(bytes32 indexed ticketId, uint256 returnedAmount, uint64 awayBlockNumber, uint64 awayClockTime);
 
@@ -775,9 +774,8 @@ interface ITickets {
     /// - It must hold money on hold with a second half, or be an open bring home, and that half must be owed or have
     ///   sends left; otherwise reverts with `SecondHalfNotOwed`.
     /// - `wallet` must have the key of the half's wallet; otherwise reverts with `ValidationBodyMismatch`.
-    /// - The token must not be paused, `wallet`'s chain and the sender's chain not blocked, and no hostile change
-    ///   running on `wallet`'s chain; otherwise reverts with `TokenPaused`, `AwayChainBlocked` or
-    ///   `HostileChangeNotOver`.
+    /// - The token must not be paused, and `wallet`'s chain and the sender's chain not blocked; otherwise reverts
+    ///   with `TokenPaused` or `AwayChainBlocked`. A hostile change does not stop a half: it goes to its pinned peer.
     /// - A send again only at or after its fixed time; otherwise reverts with `SendNotDue`.
     /// - A new half only below `MAX_NEW_HALVES`; otherwise reverts with `NoNewHalfLeft`.
     /// - A send again only to the half's pinned peer; otherwise the token reverts with `PeerChanged`.
@@ -846,8 +844,7 @@ interface ITickets {
     /// - A first cancel only at or after `stopWaitingAt`; otherwise reverts with `CancelNotDue`. A cancel already
     ///   started only when its next bring home is owed; otherwise reverts with `TicketNotCancellable`.
     ///
-    /// Emits `HoldCancelled` on the first cancel, then `SecondHalfSent` and the token's `HalfPinned` and
-    /// `ProtocolMessageSent`, or `CancelHoldShort` when the receiver has no uncounted credit left to burn.
+    /// Emits `SecondHalfSent` and the token's `HalfPinned` and `ProtocolMessageSent`, or `CancelHoldShort` when the receiver has no uncounted credit left to burn.
     /// @param ticketId The id the money on hold is kept under.
     /// @param receiver ERC-7930 interoperable address of the receiver the receipt named, read off
     /// `ReceiptWithoutTicket`.
