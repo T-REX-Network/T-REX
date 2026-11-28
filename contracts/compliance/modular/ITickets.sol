@@ -760,7 +760,9 @@ interface ITickets {
     ///
     /// An owed half, one that died answered zero after its valid until, is sent as a new half, with a fresh valid
     /// until: the send time plus the waiting time of its chain. At most `MAX_NEW_HALVES` halves per money on hold.
-    /// A half whose send failed inside its receipt's delivery never left, and is sent under its own number.
+    /// A half whose send failed inside its receipt's delivery never left, and is sent under its own number. An owed
+    /// bring home of the cancel of money on hold is sent as `cancelHold` sends it, for what the receiver's uncounted
+    /// credit covers, never while a later hold carries this one's credit (`LaterHoldStillCarries`).
     ///
     /// Otherwise the latest half is sent again, byte for byte, as an ask for its receipt: the away token answers with
     /// its stored receipt or a zero receipt. At most `MAX_SENDS_PER_HALF` sends per half, at fixed times: the second
@@ -831,7 +833,8 @@ interface ITickets {
     /// away chain, they go back to the sender by a `MOVE_OUT` at once. A bring home that burns less than it asked is a
     /// short cancel: the rest stays on hold, announced, and is not sent again until carried credit comes back to the
     /// receiver; then `cancelHold` sends it again. Money on hold whose credit a later hold carries is cancelled after
-    /// that later one, last in, first out. A bring home that expired unexecuted is sent again with `cancelHold`.
+    /// that later one, last in, first out. A bring home that expired unexecuted is sent again with `cancelHold` or
+    /// `sendSecondHalf`.
     ///
     /// Requirements:
     /// - `ticketId` must be recorded; otherwise reverts with `UnknownTicket`.
@@ -860,15 +863,15 @@ interface ITickets {
     /// - an open move, or one waiting for approval: it is cancelled once that chain's clock is past the latest valid until its copies can carry:
     ///   home's own plus the chain's reorg slot shift, the one a still open answer reported, and the stored copy's;
     /// - an open bring home: it ends `Done` with nothing moved once that chain's clock is past its half's valid until;
-    /// - money on hold whose second half goes to the receiver: once that chain's clock is past the half's valid until,
-    ///   the money goes back to the sender by a new `MOVE_OUT`, minted at once to a home sender;
+    /// - money on hold, its second half going to the receiver or back to the sender: once that chain's clock is past
+    ///   the half's valid until, the money goes back to the sender by a new `MOVE_OUT` while the sender's chain has a
+    ///   receipt route; otherwise it is minted at once to a home sender, or to the sender's identity contract;
     /// - money on hold with no ticket, moved inside that chain: what the receiver still holds as uncounted credit is
     ///   applied as the move inside that chain it was, never minted to the sender, after the carried part of an
     ///   earlier hold is applied first. Last in, first out: never while a later hold carries this one's credit. Each
     ///   move counts for the identity its receiver has at the close, not the one read when the receipt was booked.
     ///   The rules are asked again about each move; one they refuse is announced with `MoveBreachedRule`, never
     ///   refused, since the away token already made it.
-    /// Money going back to a sender whose own chain is the closed one is not closed by hand: it waits for that chain.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.

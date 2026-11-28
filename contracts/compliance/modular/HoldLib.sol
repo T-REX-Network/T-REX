@@ -582,37 +582,13 @@ library HoldLib {
         require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
 
         if (_insideOneAwayChain(ticket)) {
-            _sendTheBringHome(ticket, ticketId, receiver, token);
+            SecondHalfLib.sendTheCancelsBringHome(ticket, ticketId, receiver, token);
             return;
         }
         ticket.secondHalfToKey = ticket.fromKey;
         ticket.amountMax = ticket.moved;
         SecondHalfLib.takeANewHalf(ticket, ticketId);
         SecondHalfLib.sendTheLatestHalf(ticket, ticketId, ticket.fromWallet, token);
-    }
-
-    /// @dev The cancel's `BRING_HOME` on the receiver, for at most its uncounted credit, which it takes until the
-    ///  answer gives back what did not burn. With no credit left there is nothing to burn: a short cancel at once.
-    function _sendTheBringHome(ITickets.Ticket storage ticket, bytes32 ticketId, bytes calldata receiver, address token)
-        private
-    {
-        TicketLib.ValidationStorage storage store = TicketLib.layout();
-        bytes32 receiverKey = ticket.toKey;
-        uint256 credit = store.uncountedCredit[receiverKey];
-        uint256 amount = ticket.moved;
-        if (credit < amount) amount = credit;
-        ticket.secondHalfToKey = receiverKey;
-        if (amount == 0) {
-            ticket.secondHalfOwed = false;
-            ticket.shortCancel = true;
-            emit EventsLib.CancelHoldShort(ticketId, ticket.moved);
-            return;
-        }
-
-        store.uncountedCredit[receiverKey] = credit - amount;
-        ticket.amountMax = amount;
-        SecondHalfLib.takeANewHalf(ticket, ticketId);
-        SecondHalfLib.sendTheLatestHalf(ticket, ticketId, receiver, token);
     }
 
     /// @dev The answer to the cancel's bring home. What it did not burn is the receiver's uncounted credit again. A

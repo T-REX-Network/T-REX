@@ -769,6 +769,30 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
     }
 
+    /// @notice An owed bring home of the cancel is a half like any other: `sendSecondHalf` sends the next one, for
+    ///         what the receiver's credit allows now.
+    function test_sendSecondHalf_sendsTheCancelsBringHomeAgain_whenItExpiredUnexecuted() public {
+        (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        polygonGateway.relay(receiptIndex);
+        vm.warp(boundCompliance.ticketOf(ticketId).stopWaitingAt);
+        boundCompliance.cancelHold(ticketId, bobSat);
+        vm.warp(boundCompliance.ticketOf(ticketId).secondHalfValidUntil);
+        _relayAll(polygonGateway);
+        ITickets.Ticket memory held = boundCompliance.ticketOf(ticketId);
+        assertTrue(held.secondHalfOwed, "owed");
+
+        vm.prank(makeAddr("anyone"));
+        boundCompliance.sendSecondHalf(ticketId, bobSat);
+
+        ITickets.Ticket memory resent = boundCompliance.ticketOf(ticketId);
+        assertEq(resent.half, held.half + 1, "a new bring home");
+        assertEq(resent.amountMax, FOUR, "for what bob's credit allows now");
+        assertEq(boundCompliance.uncountedCreditOf(bobSat), 0, "the bring home takes bob's credit");
+        _relayAll(polygonGateway);
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "the hold is over");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE);
+    }
+
     function test_sendSecondHalf_sendsTheReturnAgain_whenTheMoveOutExpiredUnexecuted() public {
         (bytes32 ticketId,, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(receiptIndex);

@@ -201,7 +201,8 @@ home's clock ends them: the away chain may still have minted or burned. The oper
 3. Read the away token on that chain from one final block: its stored receipt for the half and its clock. Call
    `closeByHand(ticketId, receiver, reading)` on the compliance. A stored receipt is applied as if it had arrived;
    without one, once that chain's clock is past the half's valid until, the money goes back to the sender, and an
-   open bring home ends with nothing moved.
+   open bring home ends with nothing moved. It goes back by a move out while the sender's own chain has a receipt
+   route; otherwise it is minted at home, to a home sender or to the sender's identity contract.
 4. Set the receipt route again once every ticket of that chain is decided.
 
 ## Changing a route or a peer

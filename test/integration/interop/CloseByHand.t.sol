@@ -799,8 +799,9 @@ contract CloseByHandTest is HoldsSuiteTest {
         assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
     }
 
-    /// @notice Money going back to a sender whose own chain is the closed one waits for that chain.
-    function test_closeByHand_reverts_when_theReturnGoesToAClosedSenderChain() public {
+    /// @notice Money going back to a sender whose own chain is the closed one is minted at home to the sender's
+    ///         identity contract: no wallet of it there can be reached.
+    function test_closeByHand_mintsToTheSendersIdentityContract_whenTheReturnGoesToAClosedSenderChain() public {
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobOptimismSat, FOUR, FOUR);
         _relayAll(polygonGateway);
         rules.setAllow(false);
@@ -808,9 +809,32 @@ contract CloseByHandTest is HoldsSuiteTest {
         polygonLite.execute(ticketId, FOUR);
         _relayNext(polygonGateway); // the receipt lands; bob is refused, the move out goes back to alice
         _closeEvmChain(token, POLYGON);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+        uint256 supplyBefore = token.totalSupply();
 
-        _expectNotCancellable(ticketId, ITickets.TicketStatus.OnHold);
-        boundCompliance.closeByHand(ticketId, bobOptimismSat, _reading(uint64(block.timestamp + 1 days)));
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ClosedByHand(ticketId, FOUR, uint64(block.number), validUntil);
+        _closeByHand(ticketId, bobOptimismSat, _reading(validUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        assertEq(token.onHoldOf(ticketId), 0, "nothing left on hold");
+        assertEq(token.totalSupply(), supplyBefore, "the supply does not move");
+    }
+
+    /// @notice The receiver's chain is closed, and the sender's chain was closed too: the return cannot go back by a
+    ///         move out, so it is minted at home to the sender's identity contract.
+    function test_closeByHand_mintsToTheSendersIdentityContract_whenBothAwayChainsAreClosed() public {
+        bytes32 ticketId = _moveToBobOnOptimismUntilTheMoveOutIsOut(FOUR);
+        _closeEvmChain(token, OPTIMISM);
+        _closeEvmChain(token, POLYGON);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).secondHalfValidUntil;
+
+        _closeByHand(ticketId, bobOptimismSat, _reading(validUntil));
+
+        _assertStatus(ticketId, ITickets.TicketStatus.Done, "returned");
+        assertEq(token.balanceOf(address(aliceIdentity)), FOUR, "minted to alice's identity contract");
+        assertEq(token.awayBalanceOf(aliceSat), ALICE_AWAY_BALANCE - FOUR, "nothing goes back to her away wallet");
     }
 
     function test_closeByHand_reverts_when_theHoldWithNoTicketLeftItsChain() public {

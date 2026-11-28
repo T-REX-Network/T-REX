@@ -241,10 +241,14 @@ library SecondHalfLib {
         bool anOpenBringHome =
             ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
         require(onHoldWithAHalf || anOpenBringHome, ErrorsLib.SecondHalfNotOwed(ticketId));
-        // The bring home of a cancel of money on hold with no ticket is sent again only while it is out: once it is
-        // answered, {HoldLib-cancelHold} decides whether another one goes, for how much.
+        // The bring home of a cancel of money on hold with no ticket is sent again while it is out, or sent anew once
+        // it is owed, for what the receiver's uncounted credit covers then.
         bool aCancelsBringHome = !ticket.written && ticket.secondHalfToKey == ticket.toKey;
-        if (aCancelsBringHome) require(TicketLib.aBringHomeIsOut(ticket), ErrorsLib.SecondHalfNotOwed(ticketId));
+        bool anOwedCancelsBringHome = aCancelsBringHome && ticket.secondHalfOwed;
+        if (aCancelsBringHome) {
+            bool sendable = TicketLib.aBringHomeIsOut(ticket) || anOwedCancelsBringHome;
+            require(sendable, ErrorsLib.SecondHalfNotOwed(ticketId));
+        }
         require(WalletKeyLib.canonicalKey(wallet) == ticket.secondHalfToKey, ErrorsLib.ValidationBodyMismatch(ticketId));
         bytes32 chainKey = _chainKeyOf(wallet);
         TicketLib.requireTokenRunning(token);
@@ -253,6 +257,13 @@ library SecondHalfLib {
         // that chain is blocked.
         TicketLib.requireAwayChainNotBlocked(ticket.fromChainKey);
 
+        if (anOwedCancelsBringHome) {
+            // Last in, first out, as at the cancel: never while a later hold carries this one's credit.
+            bytes32 laterHoldId = ticket.carriedBy;
+            require(laterHoldId == bytes32(0), ErrorsLib.LaterHoldStillCarries(ticketId, laterHoldId));
+            sendTheCancelsBringHome(ticket, ticketId, wallet, token);
+            return;
+        }
         if (ticket.secondHalfOwed) {
             // A half whose send failed never left: it goes under its own number. A dead half is replaced.
             bool latestHalfLeft = ticket.secondHalfSends != 0;
@@ -307,9 +318,10 @@ library SecondHalfLib {
 
     /// @dev See {ITickets-closeByHand}: {ReceiptLib-closeByHand} found no stored receipt in the read of the half's
     ///  closed chain. Once that chain's clock is past the half's valid until, the half can no longer be executed
-    ///  there: an open bring home ends with nothing moved, and money going to the receiver goes back to the sender,
-    ///  only the latest half's amount, which for a move is all its money on hold. A return is new money on hold, so
-    ///  its halves are counted from zero.
+    ///  there: an open bring home ends with nothing moved, and the money on hold goes back to the sender, only the
+    ///  latest half's amount, which for a move is all its money on hold. By a new return half while the sender's chain
+    ///  has a receipt route, its halves counted from zero; minted to a home sender, or, when the sender's chain is
+    ///  closed too, to the sender's identity contract, since no away wallet can be reached.
     /// @param awayClockTime the timestamp of the block read on the half's chain
     /// @param token the token the compliance is bound to
     /// @return returnedAmount what goes back to the sender
@@ -321,8 +333,8 @@ library SecondHalfLib {
         ITickets.Ticket storage ticket = store.validations[ticketId];
         bool anOpenBringHome =
             ticket.kind == ITickets.TicketKind.BRING_HOME && ticket.status == ITickets.TicketStatus.Open;
-        bool goesToTheReceiver = ticket.status == ITickets.TicketStatus.OnHold && ticket.secondHalfToKey == ticket.toKey;
-        require(anOpenBringHome || goesToTheReceiver, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
+        bool onHold = ticket.status == ITickets.TicketStatus.OnHold;
+        require(anOpenBringHome || onHold, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
         uint64 validUntil = ticket.secondHalfValidUntil;
         require(awayClockTime >= validUntil, ErrorsLib.AwayClockBeforeValidUntil(ticketId, awayClockTime, validUntil));
 
@@ -334,15 +346,30 @@ library SecondHalfLib {
 
         returnedAmount = ticket.moved;
         (bool senderAtHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
-        if (senderAtHome) {
-            TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
-            IToken(token).finishMove(ticket.fromWallet, ticket.fromWallet, returnedAmount, ticketId);
+        bool sendersChainClosed = ITREXMessaging(token).receiptRouteFor(ticket.fromChainKey) == address(0);
+        if (senderAtHome || sendersChainClosed) {
+            _mintTheReturnAtHome(ticket, ticketId, returnedAmount, senderAtHome, token);
             return returnedAmount;
         }
         TicketLib.turnTheHoldBack(ticket);
         ticket.newHalves = 0;
         takeANewHalf(ticket, ticketId);
         sendTheLatestHalf(ticket, ticketId, ticket.fromWallet, token);
+    }
+
+    /// @dev Ends money on hold by minting it at home: to a home sender's own wallet, or to the sender's identity
+    ///  contract when the sender's away chain has no receipt route, so no wallet of it there can be reached.
+    function _mintTheReturnAtHome(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        uint256 amount,
+        bool senderAtHome,
+        address token
+    ) private {
+        TicketLib.moveTo(ticket, ITickets.TicketStatus.Done, token);
+        bytes memory receiver = _homeEnvelopeOf(ticket.fromIdentity);
+        if (senderAtHome) receiver = ticket.fromWallet;
+        IToken(token).finishMove(ticket.fromWallet, receiver, amount, ticketId);
     }
 
     /* ----- Private: a bring home ----- */
@@ -683,6 +710,34 @@ library SecondHalfLib {
     }
 
     /* ----- Sending a half, shared with {HoldLib} ----- */
+
+    /// @dev The cancel's `BRING_HOME` on the receiver, for at most its uncounted credit, which it takes until the
+    ///  answer gives back what did not burn. With no credit left there is nothing to burn: a short cancel at once.
+    ///  Both doors send it: {HoldLib-cancelHold} and, once a bring home of the cancel is owed, {sendSecondHalf}.
+    function sendTheCancelsBringHome(
+        ITickets.Ticket storage ticket,
+        bytes32 ticketId,
+        bytes calldata receiver,
+        address token
+    ) internal {
+        TicketLib.ValidationStorage storage store = TicketLib.layout();
+        bytes32 receiverKey = ticket.toKey;
+        uint256 credit = store.uncountedCredit[receiverKey];
+        uint256 amount = ticket.moved;
+        if (credit < amount) amount = credit;
+        ticket.secondHalfToKey = receiverKey;
+        if (amount == 0) {
+            ticket.secondHalfOwed = false;
+            ticket.shortCancel = true;
+            emit EventsLib.CancelHoldShort(ticketId, ticket.moved);
+            return;
+        }
+
+        store.uncountedCredit[receiverKey] = credit - amount;
+        ticket.amountMax = amount;
+        takeANewHalf(ticket, ticketId);
+        sendTheLatestHalf(ticket, ticketId, receiver, token);
+    }
 
     /// @dev Numbers a new second half, within the bound of new halves per money on hold.
     function takeANewHalf(ITickets.Ticket storage ticket, bytes32 ticketId) internal {
