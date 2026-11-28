@@ -179,8 +179,8 @@ library TicketLib {
     uint64 internal constant MIN_WAITING_TIME = 1 hours;
 
     /// @dev The longest validity window, in seconds: how old the rules may be when an away token executes a ticket,
-    ///  OpenZeppelin's staleness the product accepts (V_stale). OpenZeppelin gives no number: one day until the
-    ///  owner gives it.
+    ///  the ceiling OpenZeppelin asks for (OZ CL 36): the staleness the product accepts (V_stale). OpenZeppelin gives
+    ///  no number: one day until the owner gives it.
     uint64 internal constant LONGEST_VALIDITY_WINDOW = 1 days;
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
