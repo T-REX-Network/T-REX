@@ -873,7 +873,9 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         assertEq(boundCompliance.ticketOf(unknownId).fromIdentity, address(0));
     }
 
-    function test_receiveReceipt_blocksTheChain_whenAnExpiredAnswerWithNoTicketMovedSomething() public {
+    /// @notice The answer mark is not a refusal reason: an expired answer that moved something, with no ticket, is
+    ///         booked on hold like any receipt with no ticket and blocks nobody.
+    function test_receiveReceipt_booksOnHold_whenAnExpiredAnswerWithNoTicketMovedSomething() public {
         bytes32 unknownId = keccak256("expired yet moved");
         MessageTypesLib.ReceiptMessage memory receipt = _receiptWithNoTicket(unknownId, aliceSat, bobSat, FOUR);
         receipt.answer = MessageTypesLib.ReceiptAnswer.Expired;
@@ -881,13 +883,12 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         uint256 index = _awayTokenSends(polygonGateway, polygonLite, receipt);
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
-        emit EventsLib.ReceiptRefused(
-            unknownId, polygon, FOUR, receipt.askBlockHash, ITickets.ReceiptRefusal.ExpiredYetMoved
-        );
+        emit EventsLib.ReceiptWithoutTicket(unknownId, polygon, aliceSat, bobSat, FOUR);
         polygonGateway.relay(index);
 
-        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
-        assertEq(boundCompliance.ticketOf(unknownId).fromIdentity, address(0), "nothing booked");
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nobody is blocked");
+        assertEq(token.onHoldOf(unknownId), FOUR, "the amount is on hold");
+        assertEq(uint8(boundCompliance.statusOf(unknownId)), uint8(ITickets.TicketStatus.OnHold), "on hold");
     }
 
     function test_receiveReceipt_blocksTheChain_whenANeverSentTicketsReceiptNamesOtherWallets() public {

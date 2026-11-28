@@ -88,9 +88,8 @@ interface IReceiptHandler {
     ///   and no chain is blocked.
     /// - A first-half receipt that no ticket home sent answers: an id home has no record of, or a move home wrote and
     ///   never sent, waiting for approval or cancelled before it left. It is a bad receipt when another body came for
-    ///   the id, when its sender is not on the chain that sent it, when its receiver is not a well formed wallet, when
-    ///   an expired answer moved something, or, for a
-    ///   ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
+    ///   the id, when its sender is not on the chain that sent it, when its receiver is not a well formed wallet, or,
+    ///   for a ticket home wrote, when it names other wallets. Otherwise it waits like any receipt, while the token is
     ///   stopped, its chain is blocked, its sender has no identity or cannot cover the amount with its away balance
     ///   and the uncounted credit it may carry. Then its hash is written and it is booked: a zero receipt, or one from a
     ///   wallet to itself, ends the id `Done`; any other puts its amount on hold under the sender with no destination,
@@ -99,8 +98,7 @@ interface IReceiptHandler {
     ///   blocks its chain and is still booked. The same ask mined again takes it; otherwise anyone cancels it with
     ///   `cancelHold`.
     /// - A bad receipt: another body for a half that already has one, applied or waiting. For the ticket's own half:
-    ///   a chain that is not the sender's, wallets that are not the ticket's, or an expired answer that moved
-    ///   something. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet
+    ///   a chain that is not the sender's, or wallets that are not the ticket's. For a second half, or a half of the cancel of money on hold: a half home never sent, a wallet
     ///   that is not the half's, a chain that is not the one that wallet is on, a sender named, or anything but a
     ///   mint of the money on hold or a zero answer that the half expired; an older half may only answer zero. It is refused (`ReceiptRefused`, with its reason), nothing is applied,
     ///   and the chain that sent it is blocked.

@@ -317,8 +317,8 @@ library ReceiptLib {
     }
 
     /// @dev A first-half receipt that no ticket home sent answers is bad when another body came for the id, when its
-    ///  sender is not on the chain it came from, when its receiver is not a well formed wallet, when an expired answer
-    ///  still moved something, or, for a ticket home wrote, when it names other wallets. With no ticket to compare it
+    ///  sender is not on the chain it came from, when its receiver is not a well formed wallet, or, for a ticket home
+    ///  wrote, when it names other wallets. With no ticket to compare it
     ///  to, a receipt is held to the chain that holds its sender: no other away chain can move that sender's tokens.
     ///  A malformed wallet is refused here, not reverted: nothing may revert the delivery once it is admitted.
     /// @return bad whether the receipt is bad
@@ -339,8 +339,6 @@ library ReceiptLib {
         if (!fromTheSendersChain) return (true, ITickets.ReceiptRefusal.WrongChain);
         (bool toIsAWallet,,,) = WalletKeyLib.tryParse(receipt.to);
         if (!toIsAWallet) return (true, ITickets.ReceiptRefusal.WrongWallets);
-        bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
-        if (expiredYetMoved) return (true, ITickets.ReceiptRefusal.ExpiredYetMoved);
 
         ITickets.Ticket storage ticket = store.validations[receipt.ticketId];
         if (!TicketLib.isRecorded(store, receipt.ticketId)) return (false, reason);
@@ -479,7 +477,7 @@ library ReceiptLib {
     }
 
     /// @dev Whether a first-half receipt answers the ticket: from the chain the ticket went to, for the ticket's
-    ///  wallets, and not an expired answer that still moved something.
+    ///  wallets.
     /// @return answers whether it answers the ticket
     /// @return reason why not, when it does not
     function _answersTheTicket(
@@ -492,9 +490,7 @@ library ReceiptLib {
         bool fromTheTicketsSender = keccak256(receipt.from) == ticket.fromKey;
         bool toTheTicketsReceiver = keccak256(receipt.to) == ticket.toKey;
         bool namesTheTicketsWallets = fromTheTicketsSender && toTheTicketsReceiver;
-        if (!namesTheTicketsWallets) return (false, ITickets.ReceiptRefusal.WrongWallets);
-        bool expiredYetMoved = receipt.answer == MessageTypesLib.ReceiptAnswer.Expired && receipt.amount != 0;
-        return (!expiredYetMoved, ITickets.ReceiptRefusal.ExpiredYetMoved);
+        return (namesTheTicketsWallets, ITickets.ReceiptRefusal.WrongWallets);
     }
 
     /// @dev Whether a receipt answers a second half home sent: the latest half, sent at least once, or an older one;

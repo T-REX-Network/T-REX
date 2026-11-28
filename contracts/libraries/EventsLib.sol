@@ -284,8 +284,7 @@ library EventsLib {
     /// @notice The pauser deleted the receipt waiting under `halfKey` while its away chain was blocked.
     event WaitingReceiptRefused(bytes32 indexed halfKey);
     /// @notice A bad receipt from `chainKey`, refused for `reason`: another body for a half that has one, from a chain
-    ///         that is not the sender's, for wallets that are not the ticket's, for a half never sent, or an expired
-    ///         answer that moved something. Nothing is applied, and the compliance blocks `chainKey`.
+    ///         that is not the sender's, for wallets that are not the ticket's, or for a half never sent. Nothing is applied, and the compliance blocks `chainKey`.
     event ReceiptRefused(
         bytes32 indexed ticketId,
         bytes32 indexed chainKey,

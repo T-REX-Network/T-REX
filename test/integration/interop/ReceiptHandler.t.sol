@@ -199,17 +199,18 @@ contract ReceiptHandlerTest is InteropSuiteTest {
         assertEq(token.awayBalanceOf(bobOnPolygon), 40, "applied as it happened");
     }
 
-    /// @notice An expired answer says the away token moved nothing: one that moved something is a bad receipt.
-    function test_receiveReceipt_blocksTheChain_whenAnExpiredAnswerMovedSomething() public {
+    /// @notice The answer mark is not a refusal reason: an expired answer that moved something inside the ticket's
+    ///         terms is applied as it happened, and blocks nobody.
+    function test_receiveReceipt_appliesAnExpiredAnswerThatMovedSomething_asItHappened() public {
         bytes32 ticketId = _ask(aliceOnPolygon, bobOnPolygon, 10, 50);
         MessageTypesLib.ReceiptMessage memory receipt = _settlement(ticketId, aliceOnPolygon, bobOnPolygon, 40);
         receipt.answer = MessageTypesLib.ReceiptAnswer.Expired;
 
         polygonBridge.relay(_liteSettles(polygonBridge, token, receipt));
 
-        assertTrue(boundCompliance.isAwayChainBlocked(polygon));
-        assertEq(token.awayBalanceOf(bobOnPolygon), 0, "nothing applied");
-        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
+        assertFalse(boundCompliance.isAwayChainBlocked(polygon), "nobody is blocked");
+        assertEq(token.awayBalanceOf(bobOnPolygon), 40, "applied as it happened");
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
     }
 
     /* ----- Zero receipts ----- */

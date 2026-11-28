@@ -186,9 +186,7 @@ interface ITickets {
         /// A bring-home receipt above its bring home, or for a half that cannot burn any more.
         AboveTheBringHome,
         /// A still open answer on home's own ask block hash with another valid until.
-        AnotherValidUntil,
-        /// An expired answer that still moved something.
-        ExpiredYetMoved
+        AnotherValidUntil
     }
 
     /// @dev What a ticket is for. Part of the ticket id, so a holder's move and an agent's bring home asked with the
