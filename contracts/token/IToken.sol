@@ -100,9 +100,8 @@ interface IToken is IERC3643 {
     /// @param wallet the ERC-7930 envelope of the satellite wallet
     function awayBalanceOf(bytes calldata wallet) external view returns (uint256);
 
-    /// @notice Returns the sum of every bridged position, the in-transit holds included: the part of
-    ///  `totalSupply` active on satellites. The native float, what the ERC-20 balances on this chain add up to,
-    ///  is `totalSupply() - totalAwayBalance()`.
+    /// @notice Returns the sum of every away balance, money on hold not included. The native float, what the
+    ///  ERC-20 balances on this chain add up to, is `totalSupply() - totalAwayBalance() - totalOnHold()`.
     function totalAwayBalance() external view returns (uint256);
 
     /// @notice Returns the money on hold for a move between its two halves. Zero once the move ended, or for a
@@ -110,7 +109,7 @@ interface IToken is IERC3643 {
     /// @param ticketId the ticket of the move
     function onHoldOf(bytes32 ticketId) external view returns (uint256);
 
-    /// @notice Returns the sum of every in-transit hold: the part of `totalAwayBalance` no wallet currently holds.
+    /// @notice Returns the sum of every in-transit hold: the part of `totalSupply` no wallet currently holds.
     function totalOnHold() external view returns (uint256);
 
     /// @notice Ends a move on the ledger, once, by the shape of its wallets: `amount` leaves the ticket's hold when it
@@ -127,8 +126,8 @@ interface IToken is IERC3643 {
     function finishMove(bytes calldata from, bytes calldata to, uint256 amount, bytes32 ticketId) external;
 
     /// @notice Takes `amount` out of `from`'s away balance and puts it on hold against `ticketId`: the away chain
-    ///  burned it for the first half of a move, and the second half has not landed. `totalAwayBalance` and
-    ///  `totalSupply` do not move; the amount is still the sender's. `finishMove` for the same ticket later takes
+    ///  burned it for the first half of a move, and the second half has not landed. The amount leaves
+    ///  `totalAwayBalance` for `totalOnHold`, `totalSupply` does not move; the amount is still the sender's. `finishMove` for the same ticket later takes
     ///  it from the hold. A hold the ticket already has grows by `amount`.
     /// @dev Callable by the bound compliance only; reverts with `OnlyBoundCompliance` otherwise. Reverts with
     ///  `InsufficientBridgedBalance` when `from`'s away balance no longer covers `amount`, and with `EnforcedPause`
@@ -140,7 +139,7 @@ interface IToken is IERC3643 {
 
     /// @notice Burns `amount` of the home wallet `from` and puts it on hold against `ticketId`: a home wallet that
     ///  moves out to an away wallet. The native balance is burned (`Transfer(holder, 0x0)`), the hold joins
-    ///  `totalAwayBalance`, `totalSupply` does not move; `finishMove` later takes it from the hold.
+    ///  `totalOnHold`, `totalSupply` does not move; `finishMove` later takes it from the hold.
     /// @dev Callable by the bound compliance only, which checked the free balance, the freeze and the rules at the
     ///  ask; reverts with `OnlyBoundCompliance` otherwise. Reverts with `ZeroAddress` when `from` is not a home
     ///  wallet, `TransitAlreadyHeld`, `ERC20InsufficientBalance` and `EnforcedPause`.

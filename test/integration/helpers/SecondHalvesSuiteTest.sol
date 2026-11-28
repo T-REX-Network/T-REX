@@ -184,7 +184,7 @@ abstract contract SecondHalvesSuiteTest is InteropSuiteTest {
         uint256 atHome = token.balanceOf(alice) + token.balanceOf(bob) + token.balanceOf(charlie);
         assertEq(atHome + away + token.totalOnHold(), MINTED, "home + away + on hold is the supply");
         assertEq(token.totalSupply(), MINTED, "the supply never moves");
-        assertEq(token.totalAwayBalance(), away + token.totalOnHold(), "the away total counts what is on hold");
+        assertEq(token.totalAwayBalance(), away, "the away total counts away balances only");
     }
 
     /* ----- Modules, bound before any ticket is open ----- */

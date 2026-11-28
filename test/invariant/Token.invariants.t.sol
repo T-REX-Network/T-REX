@@ -57,15 +57,16 @@ import { TokenHandler } from "./handlers/TokenHandler.sol";
 ///
 /// Invariants:
 ///   INV-1  totalSupply() == ghostMinted - ghostBurned                 (supply only moves via mint/burn)
-///   INV-2  sum(balanceOf(actor)) == totalSupply() - totalAwayBalance()    (native balances are the native supply)
+///   INV-2  sum(balanceOf(actor)) == totalSupply() - totalAwayBalance() - totalOnHold()  (native balances are the
+///          native supply)
 ///   INV-3  frozenStatus[actor].amount <= balanceOf(actor)             (free balance never negative)
 ///   INV-4  compliance.getTokenBound() == address(token)               (binding is stable)
 ///   INV-5  no transfer ever succeeded while paused                    (pause gate holds)
 ///   INV-6  no successful transfer landed on an unverified recipient   (eligibility gate holds)
 ///   INV-7  totalSupply() == Σ free + Σ frozen + Σ bridged             (conservation across buckets)
-///   INV-8  totalAwayBalance() == ghostBridgedTotal == Σ awayBalanceOf + totalOnHold  (bridged total tracks
-///          the positions plus the holds, across every transition that crosses the native boundary:
-///          delegation, recall, both settlements and an in-transit hold)
+///   INV-8  totalAwayBalance() + totalOnHold() == ghostBridgedTotal, totalAwayBalance() == Σ awayBalanceOf
+///          (bridged total tracks the positions plus the holds, across every transition that crosses the
+///          native boundary: delegation, recall, both settlements and an in-transit hold)
 contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     uint256 internal constant SATELLITE_CHAIN_A = 8453;
@@ -162,7 +163,8 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
 
     /// INV-2: the native balances of the actor set are exactly the native supply.
     function invariant_balancesSumToNativeSupply() public view {
-        assertEq(_nativeSum(), token.totalSupply() - token.totalAwayBalance(), "INV-2 balance sum != native supply");
+        uint256 nativeSupply = token.totalSupply() - token.totalAwayBalance() - token.totalOnHold();
+        assertEq(_nativeSum(), nativeSupply, "INV-2 balance sum != native supply");
     }
 
     /// INV-3: frozen amount never exceeds balance (free balance >= 0).
@@ -200,13 +202,15 @@ contract TokenInvariants is StdInvariant, TREXSuiteTest {
         assertEq(token.balanceOf(address(token)), 0, "INV-7 the token holds no escrow");
     }
 
-    /// INV-8: the bridged total is the bridged positions plus the in-transit holds, and matches the external
-    /// model, whichever transition moved it: a delegation-out, a recall, either native-side settlement, or a hold.
+    /// INV-8: the bridged total is the bridged positions, the in-transit holds apart, and the two together match the
+    /// external model, whichever transition moved them: a delegation-out, a recall, either native-side settlement, or
+    /// a hold.
     function invariant_bridgedTotalMatchesPositions() public view {
         (,, uint256 bridgedSum) = _bucketSums();
-        assertEq(token.totalAwayBalance(), handler.ghostBridgedTotal(), "INV-8 bridged total drifted from the model");
+        uint256 awayAndOnHold = token.totalAwayBalance() + token.totalOnHold();
+        assertEq(awayAndOnHold, handler.ghostBridgedTotal(), "INV-8 bridged total drifted from the model");
         assertEq(token.totalOnHold(), handler.ghostInTransit(), "INV-8 in-transit total drifted from the model");
-        assertEq(token.totalAwayBalance(), bridgedSum + token.totalOnHold(), "INV-8 bridged total != positions + holds");
+        assertEq(token.totalAwayBalance(), bridgedSum, "INV-8 bridged total != positions");
     }
 
     /// @notice Prints how often each transition fired (visible with `forge test -vv`).

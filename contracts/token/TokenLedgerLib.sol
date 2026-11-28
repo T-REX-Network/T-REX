@@ -87,13 +87,14 @@ library TokenLedgerLib {
         /// @dev Positions delegated to satellites, keyed by the canonical ERC-7930 wallet key. Separate from the
         ///  native mapping, which stays OpenZeppelin's.
         mapping(bytes32 walletKey => uint256) awayBalance;
-        /// @dev Sum of every bridged position, kept so `totalSupply` counts it in O(1).
+        /// @dev Sum of every away balance, kept so `totalSupply` counts it in O(1). Money on hold is not in it.
         uint256 totalAwayBalance;
         /// @dev The money on hold between the two halves of a move, keyed by its ticket: what left the sender's
         ///  wallet, an away wallet or a home wallet, and has not reached the wallet it ends on. Counted in
-        ///  `totalAwayBalance`, still owned by the sender the ticket names.
+        ///  `totalOnHold`, still owned by the sender the ticket names.
         mapping(bytes32 ticketId => uint256) inTransit;
-        /// @dev Sum of every in-transit hold: the part of `totalAwayBalance` no wallet currently holds.
+        /// @dev Sum of every in-transit hold, the third term of `totalSupply` beside the native supply and
+        ///  `totalAwayBalance`.
         uint256 totalOnHold;
         /// @dev What open validations may still draw from each satellite wallet. Kept here, beside the balance
         ///  it reserves against, so `availableOf` is one subtraction rather than two contracts agreeing: the
@@ -145,8 +146,8 @@ library TokenLedgerLib {
     /* ----- Transitions ----- */
 
     /// @dev Takes `amount` out of `fromWallet`'s away balance and holds it against `ticketId`: the first half of a
-    ///  move landed, its away chain burned the amount, and the second half has not. The amount stays counted in
-    ///  `totalAwayBalance` and stays the sender's; only the wallet no longer holds it. A hold may grow: money on hold
+    ///  move landed, its away chain burned the amount, and the second half has not. The amount leaves
+    ///  `totalAwayBalance` for `totalOnHold` and stays the sender's; only the wallet no longer holds it. A hold may grow: money on hold
     ///  that carried another's credit holds that part too once the other is taken.
     function putOnHold(bytes calldata fromWallet, uint256 amount, bytes32 ticketId) external {
         bytes32 fromKey = WalletKeyLib.satelliteKey(fromWallet);
@@ -160,7 +161,7 @@ library TokenLedgerLib {
     }
 
     /// @dev Holds `amount` against `ticketId` for a home wallet that moves out: the token burns it from the wallet's
-    ///  native balance right after, so the amount leaves the native supply and joins `totalAwayBalance` on hold, and
+    ///  native balance right after, so the amount leaves the native supply and joins `totalOnHold`, and
     ///  `totalSupply` does not move. One hold per ticket.
     /// @return holder The home wallet the token burns from.
     function holdFromHome(bytes calldata fromWallet, uint256 amount, bytes32 ticketId)
@@ -174,7 +175,6 @@ library TokenLedgerLib {
         require(tokenStorage.inTransit[ticketId] == 0, ErrorsLib.TransitAlreadyHeld(ticketId));
         tokenStorage.inTransit[ticketId] = amount;
         tokenStorage.totalOnHold += amount;
-        tokenStorage.totalAwayBalance += amount;
 
         emit EventsLib.HeldInTransit(keccak256(fromWallet), ticketId, fromWallet, amount);
     }
@@ -195,13 +195,11 @@ library TokenLedgerLib {
         _takeFromHoldOrWallet(tokenStorage, from, fromKey, amount, ticketId);
 
         (toNative, recipient) = WalletKeyLib.isReferenceChain(to);
-        if (toNative) {
-            tokenStorage.totalAwayBalance -= amount;
-            return (toNative, recipient, fromKey);
-        }
+        if (toNative) return (toNative, recipient, fromKey);
 
         bytes32 toKey = WalletKeyLib.satelliteKey(to);
         tokenStorage.awayBalance[toKey] += amount;
+        tokenStorage.totalAwayBalance += amount;
 
         emit EventsLib.BridgedTransfer(fromKey, toKey, ticketId, from, to, amount);
     }
@@ -251,6 +249,7 @@ library TokenLedgerLib {
         uint256 balance = tokenStorage.awayBalance[key];
         require(amount <= balance, ErrorsLib.InsufficientBridgedBalance(wallet, balance, amount));
         tokenStorage.awayBalance[key] = balance - amount;
+        tokenStorage.totalAwayBalance -= amount;
     }
 
 }

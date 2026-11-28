@@ -242,21 +242,22 @@ contract Token is ERC3643Token, ERC20PermitUpgradeable, AccessManagedOwnableUpgr
     /* ----- Ledger Views ----- */
 
     /// @inheritdoc IERC20
-    /// @dev The whole issuance: the native ERC-20 supply plus every position on a satellite, money on hold included.
+    /// @dev The whole issuance: the native ERC-20 supply, plus every away balance, plus the money on hold.
     ///  A home wallet's move out, a bring home or a move ending at home moves between the two terms and never changes
     ///  the sum; only a mint or a burn does.
     ///
     ///  The register reports the issuance, not the native float, and the events say so at the cost of one
     ///  trade-off. A native-to-bridged move emits `Transfer(holder, 0x0)` deliberately: that is what makes
     ///  `balanceOf` drop visibly and keeps every ERC-20 balance indexer correct. The price is that a supply
-    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance`; `HeldInTransit` and
+    ///  derived by summing `Transfer` events under-reports by `totalAwayBalance + totalOnHold`; `HeldInTransit` and
     ///  `SettledToNative` are the reconciliation for anyone deriving it that way, and
-    ///  `totalSupply() - totalAwayBalance()` is the native float. An escrow address holding the delegated float
+    ///  `totalSupply() - totalAwayBalance() - totalOnHold()` is the native float. An escrow address holding the delegated float
     ///  would keep Transfer-summing whole and was rejected: it would show the token holding its own supply.
     ///  `INV-7` sums the buckets to this figure and asserts that escrow is never there; `INV-8` holds
     ///  `totalAwayBalance` to the positions, whichever transition moved it.
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
-        return super.totalSupply() + TokenLedgerLib.layout().totalAwayBalance;
+        TokenLedgerLib.TokenStorage storage tokenStorage = TokenLedgerLib.layout();
+        return super.totalSupply() + tokenStorage.totalAwayBalance + tokenStorage.totalOnHold;
     }
 
     /// @inheritdoc IToken

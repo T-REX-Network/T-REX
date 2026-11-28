@@ -25,6 +25,22 @@ contract TokenHoldFromHomeOnceUnitTest is TokenLedgerBaseUnitTest {
         vm.stopPrank();
     }
 
+    /// @notice The supply is the native supply, plus the away balances, plus the money on hold: a home burn onto
+    ///         hold joins the third term and leaves the away total alone.
+    function test_burnOntoHold_countsTheHoldApartFromTheAwayTotal() public {
+        uint256 homeBurn = 10;
+        uint256 awayTotalBefore = token.totalAwayBalance();
+
+        vm.prank(compliance);
+        token.burnOntoHold(user1AtHome, homeBurn, TICKET_ID);
+
+        assertEq(token.totalAwayBalance(), awayTotalBefore, "the away total holds away balances only");
+        assertEq(token.totalOnHold(), homeBurn, "the burn is on hold");
+        uint256 nativeSupply = token.balanceOf(user1);
+        assertEq(token.totalSupply(), nativeSupply + token.totalAwayBalance() + token.totalOnHold(), "three terms");
+        assertEq(token.totalSupply(), MINTED, "the supply does not move");
+    }
+
     function test_burnOntoHold_RevertWhen_TheTicketAlreadyHoldsAHomeBurn() public {
         uint256 firstBurn = 10;
         uint256 secondBurn = 5;

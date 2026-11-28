@@ -27,7 +27,8 @@ All notable changes to this project will be documented in this file.
     `setReceiptRoute`, `closeReceiptRoute`, `setTicketRoute`, `replaceHostilePeer`, `sendOnTicketRoute`,
     `sendOnReceiptRoute`, `checkReceiptOrigin`, `putOnHold`, `burnOntoHold`, `finishMove`, `reserveForTicket`,
     `releaseFromTicket`, and the views `awayBalanceOf`, `totalAwayBalance`, `onHoldOf`, `totalOnHold`,
-    `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. On `TrustedGatewayRegistry`:
+    `receiptRouteFor`, `ticketRouteFor`, `pinOf`, `hostileChangeEndsAt`. `totalSupply` is the native supply plus
+    `totalAwayBalance` (away balances only) plus `totalOnHold`. On `TrustedGatewayRegistry`:
     `depthOf`, and `setTrustedGateway(bridge, trusted, depth)` takes the depth the bridge waits for (zero is full
     finality). A receipt bridge is a bridge trusted at depth zero; a depth may be set again and is read on every
     use, and a distrusted bridge is never trusted again. Every money message, and every ticket on the receipt route,

@@ -408,7 +408,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             liteBalances += lite.balanceOf(satellites[i]);
             inFlight += _inFlightFor(i);
         }
-        assertEq(token.totalAwayBalance(), liteBalances + inFlight, "DR-3");
+        assertEq(token.totalAwayBalance() + token.totalOnHold(), liteBalances + inFlight, "DR-3");
     }
 
     function invariant_DR4_theAwayTokenMintedEachMoveOutOnce() public view {
@@ -432,7 +432,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 i = 1; i < ticketIds.length; i++) {
             if (ticketToHome[i]) cameHome += _movedHomeBy(ticketIds[i]);
         }
-        assertEq(token.totalAwayBalance(), movedOut - cameHome, "DR-5");
+        assertEq(token.totalAwayBalance() + token.totalOnHold(), movedOut - cameHome, "DR-5");
     }
 
     function invariant_DR6_anHonestAwayTokenNeverBlocksItsChainOrStopsTheToken() public view {
@@ -447,7 +447,7 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
             awayBalances += awayBalance;
             assertLe(token.reservedOf(satellites[i]), awayBalance, "reserved above the away balance");
         }
-        assertEq(awayBalances + token.totalOnHold(), token.totalAwayBalance(), "away total");
+        assertEq(awayBalances, token.totalAwayBalance(), "away total, money on hold apart");
         assertEq(_everyHold(), token.totalOnHold(), "on hold total");
     }
 
@@ -456,7 +456,8 @@ contract DelegationRecallInvariants is StdInvariant, InteropSuiteTest {
         for (uint256 i = 0; i < ACTORS; i++) {
             liteBalances += lite.balanceOf(satellites[i]);
         }
-        assertLe(liteBalances, token.totalAwayBalance(), "the away chain holds more than home counts");
+        uint256 homeCounts = token.totalAwayBalance() + token.totalOnHold();
+        assertLe(liteBalances, homeCounts, "the away chain holds more than home counts");
     }
 
     /// @dev What the away token holds for a wallet, plus what it moved or burned out of it that home has not applied,

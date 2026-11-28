@@ -82,7 +82,7 @@ contract TokenHoldInTransitUnitTest is TokenLedgerBaseUnitTest {
         assertEq(token.awayBalanceOf(satellite1), 30, "the wallet no longer holds it");
         assertEq(token.onHoldOf(VALIDATION_ID), 30, "the validation does");
         assertEq(token.totalOnHold(), 30);
-        assertEq(token.totalAwayBalance(), 60, "still bridged");
+        assertEq(token.totalAwayBalance(), 30, "the hold left the away total");
         assertEq(token.totalSupply(), 100, "still issued");
         assertEq(token.balanceOf(user1), 40);
         _assertPartition();
