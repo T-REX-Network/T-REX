@@ -199,9 +199,26 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
         _assertPositionsAreTheSupply();
     }
 
-    /// @notice The same, while the chain is blocked: the receipt waits, the approver's answer is refused until it is
-    ///         applied, and once the ticket is cancelled unsent the waiting receipt is booked on hold.
-    function test_answerApproval_reverts_when_aReceiptWithNoTicketWaitsUnderABlock() public {
+    /// @notice The ask mined again goes out even while the receipt of its dropped copy waits at home: the away token
+    ///         answers the new copy with the receipt it stored.
+    function test_askToMove_sendsTheTicket_whileTheReceiptOfItsDroppedCopyWaits() public {
+        (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
+        _blockPolygon();
+        polygonGateway.relay(receiptIndex);
+        bytes32 halfKey = MessageTypesLib.halfKeyOf(ticketId, 0);
+        assertTrue(boundCompliance.waitingReceiptOf(halfKey).bodyHash != bytes32(0), "the receipt waits");
+        _unblockPolygon();
+        uint256 sentSoFar = polygonGateway.queueLength();
+
+        _askAgain(aliceSat, bobSat, FOUR, salt);
+
+        assertEq(polygonGateway.queueLength(), sentSoFar + 1, "the ticket left");
+        assertTrue(boundCompliance.ticketOf(ticketId).sent, "sent");
+    }
+
+    /// @notice The same, while the chain is blocked: the receipt waits and the approver still answers. The first send
+    ///         is refused over the waiting receipt, which is booked on hold once applied.
+    function test_answerApproval_answers_whenAReceiptWithNoTicketWaitsUnderABlock() public {
         AsyncApprovalModule module = _bindApprovalModule(approver);
         (bytes32 ticketId, bytes32 salt, uint256 receiptIndex) = _droppedAsk(aliceOnPolygon, aliceSat, bobSat, FOUR);
         _askAgain(aliceSat, bobSat, FOUR, salt);
@@ -213,15 +230,12 @@ contract HoldWithoutTicketTest is HoldsSuiteTest {
 
         vm.prank(approver);
         module.approveValidation(address(boundCompliance), ticketId, FOUR);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, ticketId, polygon));
         module.finalize(address(boundCompliance), ticketId);
+        _assertStatus(ticketId, ITickets.TicketStatus.Open, "opened by the answer");
 
         _unblockPolygon();
-        vm.warp(boundCompliance.ticketOf(ticketId).validUntil);
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = ticketId;
-        boundCompliance.cancelTickets(ids);
-        _assertStatus(ticketId, ITickets.TicketStatus.Cancelled, "cancelled unsent");
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ApplyWaitingReceiptFirst.selector, ticketId, polygon));
+        boundCompliance.sendTicket(ticketId, bobSat, "");
 
         vm.expectEmit(true, true, false, true, address(boundCompliance));
         emit EventsLib.ReceiptWithoutTicket(ticketId, polygon, aliceSat, bobSat, FOUR);

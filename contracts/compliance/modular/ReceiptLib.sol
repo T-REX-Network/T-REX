@@ -253,7 +253,7 @@ library ReceiptLib {
     ) private view returns (bool) {
         if (!recorded) return true;
         bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
-        bool neverSent = ticket.written && ticket.askBlockHash == bytes32(0);
+        bool neverSent = ticket.written && !ticket.sent;
         return receipt.half == 0 && aMove && neverSent;
     }
 

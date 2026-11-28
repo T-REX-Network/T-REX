@@ -6,7 +6,6 @@ import { InteroperableAddress } from "@openzeppelin/contracts/utils/draft-Intero
 
 import { IComplianceLedger } from "contracts/compliance/modular/IComplianceLedger.sol";
 import { ITickets } from "contracts/compliance/modular/ITickets.sol";
-import { TicketLib } from "contracts/compliance/modular/TicketLib.sol";
 import { AsyncApprovalModule } from "contracts/compliance/modular/modules/AsyncApprovalModule.sol";
 import { ModuleProxy } from "contracts/compliance/modular/modules/ModuleProxy.sol";
 import { ErrorsLib } from "contracts/libraries/ErrorsLib.sol";
@@ -62,6 +61,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         bytes32 ticketId = _ask(bobSat, 1, 2);
         bytes32 salt = lastSalt;
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
+        bytes32 askBlockHash = boundCompliance.ticketOf(ticketId).askBlockHash;
         assertEq(token.reservedOf(aliceSat), 2);
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 2);
 
@@ -72,15 +72,13 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         ITickets.Ticket memory opened = boundCompliance.ticketOf(ticketId);
         assertEq(opened.amountMax, 1);
         assertEq(uint8(opened.status), uint8(ITickets.TicketStatus.Open));
-        assertEq(opened.askBlockHash, bytes32(0), "not sent yet");
+        assertFalse(opened.sent, "not sent yet");
         assertEq(token.reservedOf(aliceSat), 1, "the difference is released on the wallet");
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 1, "and in the ledger");
         assertEq(_ledger().pendingOutOf(address(aliceIdentity)), 1);
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.TicketWritten(
-            ticketId, aliceSat, bobSat, "", 1, 1, 2, validUntil, TicketLib.askBlockHashOf(1, validUntil), salt
-        );
+        emit EventsLib.TicketWritten(ticketId, aliceSat, bobSat, "", 1, 1, 2, validUntil, askBlockHash, salt);
         boundCompliance.sendTicket(ticketId, bobSat, "");
     }
 
@@ -102,27 +100,25 @@ contract ApprovalTicketsTest is InteropSuiteTest {
 
     /* ----- The first send ----- */
 
-    /// @notice After the yes anyone sends the ticket: it is pinned to the receipt route, written with the send's own
-    ///         ask block hash, and its last send is now.
+    /// @notice After the yes anyone sends the ticket: it is pinned to the receipt route, written with the ask block
+    ///         hash of the ask, and its last send is now.
     function test_sendTicket_canBeCalledByAnyone_afterTheApproverSaidYes() public {
         bytes32 ticketId = _ask(bobSat, 1, 50);
         bytes32 salt = lastSalt;
         _approve(ticketId, 50);
         vm.warp(block.timestamp + 5 minutes);
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
-        bytes32 sendBlocksAskBlockHash = TicketLib.askBlockHashOf(50, validUntil);
+        bytes32 asksBlockHash = boundCompliance.ticketOf(ticketId).askBlockHash;
 
         vm.expectEmit(true, false, false, true, address(boundCompliance));
-        emit EventsLib.TicketWritten(
-            ticketId, aliceSat, bobSat, "", 1, 50, 50, validUntil, sendBlocksAskBlockHash, salt
-        );
+        emit EventsLib.TicketWritten(ticketId, aliceSat, bobSat, "", 1, 50, 50, validUntil, asksBlockHash, salt);
         vm.expectEmit(true, true, false, true, address(token));
         emit EventsLib.HalfPinned(MessageTypesLib.halfKeyOf(ticketId, 0), polygon, address(receiptBridge));
         vm.prank(stranger);
         boundCompliance.sendTicket(ticketId, bobSat, "");
 
         ITickets.Ticket memory sent = boundCompliance.ticketOf(ticketId);
-        assertEq(sent.askBlockHash, sendBlocksAskBlockHash);
+        assertEq(sent.askBlockHash, asksBlockHash);
         assertEq(sent.lastSentAt, block.timestamp);
     }
 
@@ -145,6 +141,41 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         boundCompliance.sendTicket(ticketId, bobSat, "");
         assertEq(receiptBridge.queueLength(), 2, "the ask on the receipt bridge");
         assertEq(ticketBridge.queueLength(), 0, "never on the ticket bridge");
+    }
+
+    /// @notice The ask block hash is written at the ask, for a ticket that waits for approval too: the approval and
+    ///         the first send, in later blocks, keep it, and the first send carries it.
+    function test_askToMove_writesTheAskBlockHashAtTheAsk_whenTheTicketWaitsForApproval() public {
+        bytes32 ticketId = _ask(bobSat, 1, 50);
+        bytes32 askBlockHash = boundCompliance.ticketOf(ticketId).askBlockHash;
+        assertTrue(askBlockHash != bytes32(0), "written at the ask");
+        assertFalse(boundCompliance.ticketOf(ticketId).sent, "not sent");
+
+        vm.roll(block.number + 1);
+        _approve(ticketId, 40);
+        vm.roll(block.number + 1);
+        boundCompliance.sendTicket(ticketId, bobSat, "");
+
+        assertEq(boundCompliance.ticketOf(ticketId).askBlockHash, askBlockHash, "the ask's, not the send's");
+        assertTrue(boundCompliance.ticketOf(ticketId).sent, "sent");
+        MessageTypesLib.TicketMessage memory sentTicket = _decodeQueuedValidation(receiptBridge, 0);
+        assertEq(sentTicket.askBlockHash, askBlockHash, "the copy carries the ask's block hash");
+    }
+
+    /// @notice The approver answers while a receipt for the unsent ticket waits: that receipt answers no copy home
+    ///         sent, and is booked on hold whatever the answer.
+    function test_answerApproval_answers_whileAReceiptWaitsForTheTicket() public {
+        bytes32 ticketId = _ask(bobSat, 1, 50);
+        vm.prank(agent);
+        boundCompliance.blockAwayChain(polygon);
+        MessageTypesLib.ReceiptMessage memory receipt =
+            _settlementUnder(ticketId, aliceSat, bobSat, 40, keccak256("a copy home never sent"));
+        receiptBridge.relay(_liteSettles(receiptBridge, token, receipt));
+        assertTrue(boundCompliance.waitingReceiptOf(MessageTypesLib.halfKeyOf(ticketId, 0)).bodyHash != bytes32(0));
+
+        _approve(ticketId, 50);
+
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Open));
     }
 
     /// @notice The first send has no deadline. Between valid until and the end of the waiting time it is a plain
@@ -172,7 +203,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         boundCompliance.sendTicket(ticketId, bobSat, "");
 
         assertEq(boundCompliance.ticketOf(ticketId).asksForReceipt, 1, "the first send is the first ask");
-        assertTrue(boundCompliance.ticketOf(ticketId).askBlockHash != bytes32(0), "the ticket left");
+        assertTrue(boundCompliance.ticketOf(ticketId).sent, "the ticket left");
     }
 
     function test_sendTicket_reverts_when_theTokenIsStoppedAtTheFirstSend() public {

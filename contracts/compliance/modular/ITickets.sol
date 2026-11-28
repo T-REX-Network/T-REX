@@ -207,8 +207,8 @@ interface ITickets {
     struct Ticket {
         /* ----- Written once, at issuance ----- */
 
-        /// Names the copy of the ticket home sent, see {TicketLib-askBlockHashOf}. Zero until the ticket is
-        /// issued and sent.
+        /// Names the copy of the ticket home wrote, see {TicketLib-askBlockHashOf}: the ask's own block. For a record a
+        /// receipt created, the one the receipt echoed.
         bytes32 askBlockHash;
         /// Final inclusive lower bound, so a receipt's executed amount can be judged.
         uint256 amountMin;
@@ -323,6 +323,12 @@ interface ITickets {
         /// The number of the last second half sent to the receiver before close by hand turned the money on hold
         /// back to the sender; zero when none was. An older half's late answer is judged against the receiver.
         uint8 lastHalfToTheReceiver;
+
+        /* ----- The first send; last for the layout's sake ----- */
+
+        /// The ticket left for the away chain: written at its first send. A ticket waiting for approval, or opened
+        /// and not sent yet, has none.
+        bool sent;
     }
 
     /// @dev A good receipt that could not be applied when it arrived, kept under its half until anyone applies it
@@ -505,8 +511,6 @@ interface ITickets {
     /// - It must be stored `WaitingForApproval`; otherwise reverts with `NotWaitingForApproval`.
     /// - The caller must be the bound `APPROVAL` module; otherwise reverts with `NotTheApprovalModule`.
     /// - `block.timestamp` must be before `validUntil`; otherwise reverts with `ValidationExpired`.
-    /// - No receipt for the ticket waiting: it answers no copy home sent, and is booked on hold once it can be;
-    ///   otherwise reverts with `ApplyWaitingReceiptFirst`.
     /// - `approvedMax` zero or inside `[amountMin, amountMax]`; otherwise reverts with
     ///   `EmptyValidationRange(amountMin, amountMax)`, the range an answer must fall in.
     ///

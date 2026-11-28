@@ -193,6 +193,8 @@ library TicketLib {
         uint256 requestedMax;
         uint64 validUntil;
         uint64 waitingTime;
+        /// The ask block hash, see {askBlockHashOf}, written by {_record}.
+        bytes32 askBlockHash;
         /// An `APPROVAL` module is bound: the ticket waits for its answer.
         bool waitedForApproval;
         /// The route the ticket travels, see {_chooseTheRoute}.
@@ -546,7 +548,7 @@ library TicketLib {
                 requestedMax: draft.requestedMax,
                 token: token,
                 validUntil: draft.validUntil,
-                askBlockHash: askBlockHashOf(draft.amountMax, draft.validUntil)
+                askBlockHash: draft.askBlockHash
             })
         );
         _dispatch(token, ticketId, draft.fromChainKey, draft.validUntil, body);
@@ -567,7 +569,6 @@ library TicketLib {
         );
         require(msg.sender == _approvalModule(), ErrorsLib.NotTheApprovalModule(msg.sender));
         require(block.timestamp < ticket.validUntil, ErrorsLib.ValidationExpired(ticketId, ticket.validUntil));
-        _requireNoReceiptWaitsForTheTicket(store, ticketId);
         bool refused = approvedMax == 0;
         bool insideTheRange = approvedMax >= ticket.amountMin && approvedMax <= ticket.amountMax;
         require(refused || insideTheRange, ErrorsLib.EmptyValidationRange(ticket.amountMin, ticket.amountMax));
@@ -647,7 +648,7 @@ library TicketLib {
                 requestedMax: ticket.requestedMax,
                 token: token,
                 validUntil: ticket.validUntil,
-                askBlockHash: askBlockHashOf(ticket.amountMax, ticket.validUntil)
+                askBlockHash: ticket.askBlockHash
             })
         );
         _dispatch(token, ticketId, chainKey, ticket.validUntil, body);
@@ -911,8 +912,8 @@ library TicketLib {
         return keccak256(spender);
     }
 
-    /// @dev The ask block hash: names the copy of a ticket written in this block, the ask's own block, or the
-    ///  first send's for a ticket that waited for approval. Two copies of one ask mined in two blocks share the id and
+    /// @dev The ask block hash: names the copy of a ticket written in this block, the ask's own block, for every
+    ///  ticket, one that waits for approval included. Two copies of one ask mined in two blocks share the id and
     ///  differ here; two sibling blocks share number and parent, so the terms are in it too.
     function askBlockHashOf(uint256 amountMax, uint64 validUntil) internal view returns (bytes32) {
         return keccak256(abi.encode(block.number, blockhash(block.number - 1), amountMax, validUntil));
@@ -936,16 +937,15 @@ library TicketLib {
     }
 
     /// @dev Whether a move was written and never sent: waiting for approval, or opened by the approver and not sent
-    ///  yet. The ask block hash is written at the first send, see {_issueRecorded}.
+    ///  yet. `sent` is written at the first send, see {_issueRecorded}.
     function neverSent(ITickets.Ticket storage ticket) internal view returns (bool) {
         bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
-        bool noCopyLeft = ticket.askBlockHash == bytes32(0);
-        return aMove && noCopyLeft && _holdsTheAsk(ticket.status);
+        return aMove && !ticket.sent && _holdsTheAsk(ticket.status);
     }
 
-    /// @dev Keeps the ticket forever and reserves its amount, with the route chosen for it. Everything written
-    ///  here is the issuance half of the lifecycle; the ask block hash is written at the first send, see
-    ///  {_issueRecorded}. A ticket on the ticket route counts in that route's window.
+    /// @dev Keeps the ticket forever and reserves its amount, with the route chosen for it and the ask block hash of
+    ///  the ask's own block. Everything written here is the issuance half of the lifecycle; `sent` is written at the
+    ///  first send, see {_issueRecorded}. A ticket on the ticket route counts in that route's window.
     function _record(bytes32 ticketId, bytes calldata from, bytes calldata spender, Draft memory draft, address token)
         private
     {
@@ -953,6 +953,8 @@ library TicketLib {
         stored.amountMin = draft.amountMin;
         stored.amountMax = draft.amountMax;
         stored.validUntil = draft.validUntil;
+        draft.askBlockHash = askBlockHashOf(draft.amountMax, draft.validUntil);
+        stored.askBlockHash = draft.askBlockHash;
         stored.stopWaitingAt = draft.validUntil + 4 * draft.waitingTime;
         stored.fromChainKey = draft.fromChainKey;
         stored.toChainKey = draft.toChainKey;
@@ -981,13 +983,13 @@ library TicketLib {
         if (draft.homeWallet == address(0)) IToken(token).reserveForTicket(from, draft.amountMax);
     }
 
-    /// @dev Writes the ask block hash of the copy the away token will execute against, announces it, and encodes it.
-    ///  Run once, at the first send: a written ask block hash is what says the ticket left.
+    /// @dev Marks the ticket sent, announces the copy the away token will execute against, and encodes it. Run once,
+    ///  at the first send: `sent` is what says the ticket left.
     function _issueRecorded(bytes32 ticketId, MessageTypesLib.TicketMessage memory issued)
         private
         returns (bytes memory body)
     {
-        layout().validations[ticketId].askBlockHash = issued.askBlockHash;
+        layout().validations[ticketId].sent = true;
 
         emit EventsLib.TicketWritten(
             ticketId,
@@ -1005,10 +1007,9 @@ library TicketLib {
         body = abi.encode(issued);
     }
 
-    /// @dev Sends a written ticket to the sender's away chain on the route chosen at its ask, unless that chain
-    ///  already answered it: an ask mined again after a reorg, whose dropped copy the away token executed and whose
-    ///  receipt waits here, and {ReceiptLib-applyWaitingReceipt} applies it instead. The token is the wire's only
-    ///  author: it pins the half and refuses a closed chain. As the compliance's DELEGATECALL target, this library
+    /// @dev Sends a written ticket to the sender's away chain on the route chosen at its ask. When that chain already
+    ///  answered an ask mined again after a reorg, the away token answers this copy with the receipt it stored. The
+    ///  token is the wire's only author: it pins the half and refuses a closed chain. As the compliance's DELEGATECALL target, this library
     ///  reaches the token with the compliance as the caller. The latest valid until sent toward the chain is kept for
     ///  the cap setter, see {ITickets-setTicketLimits}.
     function _dispatch(address token, bytes32 ticketId, bytes32 fromChainKey, uint64 validUntil, bytes memory body)
@@ -1018,8 +1019,6 @@ library TicketLib {
         if (validUntil > store.latestValidUntilSent[fromChainKey]) {
             store.latestValidUntilSent[fromChainKey] = validUntil;
         }
-        bool aReceiptWaitsForTheTicket = store.waitingReceipts[MessageTypesLib.halfKeyOf(ticketId, 0)].bodyHash != 0;
-        if (aReceiptWaitsForTheTicket) return;
         ITickets.Ticket storage ticket = store.validations[ticketId];
         ticket.lastSentAt = uint64(block.timestamp);
         _sendOnItsRoute(token, ticket.onReceiptRoute, ticketId, fromChainKey, body);

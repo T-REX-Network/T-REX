@@ -438,6 +438,7 @@ contract NamespaceFieldsTest is Test {
         ticket.onReceiptRoute = true;
         ticket.waitedForApproval = true;
         ticket.lastHalfToTheReceiver = 72;
+        ticket.sent = true;
     }
 
     function _assertTicket(bytes32 entry) private view {
@@ -480,11 +481,12 @@ contract NamespaceFieldsTest is Test {
         assertEq(_word(_field(entry, 19)), 69, "validations.carriedFrom");
         assertEq(_word(_field(entry, 20)), 70, "validations.carriedAmount");
         assertEq(_word(_field(entry, 21)), 71, "validations.carriedBy");
-        // shortCancel byte 0, onReceiptRoute byte 1, waitedForApproval byte 2, lastHalfToTheReceiver byte 3.
+        // shortCancel byte 0, onReceiptRoute byte 1, waitedForApproval byte 2, lastHalfToTheReceiver byte 3, sent
+        // byte 4.
         assertEq(
             _word(_field(entry, 22)),
-            1 | (1 << 8) | (1 << 16) | (72 << 24),
-            "validations: shortCancel, the route and lastHalfToTheReceiver"
+            1 | (1 << 8) | (1 << 16) | (72 << 24) | (1 << 32),
+            "validations: shortCancel, the route, lastHalfToTheReceiver and sent"
         );
     }
 

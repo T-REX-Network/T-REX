@@ -163,7 +163,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         ITickets.Ticket memory waiting = boundCompliance.ticketOf(id);
         assertEq(uint8(waiting.status), uint8(ITickets.TicketStatus.WaitingForApproval));
-        assertEq(waiting.askBlockHash, bytes32(0), "nothing issued yet");
+        assertFalse(waiting.sent, "nothing issued yet");
         assertEq(gateway.queueLength(), 0, "nothing sent");
         assertEq(token.availableOf(aliceSat), freeBefore - 150, "the room is held while it waits");
         assertEq(_ledger().pendingInOf(address(bobIdentity)), 150, "and counted against the recipient");
@@ -198,7 +198,7 @@ contract AsyncApprovalModuleTest is InteropSuiteTest {
 
         ITickets.Ticket memory issued = boundCompliance.ticketOf(id);
         assertEq(uint8(issued.status), uint8(ITickets.TicketStatus.Open));
-        assertTrue(issued.askBlockHash != bytes32(0), "issued");
+        assertTrue(issued.sent, "issued");
         assertEq(issued.validUntil, requestedAt + VALIDITY_WINDOW, "the rules are never older than one window");
         assertEq(gateway.queueLength(), 1, "the leg is sent");
         assertEq(_decodeQueuedValidation(gateway, 0).amountMax, 150);
