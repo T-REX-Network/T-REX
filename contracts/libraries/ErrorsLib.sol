@@ -292,11 +292,11 @@ library ErrorsLib {
     error ReceiptRouteNotClosed(bytes32 chainKey);
     /// @dev Less gas is left than a second half's send needs: the whole delivery reverts and stays deliverable.
     error NotEnoughGasForTheSecondHalf(uint256 left, uint256 needed);
-    /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or a floor
-    ///  measured for that chain.
+    /// @dev The waiting time `duration` of `chainKey` is not above `mustBeAbove`: one hour less a second, or the full
+    ///  finality delivery plus the clock lead measured for that chain.
     error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
-    /// @dev A validity window must be above the floor measured for every away chain and at most the longest allowed.
-    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
+    /// @dev A validity window must be at most the longest allowed.
+    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAtMost);
     /// @dev New asks are paused for the whole token; receipts still land.
     error AsksPaused();
     /// @dev An approval module is bound or removed only while asks are paused for the whole token: a module bound in a

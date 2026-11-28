@@ -117,10 +117,9 @@ library TicketLib {
         /// Away chains blocked by the pauser or by a bad receipt: no ticket goes to them, none of their tickets is
         /// cancelled, and their receipts wait.
         mapping(bytes32 chainKey => bool blocked) blockedAwayChains;
-        /// The times measured for each away chain: the floors of its waiting time and of the validity windows.
+        /// The times measured for each away chain: the floor of its waiting time, the cap of a still open answer and
+        /// the shift a closed-route cancel waits for.
         mapping(bytes32 chainKey => ITickets.MeasuredTimes times) measuredTimes;
-        /// The floor of each validity window: the largest one any away chain's measured times asked for. Only rises.
-        ITickets.ValidityWindows validityWindowFloors;
         /// The latest `stopWaitingAt` of any ticket: the compliance is not unbound before it.
         uint64 latestStopWaitingAt;
         /// New asks refused for every chain.
@@ -170,8 +169,9 @@ library TicketLib {
     /// @dev The shortest waiting time any away chain may have, in seconds.
     uint64 internal constant MIN_WAITING_TIME = 1 hours;
 
-    /// @dev The longest validity window, in seconds: how old the rules may be when an away token executes a ticket.
-    ///  A product number the owner gives; one day until then.
+    /// @dev The longest validity window, in seconds: how old the rules may be when an away token executes a ticket,
+    ///  OpenZeppelin's staleness the product accepts (V_stale). OpenZeppelin gives no number: one day until the
+    ///  owner gives it.
     uint64 internal constant LONGEST_VALIDITY_WINDOW = 1 days;
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TransferValidation")) - 1)) & ~bytes32(uint256(0xff));
@@ -786,9 +786,8 @@ library TicketLib {
 
     /// @dev See {ITickets-setValidityWindows}.
     function setValidityWindows(uint64 onTicketRoute, uint64 onReceiptRoute) external {
-        ITickets.ValidityWindows memory floors = layout().validityWindowFloors;
-        _requireValidityWindowInRange(onTicketRoute, floors.onTicketRoute);
-        _requireValidityWindowInRange(onReceiptRoute, floors.onReceiptRoute);
+        _requireValidityWindowAtMostTheLongest(onTicketRoute);
+        _requireValidityWindowAtMostTheLongest(onReceiptRoute);
         layout().validityWindows =
             ITickets.ValidityWindows({ onTicketRoute: onTicketRoute, onReceiptRoute: onReceiptRoute });
         emit EventsLib.ValidityWindowsSet(onTicketRoute, onReceiptRoute);
@@ -802,66 +801,33 @@ library TicketLib {
         emit EventsLib.WaitingTimeSet(chainKey, duration);
     }
 
-    /// @dev See {ITickets-setMeasuredTimes}. The settings already made must stay above the floors the new times give.
+    /// @dev See {ITickets-setMeasuredTimes}. A waiting time already set must stay above the floor the new times give.
     function setMeasuredTimes(bytes32 chainKey, ITickets.MeasuredTimes calldata times) external {
         ValidationStorage storage store = layout();
         uint64 waitingTime = store.waitingTimes[chainKey];
         if (waitingTime != 0) _requireWaitingTimeAboveTheFloors(chainKey, waitingTime, times);
 
-        ITickets.ValidityWindows memory floors = _raisedValidityWindowFloors(store.validityWindowFloors, times);
-        ITickets.ValidityWindows memory windows = store.validityWindows;
-        bool windowsSet = windows.onTicketRoute != 0;
-        if (windowsSet) {
-            _requireValidityWindowInRange(windows.onTicketRoute, floors.onTicketRoute);
-            _requireValidityWindowInRange(windows.onReceiptRoute, floors.onReceiptRoute);
-        }
-
         store.measuredTimes[chainKey] = times;
-        store.validityWindowFloors = floors;
         emit EventsLib.MeasuredTimesSet(chainKey, times);
     }
 
-    /// @dev The floors of the validity windows once one chain's times are added. They only rise: a floor one chain's
-    ///  times asked for stays, whatever another chain's times say. A ticket on the ticket route needs the chain's
-    ///  shortest validity window. A ticket on the receipt route needs that too, and must also outlast its full
-    ///  finality delivery on a clock that runs ahead.
-    function _raisedValidityWindowFloors(ITickets.ValidityWindows memory floors, ITickets.MeasuredTimes calldata times)
-        private
-        pure
-        returns (ITickets.ValidityWindows memory)
-    {
-        uint64 shortest = times.shortestValidityWindow;
-        uint64 receiptRouteFloor = times.fullFinalityDelivery + times.clockLead;
-        if (shortest > receiptRouteFloor) receiptRouteFloor = shortest;
-        if (shortest > floors.onTicketRoute) floors.onTicketRoute = shortest;
-        if (receiptRouteFloor > floors.onReceiptRoute) floors.onReceiptRoute = receiptRouteFloor;
-        return floors;
-    }
-
-    /// @dev A validity window above its floor, strictly: the away token executes strictly before valid until, so a
-    ///  holder acting at the last moment the floor allows would be refused at equality. At most the longest allowed.
-    function _requireValidityWindowInRange(uint64 duration, uint64 floor) private pure {
+    /// @dev A validity window at most the longest allowed: how old the rules may be when an away token executes.
+    function _requireValidityWindowAtMostTheLongest(uint64 duration) private pure {
         uint64 longest = LONGEST_VALIDITY_WINDOW;
-        require(duration > floor, ErrorsLib.ValidityWindowOutOfRange(duration, floor, longest));
-        require(duration <= longest, ErrorsLib.ValidityWindowOutOfRange(duration, floor, longest));
+        require(duration <= longest, ErrorsLib.ValidityWindowOutOfRange(duration, longest));
     }
 
-    /// @dev The floors of a waiting time, each strict but the first: one hour; the ask's round trip, so an answer
-    ///  lands before the cancel; the full finality delivery plus the clock lead, so a second half arrives before its
-    ///  valid until on a clock that runs ahead; and the clock lag plus the reorg slot shift, so the away chain's clock
-    ///  has passed valid until when home cancels.
+    /// @dev The floors of a waiting time: at least one hour; and strictly above the full finality delivery plus the
+    ///  clock lead, so a second half arrives before its valid until on a clock that runs ahead, strictly since the
+    ///  away token executes strictly before valid until. The other conditions on a waiting time are sized off chain.
     function _requireWaitingTimeAboveTheFloors(bytes32 chainKey, uint64 duration, ITickets.MeasuredTimes memory times)
         private
         pure
     {
         uint64 belowOneHour = MIN_WAITING_TIME - 1;
         require(duration > belowOneHour, ErrorsLib.WaitingTimeTooShort(chainKey, duration, belowOneHour));
-        uint64 askRoundTrip = times.shortestWaitingTime;
-        require(duration > askRoundTrip, ErrorsLib.WaitingTimeTooShort(chainKey, duration, askRoundTrip));
         uint64 secondHalfFloor = times.fullFinalityDelivery + times.clockLead;
         require(duration > secondHalfFloor, ErrorsLib.WaitingTimeTooShort(chainKey, duration, secondHalfFloor));
-        uint64 clockFloor = times.clockLag + times.reorgSlotShift;
-        require(duration > clockFloor, ErrorsLib.WaitingTimeTooShort(chainKey, duration, clockFloor));
     }
 
     /// @dev Nothing goes out while the token is paused: an incident is under investigation, every receipt waits

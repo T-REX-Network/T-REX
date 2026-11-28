@@ -147,7 +147,7 @@ interface ITickets {
     error NoAsksLeft(bytes32 ticketId);
     error SendNotDue(bytes32 ticketId, uint64 dueAt);
     error WaitingTimeTooShort(bytes32 chainKey, uint64 duration, uint64 mustBeAbove);
-    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAbove, uint64 mustBeAtMost);
+    error ValidityWindowOutOfRange(uint64 duration, uint64 mustBeAtMost);
     error AsksPaused();
     error AsksNotPaused();
     error AskLimitReached(address identity);
@@ -353,18 +353,11 @@ interface ITickets {
         uint64 onReceiptRoute;
     }
 
-    /// @dev The times measured for one away chain, in seconds. Each is a floor a setting must stay above.
+    /// @dev The times measured for one away chain, in seconds: the floor of its waiting time, the cap of a still
+    /// open answer, and the shift a cancel on its closed route waits for.
     struct MeasuredTimes {
-        /// The smallest validity window this chain's tickets on the ticket route need: the approver's time, the
-        /// ticket's delivery, the holder's time to act and the clock lead.
-        uint64 shortestValidityWindow;
-        /// The smallest waiting time an ask for the receipt needs: the ask's delivery at full finality, the time to
-        /// answer, the receipt's way back and the failed and held deliveries to absorb.
-        uint64 shortestWaitingTime;
         /// How far this chain's clock may run ahead of home's.
         uint64 clockLead;
-        /// How far this chain's clock may run behind home's. The waiting time must be above it plus `reorgSlotShift`.
-        uint64 clockLag;
         /// The longest delivery to this chain at full finality.
         uint64 fullFinalityDelivery;
         /// How far an ask mined again after a home reorg may move in time, under a minute on Ethereum.
@@ -529,9 +522,8 @@ interface ITickets {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `onTicketRoute` above the largest `shortestValidityWindow` measured for an away chain, `onReceiptRoute` above
-    ///   that too and above the largest full finality delivery plus clock lead, and both at most
-    ///   `LONGEST_VALIDITY_WINDOW` (one day); otherwise reverts with `ValidityWindowOutOfRange`.
+    /// - Both at most `LONGEST_VALIDITY_WINDOW` (one day); otherwise reverts with `ValidityWindowOutOfRange`. The
+    ///   floors of the windows are sized off chain. A window of zero refuses every ask on that route.
     ///
     /// Emits `ValidityWindowsSet`.
     /// @param onTicketRoute The window, in seconds, of a ticket on the ticket route.
@@ -544,24 +536,22 @@ interface ITickets {
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - `duration` at least `MIN_WAITING_TIME`, one hour; above the chain's `shortestWaitingTime`, so an ask's answer
-    ///   lands before the cancel; above its full finality delivery plus clock lead, so a second half arrives before
-    ///   its valid until; and above its clock lag plus reorg slot shift; otherwise reverts with `WaitingTimeTooShort`.
+    /// - `duration` at least `MIN_WAITING_TIME`, one hour, and above the chain's full finality delivery plus clock
+    ///   lead, so a second half arrives before its valid until; otherwise reverts with `WaitingTimeTooShort`. The
+    ///   other conditions on a waiting time are sized off chain.
     ///
     /// Emits `WaitingTimeSet`.
     /// @param chainKey The chain, keyed as `MessageTypesLib.chainKey` computes it.
     /// @param duration The waiting time in seconds.
     function setWaitingTime(bytes32 chainKey, uint64 duration) external;
 
-    /// @dev Sets the times measured for the away chain `chainKey`, the floors of its waiting time and of the validity
-    /// windows. Set when the chain is added. The validity windows' floors only rise.
+    /// @dev Sets the times measured for the away chain `chainKey`: the floor of its waiting time, the cap of a still
+    /// open answer, and the shift a cancel on its closed route waits for. Set when the chain is added.
     ///
     /// Requirements:
     /// - The caller must hold the role bound to this selector by the AccessManager.
-    /// - The chain's waiting time, once set, still above every floor the new times give; otherwise reverts with
+    /// - The chain's waiting time, once set, still above the floor the new times give; otherwise reverts with
     ///   `WaitingTimeTooShort`.
-    /// - The validity windows, once set, still above the floors the new times give; otherwise reverts with
-    ///   `ValidityWindowOutOfRange`.
     ///
     /// Emits `MeasuredTimesSet`.
     /// @param chainKey The away chain, keyed as `MessageTypesLib.chainKey` computes it.

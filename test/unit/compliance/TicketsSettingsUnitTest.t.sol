@@ -67,10 +67,12 @@ contract TicketsSettingsUnitTest is ModularComplianceBaseUnitTest {
         assertEq(mc.validityWindows().onReceiptRoute, 25 minutes);
     }
 
-    /// @notice A window of zero is not above the floor, which is zero while nothing was measured.
-    function test_setValidityWindows_reverts_when_aWindowIsZero() public {
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidityWindowOutOfRange.selector, 0, 0, 1 days));
+    /// @notice A window of zero is taken: it refuses every ask on that route (`ValidityWindowNotSet`).
+    function test_setValidityWindows_takesAZeroWindow() public {
         mc.setValidityWindows(0, 25 minutes);
+
+        assertEq(mc.validityWindows().onTicketRoute, 0);
+        assertEq(mc.validityWindows().onReceiptRoute, 25 minutes);
     }
 
     function test_setValidityWindows_reverts_when_theCallerIsNotManager() public {

@@ -129,20 +129,9 @@ contract AwayTokenClockTest is InteropSuiteTest {
         polygonLite.execute(lateTicket, 40);
     }
 
-    /// @notice A window shorter than a full finality delivery plus the clock lead is refused, since a ticket on the
-    ///         receipt route would arrive expired; a ticket that still arrives at its valid until is answered zero,
-    ///         and home ends it with nothing moved.
+    /// @notice A ticket that arrives at its valid until, as one would on a validity window sized below the full
+    ///         finality delivery, is answered zero, and home ends it with nothing moved.
     function test_awayToken_answersZero_whenTheTicketArrivesAtItsValidUntil() public {
-        uint64 fifteenMinutes = 15 minutes;
-        uint64 receiptRouteFloor = 20 minutes + 30 seconds;
-        vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, fifteenMinutes, receiptRouteFloor, 1 days
-            )
-        );
-        boundCompliance.setValidityWindows(fifteenMinutes, fifteenMinutes);
-
         bytes32 ticketId = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, 50);
         vm.warp(boundCompliance.ticketOf(ticketId).validUntil);
         _relayAll();

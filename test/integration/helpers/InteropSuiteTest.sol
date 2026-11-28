@@ -97,16 +97,12 @@ abstract contract InteropSuiteTest is TREXSuiteTest {
         vm.stopPrank();
     }
 
-    /// @dev Times measured for an away chain, in seconds: the validity windows and waiting times above clear them.
+    /// @dev Times measured for an away chain, in seconds: the waiting times above clear the floor they give.
     function _measuredTimes() internal pure returns (ITickets.MeasuredTimes memory) {
-        return ITickets.MeasuredTimes({
-            shortestValidityWindow: 10 minutes,
-            shortestWaitingTime: 80 minutes,
-            clockLead: 30 seconds,
-            clockLag: 30 seconds,
-            fullFinalityDelivery: 20 minutes,
-            reorgSlotShift: 1 minutes
-        });
+        return
+            ITickets.MeasuredTimes({
+                clockLead: 30 seconds, fullFinalityDelivery: 20 minutes, reorgSlotShift: 1 minutes
+            });
     }
 
     /// @dev Ask limits no test reaches unless it means to.

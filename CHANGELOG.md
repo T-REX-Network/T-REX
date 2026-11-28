@@ -47,10 +47,11 @@ All notable changes to this project will be documented in this file.
     peers on the token, and closes by hand on the compliance. The interop manager trusts and distrusts bridges.
     Asking for a receipt, cancelling a ticket, sending a second half again, cancelling money on hold and applying a
     waiting receipt are open to anyone.
-  - *Settings, with OpenZeppelin's values for Base.* Measured times per away chain (`setMeasuredTimes`): shortest
-    validity window 372 s, shortest waiting time 5,485 s, clock lead 30 s, clock lag 120 s, full finality delivery
-    1,148 s; they are the floors the other settings are checked against. OpenZeppelin counts the reorg slot shift
-    inside its clock lead; the seed script sets it to 60 s. Validity windows
+  - *Settings, with OpenZeppelin's values for Base.* Measured times per away chain (`setMeasuredTimes`): clock lead
+    30 s, full finality delivery 1,148 s, reorg slot shift 60 s. On chain, a waiting time must be at least one hour
+    and above the full finality delivery plus the clock lead; a validity window at most one day. The other sizing
+    conditions (OpenZeppelin's shortest validity window 372 s and shortest waiting time 5,485 s, its clock lag of
+    120 s with the reorg slot shift inside it) are checked off chain. Validity windows
     (`setValidityWindows`): 15 minutes on the ticket route, 25 minutes on the receipt route. Waiting time per away
     chain (`setWaitingTime`): 95 minutes. OpenZeppelin gives no values for the ask limits (`setAskLimits`: open
     tickets and asks per identity, the ask window, the smallest amount) or the ticket caps (`setTicketLimits`: per
@@ -64,7 +65,7 @@ All notable changes to this project will be documented in this file.
     `reconciliationWindows`, `issuancePaused`, `awaitedTerms`, `parkedLegs` and `reportedLegs` are gone,
     `validations` moved from slot 3 to slot 2 and holds the reshaped `ITickets.Ticket` with its new status enum, and
     `waitingReceipts`, `receiptHashes`, `ticketLimits`, `latestValidUntilSent`, `blockedAwayChains`,
-    `measuredTimes`, `validityWindowFloors`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
+    `measuredTimes`, `latestStopWaitingAt`, `asksPaused`, `askLimits`, `askLimitOverrides`,
     `identityAsks`, `openBringHome`, `uncountedCredit`, `uncountedCreditFrom` and `ticketRouteVolumes` are new.
     `erc3643.storage.TREXMessaging` (the token) keeps every field at its slot and appends the new ones: `routes`
     is read as `receiptRoutes` and `fastRoutes` as `ticketRoutes`, `pinnedRoutes`, `pinnedPeers` and

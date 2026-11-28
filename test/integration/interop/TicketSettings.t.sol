@@ -10,18 +10,14 @@ import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol"
 import { TokenLedgerHarness } from "test/integration/helpers/TokenLedgerHarness.sol";
 
 /// @dev The settings of the clock and their floors and ceilings: the waiting time of an away chain, the two validity
-///      windows, the times measured for an away chain that give their floors, and the unbind that waits until home
-///      stopped waiting for every ticket it wrote. The suite sets Polygon's times to a shortest validity window of 10
-///      minutes, a shortest waiting time of 80 minutes, a lead and a lag of 30 seconds, a full finality delivery of 20
-///      minutes and a reorg slot shift of 1 minute.
+///      windows, the times measured for an away chain that give the waiting time's floor, and the unbind that waits
+///      until home stopped waiting for every ticket it wrote. The suite sets Polygon's times to a clock lead of 30
+///      seconds, a full finality delivery of 20 minutes and a reorg slot shift of 1 minute. Every other sizing
+///      condition is checked off chain.
 contract TicketSettingsTest is InteropSuiteTest {
 
     uint64 internal constant ONE_HOUR = 1 hours;
     uint64 internal constant ONE_DAY = 1 days;
-    /// @dev The suite's floor of the ticket route's window: Polygon's shortest validity window.
-    uint64 internal constant TICKET_ROUTE_FLOOR = 10 minutes;
-    /// @dev The suite's floor of the receipt route's window: Polygon's full finality delivery plus its clock lead.
-    uint64 internal constant RECEIPT_ROUTE_FLOOR = 20 minutes + 30 seconds;
 
     /// @dev An away chain no test opened, to measure from scratch.
     bytes32 internal base = _evmChainKey(8453);
@@ -45,9 +41,7 @@ contract TicketSettingsTest is InteropSuiteTest {
         uint64 delivery = 3000;
         uint64 lead = 600;
         uint64 secondHalfFloor = delivery + lead;
-        _openTheWindowsWide();
         ITickets.MeasuredTimes memory times = _measuredTimes();
-        times.shortestWaitingTime = 50 minutes;
         times.fullFinalityDelivery = delivery;
         times.clockLead = lead;
         vm.startPrank(deployer);
@@ -66,21 +60,15 @@ contract TicketSettingsTest is InteropSuiteTest {
         assertEq(boundCompliance.waitingTimeOf(base), secondHalfFloor + 1);
     }
 
-    /// @notice An away chain whose ask for the receipt takes 5,485 seconds at full finality refuses a waiting time
-    ///         of 80 minutes: the answer could land after the cancel.
-    function test_setWaitingTime_reverts_when_itIsNotAboveTheAskRoundTrip() public {
-        uint64 askRoundTrip = 5485;
-        uint64 eightyMinutes = 80 minutes;
-        ITickets.MeasuredTimes memory times = _measuredTimes();
-        times.shortestWaitingTime = askRoundTrip;
+    /// @notice The ask's round trip and the clock lag are sized off chain: one hour is taken on a chain whose full
+    ///         finality delivery plus clock lead is below it, whatever its round trip is.
+    function test_setWaitingTime_takesOneHour_aboveTheSecondHalfFloor() public {
         vm.startPrank(deployer);
-        boundCompliance.setMeasuredTimes(base, times);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.WaitingTimeTooShort.selector, base, eightyMinutes, askRoundTrip)
-        );
-        boundCompliance.setWaitingTime(base, eightyMinutes);
+        boundCompliance.setMeasuredTimes(base, _measuredTimes());
+        boundCompliance.setWaitingTime(base, ONE_HOUR);
         vm.stopPrank();
+
+        assertEq(boundCompliance.waitingTimeOf(base), ONE_HOUR);
     }
 
     /* ----- The validity windows ----- */
@@ -89,35 +77,19 @@ contract TicketSettingsTest is InteropSuiteTest {
     function test_setValidityWindows_reverts_when_itIsAboveTheLongestAllowed() public {
         uint64 tenYears = 3650 days;
         vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.ValidityWindowOutOfRange.selector, tenYears, RECEIPT_ROUTE_FLOOR, ONE_DAY)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidityWindowOutOfRange.selector, tenYears, ONE_DAY));
         boundCompliance.setValidityWindows(15 minutes, tenYears);
     }
 
-    /// @notice A window at its floor is refused on either route: a holder acting at the last moment the floor allows
-    ///         would reach the away token at valid until, and be refused there.
-    function test_setValidityWindows_reverts_when_itIsNotAboveTheFloor() public {
-        vm.startPrank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, TICKET_ROUTE_FLOOR, TICKET_ROUTE_FLOOR, ONE_DAY
-            )
-        );
-        boundCompliance.setValidityWindows(TICKET_ROUTE_FLOOR, VALIDITY_WINDOW);
+    /// @notice A window's floor is sized off chain: a window below the full finality delivery plus the clock lead
+    ///         measured for an away chain is taken.
+    function test_setValidityWindows_takesAWindowBelowTheMeasuredDelivery() public {
+        uint64 oneMinute = 1 minutes;
+        vm.prank(deployer);
+        boundCompliance.setValidityWindows(oneMinute, oneMinute);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, RECEIPT_ROUTE_FLOOR, RECEIPT_ROUTE_FLOOR, ONE_DAY
-            )
-        );
-        boundCompliance.setValidityWindows(TICKET_ROUTE_WINDOW, RECEIPT_ROUTE_FLOOR);
-
-        boundCompliance.setValidityWindows(TICKET_ROUTE_FLOOR + 1, RECEIPT_ROUTE_FLOOR + 1);
-        vm.stopPrank();
-
-        assertEq(boundCompliance.validityWindows().onTicketRoute, TICKET_ROUTE_FLOOR + 1);
-        assertEq(boundCompliance.validityWindows().onReceiptRoute, RECEIPT_ROUTE_FLOOR + 1);
+        assertEq(boundCompliance.validityWindows().onTicketRoute, oneMinute);
+        assertEq(boundCompliance.validityWindows().onReceiptRoute, oneMinute);
     }
 
     /// @notice The longest allowed window, one day, is taken on both routes.
@@ -133,18 +105,6 @@ contract TicketSettingsTest is InteropSuiteTest {
 
     /* ----- The measured times ----- */
 
-    /// @notice New times whose ask round trip is the waiting time already set are refused.
-    function test_setMeasuredTimes_reverts_when_theWaitingTimeNoLongerClearsTheAskRoundTrip() public {
-        ITickets.MeasuredTimes memory times = _measuredTimes();
-        times.shortestWaitingTime = POLYGON_WINDOW;
-
-        vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.WaitingTimeTooShort.selector, polygon, POLYGON_WINDOW, POLYGON_WINDOW)
-        );
-        boundCompliance.setMeasuredTimes(polygon, times);
-    }
-
     /// @notice New times whose full finality delivery plus clock lead reach the waiting time already set are refused.
     function test_setMeasuredTimes_reverts_when_theWaitingTimeNoLongerClearsTheSecondHalfFloor() public {
         ITickets.MeasuredTimes memory times = _measuredTimes();
@@ -157,62 +117,17 @@ contract TicketSettingsTest is InteropSuiteTest {
         boundCompliance.setMeasuredTimes(polygon, times);
     }
 
-    /// @notice New times whose clock lag plus reorg slot shift reach the waiting time already set are refused.
-    function test_setMeasuredTimes_reverts_when_theWaitingTimeNoLongerClearsTheClockLagAndReorgSlotShift() public {
+    /// @notice New times never check the validity windows already set: a full finality delivery longer than the
+    ///         receipt route's window is taken.
+    function test_setMeasuredTimes_leavesTheValidityWindowsAlone() public {
         ITickets.MeasuredTimes memory times = _measuredTimes();
-        times.clockLag = POLYGON_WINDOW - times.reorgSlotShift;
+        times.fullFinalityDelivery = VALIDITY_WINDOW + 1;
 
         vm.prank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(ErrorsLib.WaitingTimeTooShort.selector, polygon, POLYGON_WINDOW, POLYGON_WINDOW)
-        );
         boundCompliance.setMeasuredTimes(polygon, times);
-    }
 
-    /// @notice New times that raise a validity window's floor to the window already set are refused, on either route.
-    function test_setMeasuredTimes_reverts_when_theWindowsNoLongerClearTheFloors() public {
-        ITickets.MeasuredTimes memory ticketRouteTimes = _measuredTimes();
-        ticketRouteTimes.shortestValidityWindow = TICKET_ROUTE_WINDOW;
-        ITickets.MeasuredTimes memory receiptRouteTimes = _measuredTimes();
-        receiptRouteTimes.fullFinalityDelivery = VALIDITY_WINDOW - receiptRouteTimes.clockLead;
-
-        vm.startPrank(deployer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, TICKET_ROUTE_WINDOW, TICKET_ROUTE_WINDOW, ONE_DAY
-            )
-        );
-        boundCompliance.setMeasuredTimes(polygon, ticketRouteTimes);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, VALIDITY_WINDOW, VALIDITY_WINDOW, ONE_DAY
-            )
-        );
-        boundCompliance.setMeasuredTimes(polygon, receiptRouteTimes);
-        vm.stopPrank();
-    }
-
-    /// @notice The floors of the validity windows only rise: lower times measured for one chain leave the floor
-    ///         another chain's times asked for.
-    function test_setMeasuredTimes_neverLowersTheValidityWindowFloors() public {
-        ITickets.MeasuredTimes memory lowerTimes = _measuredTimes();
-        lowerTimes.shortestValidityWindow = 1 minutes;
-        lowerTimes.fullFinalityDelivery = 1 minutes;
-
-        vm.startPrank(deployer);
-        boundCompliance.setMeasuredTimes(polygon, lowerTimes);
-        boundCompliance.setMeasuredTimes(optimism, lowerTimes);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ErrorsLib.ValidityWindowOutOfRange.selector, RECEIPT_ROUTE_FLOOR, RECEIPT_ROUTE_FLOOR, ONE_DAY
-            )
-        );
-        boundCompliance.setValidityWindows(TICKET_ROUTE_WINDOW, RECEIPT_ROUTE_FLOOR);
-        vm.stopPrank();
-
-        assertEq(boundCompliance.measuredTimesOf(polygon).fullFinalityDelivery, 1 minutes, "the times are taken");
+        assertEq(boundCompliance.measuredTimesOf(polygon).fullFinalityDelivery, VALIDITY_WINDOW + 1);
+        assertEq(boundCompliance.validityWindows().onReceiptRoute, VALIDITY_WINDOW);
     }
 
     /* ----- The unbind ----- */
@@ -249,14 +164,6 @@ contract TicketSettingsTest is InteropSuiteTest {
         vm.prank(deployer);
         token.setCompliance(address(fresh));
         assertEq(address(token.compliance()), address(fresh));
-    }
-
-    /* ----- Helpers ----- */
-
-    /// @dev Windows of two hours on both routes, so new times with a long full finality delivery can be measured.
-    function _openTheWindowsWide() private {
-        vm.prank(deployer);
-        boundCompliance.setValidityWindows(2 hours, 2 hours);
     }
 
 }
