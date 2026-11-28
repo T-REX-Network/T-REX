@@ -313,7 +313,8 @@ contract SatelliteLiteMock is IERC7786Recipient {
             _answerExpired(ticketId);
             return;
         }
-        // Not counted: home gives its ask back on each still open answer, so it must hear every one.
+        // Not counted: a still open answer that moves the ticket's valid until gives home's ask back, so home must
+        // hear every one.
         _send(ticketType, ticketId, _ticketReceipt(firstCopy, 0, MessageTypesLib.ReceiptAnswer.StillOpen));
     }
 

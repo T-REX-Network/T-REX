@@ -3,7 +3,7 @@
 A compliance module is a rule about who may hold or move a token. This page is everything you need to
 write one.
 
-## The four numbers the compliance keeps
+## What the compliance keeps
 
 The token knows balances per wallet. One investor holds several wallets, here and on satellite chains,
 and every rule about distribution asks about the investor, not the wallet. So the compliance keeps these
@@ -174,7 +174,8 @@ result in a later transaction, through its decryption callback. `checkTransfer` 
 the compliance has a waiting state for cross-chain requests, and a module of type `APPROVAL` decides them.
 
 While an `APPROVAL` module is bound (one at most), `askToMove` does everything it does today,
-resolving the route, narrowing the range by every rule and reserving it, but records the validation as
+resolving the route, checking that the chain its first message goes to is open (`ChainNotOpen`), narrowing the
+range by every rule and reserving it, but records the validation as
 `WaitingForApproval` instead of issuing it. Nothing is signed and nothing is sent. The module is told through
 `approvalRequested`. A ticket that waits for an approver always travels the receipt route, at full finality: a home
 reorg short of finality could otherwise drop the approver's answer after the away token executed the ticket. The
@@ -190,7 +191,8 @@ first send with `sendTicket(ticketId, to, spender)`, at any time, and that send 
 and the chain again, as either may have been stopped while the request waited. A zero answer is a refusal,
 which releases the reservation and ends the validation `Cancelled`; any other answer must lie inside
 `[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered is discarded past its
-deadline with `cancelTickets`, by anyone, since nothing was sent for it. An approved ticket is cancelled only once an
+deadline with `cancelTickets`, by anyone, since nothing was sent for it, unless a receipt for it waits and can be
+applied now (`ApplyWaitingReceiptFirst`): anyone applies it first with `applyWaitingReceipt`. An approved ticket is cancelled only once an
 ask for its receipt went unanswered, as any open ticket: a first send made at or after `waitingEndsAt` is that ask.
 A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
 unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
@@ -203,8 +205,11 @@ ledger: the second one sees the first one's pending amount, as it would see an i
 An `APPROVAL` module is bound, removed or filed again only while asks are paused for the whole token
 (`setAsksPaused(0, true)`, otherwise `AsksNotPaused`): whether a ticket waits for an approver is written at its ask, and a
 change inside a home block a reorg drops would leave one fork's ticket waiting and the other's not. A module change
-does not wait for open tickets: a ticket keeps what was decided at its ask. Only unbinding the compliance from its
-token waits until no ticket holds a reservation (`TicketsStillReserved`). Unbinding the module turns new requests
+does not wait for open tickets: `addModule`, `addAndSetModule`, `removeModule`, `resyncModuleTypes` and
+`callModuleFunction` run while tickets are open, since a ticket keeps what was decided at its ask. Only unbinding
+the compliance from its token waits: it is refused with `ValidationsPending` while the reserved total is above zero,
+and before `latestStopWaitingAt`, the latest `stopWaitingAt` of any ticket, since a new compliance would meet a late
+receipt with no record. Unbinding the module turns new requests
 back into immediate issuances; the OWNER of the compliance can do it if the approvers stop answering, and the
 requests left waiting are discarded past their deadline.
 

@@ -42,6 +42,13 @@ second half, to the receiver's chain, or back to the sender's wallet when the ru
 wallet is minted at home in the receipt's delivery. A home wallet that moves out to an away wallet is the same move
 with no first half: home burns at the ask and sends the `MOVE_OUT`. Away tokens never talk to each other.
 
+An ask is refused while asks are paused for the whole token or on any chain it involves, the sender's or the
+receiver's (`setAsksPaused(chainKey, true)`, `AsksPaused`). The chain its first message goes to must be open, a
+receipt route with a peer, checked at the ask itself, also when the ticket waits for an approval (`ChainNotOpen`).
+A receiver on another away chain needs that chain unblocked, under no hostile change, with a waiting time and open
+(`AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`, `ChainNotOpen`); the first send of an approved
+ticket and every later send check that chain again.
+
 A bring home is a ticket too, of kind `BRING_HOME`, written by an agent with `bringHome(awayWallet, amount,
 homeWallet, salt)` on the compliance for two wallets of one identity. It reserves `amount` on the away wallet in the
 same table as every ticket, so no ticket and no bring home count on the same tokens, and at most one is open per
@@ -100,7 +107,8 @@ for a non-EVM chain until it is.
    nothing else, and the receipt route, set with `setReceiptRoute` to a receipt bridge, that carries money messages out
    and is the only one receipts are taken from. A receipt bridge is a bridge the registry trusts at depth zero
    (`setTrustedGateway(bridge, true, 0)`, `depthOf`); the depth may be set again and is read on every send of a money
-   message and every receipt. The token takes deliveries from receipt bridges only,
+   message and every receipt. `depthOf` never reverts: an unknown bridge reads zero, so the token asks `isTrusted`
+   first. The token takes deliveries from receipt bridges only,
    so a ticket bridge's delivery is refused (`ERC7786RecipientUnauthorizedGateway`, OZ's `WrongRoute`: the message stays
    deliverable through a receipt bridge), and it reads the receipt
    bridge's receiving policy for this chain's receipt bridge when the route is set and on every receipt, refusing
@@ -125,8 +133,9 @@ for a non-EVM chain until it is.
    each answer window (`MAX_ANSWERS_PER_WINDOW`, `answerWindow`), not six for ever. Home sends at most three asks for
    a ticket's receipt and three sends of a half, so six cover home and a redelivery of each; past the limit the
    delivery is consumed and nothing is sent (`AnswerNotSent`), and the next window answers again. The window is set
-   at deployment, and its setter refuses zero. The first send of a stored receipt is not counted, and neither is a still open answer: home
-   gives its ask back on each one, so it must hear every one, and counting them would use up the answers home needs
+   at deployment, and its setter refuses zero. The first send of a stored receipt is not counted, and neither is a
+   still open answer: the first send is the receipt home waits for, and a still open answer that moves the ticket's
+   valid until gives home's ask back, so home must hear every one. Counting them would use up the answers home needs
    once the ticket executed or passed its valid until.
 4. Execute strictly before `validUntil`.
 5. Execute an amount inside `[amountMin, amountMax]`.
@@ -191,10 +200,16 @@ that chain. Three things can happen to an issuance after the Lite acted on it, a
   that home does not count for it yet and that it cannot ask to move. The request sent again with the same terms and
   `salt` takes the same id; the body carries the `salt`, so an agent can send it on the requester's behalf from the
   Lite's copy. That ask takes the money on hold and finishes the move, once the held receipt keeps the ask's terms and
-  the per-ticket cap; no approval module may be bound. If nobody takes it within four waiting times of the sender's
-  chain, anyone cancels it (`cancelHold`): a `BRING_HOME` on the receiver for at most its uncounted credit, then a
-  `MOVE_OUT` of what burned back to the sender. A bring home that burns less than it asked leaves the rest on hold
-  (`CancelHoldShort`) and is not sent again until credit comes back to the receiver. A receipt for a ticket home
+  the per-ticket cap; no approval module may be bound. The take is an ask: it is refused over the identity's asks per
+  window (`AskLimitReached`) and counted there, but not as an open ticket. If nobody takes it within four waiting
+  times of the sender's chain, anyone starts its cancel (`cancelHold(ticketId)`), which sends nothing: the cancel's
+  first half is owed, and anyone sends it, and every later half of the cancel, with `sendSecondHalf(ticketId,
+  wallet)`, since home keeps no wallet's bytes for it. When the Lite moved the tokens to a wallet on its own chain,
+  that half is a `BRING_HOME` on the receiver for at most its uncounted credit, sent even when that credit is zero,
+  then a `MOVE_OUT` of what burned back to the sender; when the tokens left the sender's chain, it is a `MOVE_OUT`
+  back to the sender. A bring home that burns less than it asked, zero included, leaves the rest on hold
+  (`CancelHoldShort`) and is not sent again until credit comes back to the receiver. A cancel already started is not
+  started again (`TicketNotCancellable`). A receipt for a ticket home
   wrote and never sent (waiting for approval, or cancelled before it left) is put on hold the same way, never applied
   as that ticket's move.
 - **Mined again in another block.** The id is the same and the ask block hash is not: the copy home now holds may
@@ -217,8 +232,8 @@ Nothing is written off; a lost message is sent again.
 
 | Lost | Who retries | How |
 |---|---|---|
-| ticket (a resend, or an ask for its receipt) | anyone | `sendTicket(ticketId, to, spender)`: while `Open`, before `validUntil` a resend of a lost ticket that counts as no ask, and from one waiting time after the later of `validUntil` and `seenValidUntil` an ask, three asks at most; one send per waiting time either way; sent to the sender's chain read from the record; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out on the route chosen at the ask (the ticket route falls back to the receipt route when its bridge is no longer trusted), to the pinned pair while it is the current pair or the former pair inside its window, and to the current pair otherwise; refused while that away chain is blocked, under a hostile change, or the token is paused, and for a receiver on another away chain while that chain is blocked, under a hostile change or closed; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
-| move out (a second half) | anyone | `sendSecondHalf(ticketId, wallet)`, `wallet` read off `SecondHalfSent`: an owed half (answered `Expired`, or its send failed inside the receipt's delivery) is sent as a new half with a fresh valid until, at most four halves per money on hold (`NoNewHalfLeft`); otherwise the latest half is sent again byte for byte, three sends at most, at fixed times: one waiting time of its chain after its valid until, then two more. A half sent again goes only to its pinned peer: through the former pair inside the window of a planned change, or the current route while that peer is still the chain's (`PeerChanged` otherwise) |
+| ticket (a resend, or an ask for its receipt) | anyone | `sendTicket(ticketId, to, spender)`: while `Open`, before `validUntil` a resend of a lost ticket that counts as no ask, and from one waiting time after the later of `validUntil` and `seenValidUntil` an ask, three asks at most; one send per waiting time either way; sent to the sender's chain read from the record; rebuilt from the record, `to` and `spender` checked against the ones asked with, and the recorded ask block hash sent again; goes out on the route chosen at the ask (the ticket route falls back to the receipt route when its bridge is no longer trusted), to the pinned pair while it is the current pair or the former pair inside its window, and to the current pair otherwise; refused while that away chain is blocked, under a hostile change, or the token is paused, and for a receiver on another away chain while that chain is blocked, under a hostile change, has no waiting time or is closed; the Lite answers this later copy with its stored receipt, a zero receipt (`Expired`) or a still open answer |
+| move out (a second half) | anyone | `sendSecondHalf(ticketId, wallet)`, `wallet` read off `SecondHalfSent`: an owed half (answered `Expired`, or its send failed inside the receipt's delivery) is sent as a new half with a fresh valid until, at most four halves per money on hold (`NoNewHalfLeft`); every half of a cancel `cancelHold` started is sent here too, its first one included; otherwise the latest half is sent again byte for byte, three sends at most, at fixed times: one waiting time of its chain after its valid until, then two more. A half sent again goes only to its pinned peer: through the former pair inside the window of a planned change, or the current route while that peer is still the chain's (`PeerChanged` otherwise) |
 | bring home, or its receipt | anyone | `sendSecondHalf(ticketId, awayWallet)` while the bring home is open, at the same fixed times as a move out; the Lite answers with its stored receipt or a zero receipt (`Expired`), which ends the bring home with nothing moved. Sent again only to its pinned peer, as a move out is |
 | a receipt, when home no longer asks for it | the reconciler (anyone may) | `resendReceipt(type, halfKey)` on the Lite, rule 7. An off-chain reconciler compares home's records with every Lite's stored receipts, read over RPC (`storedReceipt`), and has a stored receipt sent again when home cancelled that ticket or has no record of its id (a ticket from a home block a reorg dropped, whose receipt was lost). Home then handles it by its own rules: a late receipt for a cancelled ticket is applied as it happened (a move inside one away chain) or taken onto hold and decided (a move to another chain), and one for an id it has no record of is booked on hold (`ReceiptWithoutTicket`). Each resend is paid from the Lite's fee account, within its quota per half |
 
@@ -257,17 +272,22 @@ home's clock ends them: the away chain may still have minted or burned. The oper
    on hold, as a delivered one would be. Without one, for:
    - an open move, or one waiting for approval: it is cancelled once that chain's clock is past the latest valid
      until its copies can carry: home's own plus the chain's reorg slot shift, the one a still open answer reported,
-     and the stored copy's. This one is closed even while the chain is blocked;
+     and the stored copy's. This one is closed even while the chain is blocked, and, being a cancel, never while a
+     hostile change runs on that chain (`HostileChangeNotOver`);
    - an open bring home: it ends with nothing moved once that chain's clock is past its half's valid until;
    - money on hold, its half going to the receiver or back to the sender: once that chain's clock is past the half's
      valid until, the money goes back to the sender by a new `MOVE_OUT` while the sender's own chain has a receipt
      route; otherwise it is minted at home at once, to a home sender or to the sender's identity contract;
+   - money on hold with no ticket whose tokens left their chain, the closed one: the carried part of an earlier hold
+     is applied first, then the money is minted at home to the sender's identity contract, once its cancel is due
+     and, when a return half of its cancel is out, that chain's clock is past that half's valid until;
    - money on hold with no ticket, moved inside that chain (the cancel of the hold): what the receiver still holds
      as uncounted credit is applied as the move inside that chain it was, never minted to the sender, after the
      carried part of an earlier hold is applied first, last in, first out. The rules are asked again about each
      move; one they refuse is announced with `MoveBreachedRule`, never refused, since the away token already made it.
    Every case but the open move needs that chain unblocked, and a bring home or money on hold the sender's chain
-   too; none runs under a stop of the token or a hostile change.
+   too; none runs under a stop of the token. A hostile change holds only the cancel of an open move or of one
+   waiting for approval; every other case, a stored receipt applied included, runs under it.
 4. Set the receipt route again once every ticket of that chain is decided.
 
 Nothing on chain announces a half that keeps dying. The operator's monitor alerts on the fourth `SecondHalfSent` of
@@ -277,22 +297,30 @@ too short for its delivery and clock lead, and the waiting time is raised before
 
 ## Changing a route or a peer
 
-A planned change (`setReceiptRoute` on an open route, or `setPeer`) is made on home first. Home keeps the route and
-peer the chain had as its former pair and takes every receipt from it for four waiting times of that away chain
-(`FormerRouteKept`): home keeps the time of the change and reads the waiting time from the compliance on every use,
-so changing the waiting time moves the end of a window already running, and of a hostile change's freeze too. The Lite switches only after home's
-change is final, early enough that its last receipts on the old pair land inside those four waiting times. A second
-change of route or peer on that chain inside the window is refused while its route is open
-(`RouteChangedTooRecently`): it would drop the former pair. A closed route keeps no new pair, so its peer and route
-may be set again inside the window. A receipt that came on the former pair inside the window and then waited (chain blocked, token stopped)
-stays applicable after the window ends. The accepted cost: an old peer that turns hostile inside the window can have
-home apply receipts it forges, for any ticket of that chain. When an away chain is first opened, set its peer before
-its receipt route: a change on a chain that has a route starts a change window.
+There is one setter per change, and no event of its own for the former pair: `ReceiptRouteSet` and `PeerSet` say a
+change happened.
 
-A hostile peer is replaced with `replaceHostilePeer`, never with `setPeer`. Home keeps no former pair, and for four
-waiting times of that away chain no ask, no ticket send, no ask for a receipt and no cancel runs for it
-(`HostileChangeNotOver`); receipts still land, and halves still go out (`sendSecondHalf`). Halves pinned to the hostile peer keep their receipt from it: for full
-containment the operator also distrusts its bridge.
+A planned change (`setReceiptRoute` on an open route, or `setPeer(chainKey, peer, false)`) is made on home first.
+Home keeps the route and peer the chain had as its former pair and takes every receipt from it for four waiting times
+of that away chain: home keeps the time of the change and reads the waiting time from the compliance on every use,
+so changing the waiting time moves the end of a window already running, and of a hostile change's freeze too. The
+Lite switches only after home's change is final, early enough that its last receipts on the old pair land inside
+those four waiting times. A second change of route or peer on that chain inside the window is not refused: it keeps
+the pair the chain has then and drops the older one. So the operator plans changes of one chain at least four of its
+waiting times apart; the token does not check it. A change while the route is closed keeps no former pair. A receipt
+that came on the former pair inside the window and then waited (chain blocked, token stopped) stays applicable after
+the window ends. The accepted cost: an old peer that turns hostile inside the window can have home apply receipts it
+forges, for any ticket of that chain. When an away chain is first opened, set its peer before its receipt route: a
+change on a chain that has a route starts a change window.
+
+A hostile peer is replaced with the same setter, `setPeer(chainKey, peer, true)`. Home keeps no former pair, the one
+of an earlier planned change included, and for four waiting times of that away chain (`hostileChangeEndsAt`) no ask,
+no ticket send, no ask for a receipt and no cancel runs for it (`HostileChangeNotOver`): `cancelTickets`,
+`cancelHold`, and the close by hand of an open move or one waiting for approval. Receipts still land, halves still go
+out (`sendSecondHalf`), bring homes are still written and sent, and every other close by hand runs. Halves pinned to
+the hostile peer keep their receipt from it: for full containment the operator also distrusts its bridge.
+
+Closing a receipt route that is already closed changes nothing and emits `ReceiptRouteClosed` again.
 
 ## What the reference chain does with a Lite that breaks a rule
 
@@ -300,7 +328,7 @@ containment the operator also distrusts its bridge.
 |---|---|
 | 3, 7: another receipt for a half that already has one, applied or waiting | `ReceiptRefused` (`AnotherBody`), consumed, nothing applied, the compliance blocks that away chain (`blockAwayChain`) |
 | the receipt home holds for a half, delivered again byte for byte (a bridge redelivery, or the Lite resending its receipt) | `ReceiptDuplicate`, consumed, nothing applied, nothing blocked; a chain blocked over the first delivery and reopened stays open |
-| a first-half receipt for an id home has no record of, or for a ticket home never sent | put on hold under the sender with no destination (`ReceiptWithoutTicket`), nothing blocked; refused and the chain blocked when its sender is not on that chain or, for a ticket home wrote, its wallets are not the ticket's; taken by the ask mined again, or cancelled with `cancelHold` |
+| a first-half receipt for an id home has no record of, or for a ticket home never sent | put on hold under the sender with no destination (`ReceiptWithoutTicket`), nothing blocked; refused and the chain blocked when its sender is not on that chain or, for a ticket home wrote, its wallets are not the ticket's; taken by the ask mined again, or cancelled with `cancelHold`, whose halves `sendSecondHalf` sends |
 | a second-half receipt for an id home has no record of | `ReceiptUnknown`, consumed, nothing written, nothing blocked |
 | a good receipt that cannot be applied yet: the token stopped, its away chain blocked, or the sender's away balance too low (for a receipt with no ticket, its away balance and the uncounted credit it may carry) | `ReceiptWaiting`, consumed and kept under its half with the bridge and peer that brought it, nothing blocked; anyone applies it with `applyWaitingReceipt` once it can be, after the route check runs again on that bridge and peer; the same receipt delivered again then applies it too |
 | 6: wrong wallets, a chain the ticket was not sent to, or a half home never sent | `ReceiptRefused` (`WrongWallets`, `WrongChain`, `HalfNotSent`), consumed, nothing applied, the compliance blocks that away chain; the ticket stands |
@@ -343,7 +371,8 @@ distrust its gateway.
 |---|---|---|---|
 | token pause, `pause` | every balance movement between wallets, native or satellite; every inbound receipt waits at home; new tickets, bring homes, approvals into issuance and asks for receipts; cancels of tickets whose receipt may be waiting | the pauser | the pauser, `unpause` |
 | block an away chain, `blockAwayChain` on the compliance | applying one chain's receipts (they wait at home); move outs, bring homes, new tickets and asks for receipts toward it; cancels of its tickets on home's clock, and every close by hand on it but an open move's | the pauser; the compliance itself on a bad receipt from that chain or a receipt that breaks its terms | the pauser, `unblockAwayChain` |
-| hostile peer replaced, `replaceHostilePeer` | asks, ticket sends, asks for receipts and cancels for one away chain, for four of its waiting times (`HostileChangeNotOver`); receipts still land | the identity manager | nobody: it ends by itself at `hostileChangeEndsAt` |
+| asks paused, `setAsksPaused(chainKey, true)` on the compliance | new asks that involve that chain, as the sender's or the receiver's; zero pauses every new ask; receipts, asks for receipts and cancels go on (`AsksPaused`) | the compliance manager | the compliance manager, `setAsksPaused(chainKey, false)` |
+| hostile peer replaced, `setPeer(chainKey, peer, true)` | asks, ticket sends, asks for receipts and cancels for one away chain, for four of its waiting times (`HostileChangeNotOver`); receipts still land, halves and bring homes still go out | the identity manager | nobody: it ends by itself at `hostileChangeEndsAt` |
 | receipt route close, `closeReceiptRoute` | every send toward one chain and every message from it, a receipt of a half already sent included (`ChainNotOpen`); they stay deliverable and land once a route is set again; no ticket toward that chain is cancelled on home's clock meanwhile: the identity manager closes it by hand, `closeByHand` on the compliance, from a read of that chain's stored receipt and clock in one final block | the identity manager | the identity manager, `setReceiptRoute` with a receipt bridge |
 | bridge distrust, `setTrustedGateway(bridge, false, 0)` on `TrustedGatewayRegistry` | every message through that bridge, pinned or not, for every token; no ticket whose receipt route it is is cancelled on home's clock meanwhile: the route is closed, then the ticket is closed by hand from a read of its chain | the registry's interop manager | never: a distrusted bridge is never trusted again, so the receipt route is set to a new receipt bridge |
 
