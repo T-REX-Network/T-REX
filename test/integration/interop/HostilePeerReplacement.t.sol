@@ -309,6 +309,23 @@ contract HostilePeerReplacementTest is InteropSuiteTest {
         assertEq(token.hostileChangeEndsAt(base), block.timestamp, "no freeze");
     }
 
+    /// @notice The freeze is four of the chain's waiting times after the change, the waiting time read as it is now:
+    ///         lengthening it after the change makes the freeze longer.
+    function test_hostileChangeEndsAt_movesWithTheWaitingTime() public {
+        uint64 changedAt = uint64(block.timestamp);
+        uint64 longerWaitingTime = 2 * POLYGON_WINDOW;
+        _replaceThePeer();
+
+        vm.prank(deployer);
+        boundCompliance.setWaitingTime(polygon, longerWaitingTime);
+
+        uint64 endAfterTheChange = changedAt + 4 * longerWaitingTime;
+        assertEq(token.hostileChangeEndsAt(polygon), endAfterTheChange, "the end moved");
+        vm.warp(changedAt + 4 * POLYGON_WINDOW);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.HostileChangeNotOver.selector, polygon, endAfterTheChange));
+        _ask(10, 50);
+    }
+
     function test_hostileChangeEndsAt_isZero_forAChainNeverReplaced() public view {
         assertEq(token.hostileChangeEndsAt(polygon), 0);
         assertEq(token.hostileChangeEndsAt(optimism), 0);

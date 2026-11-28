@@ -211,7 +211,8 @@ interface ITREXMessaging {
     function replaceHostilePeer(bytes32 chainKey, bytes calldata peer) external;
 
     /// @dev Until when asks, ticket sends and cancels for `chainKey` stay frozen after its peer was replaced as
-    /// hostile; the compliance reads it. Frozen while the time is before it.
+    /// hostile: four of the chain's waiting times after the change, the waiting time read as it is now. The
+    /// compliance reads it. Frozen while the time is before it.
     /// @param chainKey The away chain to look up.
     /// @return The end of the freeze, or zero when the peer was never replaced as hostile.
     function hostileChangeEndsAt(bytes32 chainKey) external view returns (uint64);

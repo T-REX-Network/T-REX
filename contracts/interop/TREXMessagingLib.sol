@@ -112,12 +112,12 @@ library TREXMessagingLib {
     }
 
     /// @dev The receipt route and peer an away chain had before a planned change, still taken for every receipt
-    ///  until `acceptedUntil`: the away token switches after home, and its receipts sent before it switched arrive
-    ///  on this pair. The peer is kept whole so an ask can still reach it, and the away side so the former bridge's
+    ///  until four of the chain's waiting times after `changedAt`, the waiting time read as it is then: the away
+    ///  token switches after home, and its receipts sent before it switched arrive on this pair. The peer is kept whole so an ask can still reach it, and the away side so the former bridge's
     ///  receiving policy is asked about its own sender.
     struct FormerRoute {
         address bridge;
-        uint64 acceptedUntil;
+        uint64 changedAt;
         bytes peer;
         AwayReceiptBridge awayReceiptBridge;
     }
@@ -163,9 +163,9 @@ library TREXMessagingLib {
         /// The pair each away chain had before its last planned change of route or peer. Deleted by a hostile change.
         mapping(bytes32 chainKey => FormerRoute formerRoute) formerReceiptRoutes;
 
-        /// Until when asks, ticket sends and cancels for each away chain stay frozen after its peer was replaced as
-        /// hostile. The compliance reads it; receipts still land.
-        mapping(bytes32 chainKey => uint64 endsAt) hostileChangeEndsAt;
+        /// When each away chain's peer was last replaced as hostile. Asks, ticket sends and cancels for it stay
+        /// frozen for four of its waiting times after, see {hostileChangeEndsAt}; receipts still land.
+        mapping(bytes32 chainKey => uint64 changedAt) hostileChangedAt;
     }
 
     // keccak256(abi.encode(uint256(keccak256("erc3643.storage.TREXMessaging")) - 1)) & ~bytes32(uint256(0xff));
@@ -309,13 +309,21 @@ library TREXMessagingLib {
         _requireValidPeer(messagingStorage, chainKey, peer);
 
         // No former pair: home cannot tell a receipt of the hostile peer from an honest one.
-        uint64 endsAt = uint64(block.timestamp) + _changeWindowOf(chainKey);
         delete messagingStorage.formerReceiptRoutes[chainKey];
-        messagingStorage.hostileChangeEndsAt[chainKey] = endsAt;
+        messagingStorage.hostileChangedAt[chainKey] = uint64(block.timestamp);
         messagingStorage.peers[chainKey] = peer;
 
         emit EventsLib.PeerSet(chainKey, peer);
-        emit EventsLib.HostilePeerReplaced(chainKey, peer, endsAt);
+        emit EventsLib.HostilePeerReplaced(chainKey, peer, hostileChangeEndsAt(chainKey));
+    }
+
+    /// @dev See {ITREXMessaging-hostileChangeEndsAt}. Computed from the waiting time as it is now, so changing it
+    ///  moves the end of a freeze already running.
+    function hostileChangeEndsAt(bytes32 chainKey) public view returns (uint64) {
+        uint64 changedAt = layout().hostileChangedAt[chainKey];
+        bool neverReplacedAsHostile = changedAt == 0;
+        if (neverReplacedAsHostile) return 0;
+        return changedAt + _changeWindowOf(chainKey);
     }
 
     /* ----- Outbound ----- */
@@ -625,8 +633,8 @@ library TREXMessagingLib {
         FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
         bool sameBridge = former.bridge == gateway;
         bool samePeer = keccak256(former.peer) == senderPeerKey;
-        bool insideTheWindow = arrivedAt < former.acceptedUntil;
-        return sameBridge && samePeer && insideTheWindow;
+        if (!sameBridge || !samePeer) return false;
+        return arrivedAt < _formerPairEndsAt(chainKey, former);
     }
 
     /// @dev Whether an ask for the receipt of the half pinned to `pin` goes to the former pair: the pin is that pair,
@@ -661,7 +669,10 @@ library TREXMessagingLib {
     function _requireNoChangeInsideTheWindow(MessagingStorage storage messagingStorage, bytes32 chainKey) private view {
         bool chainHasARoute = messagingStorage.receiptRoutes[chainKey] != address(0);
         if (!chainHasARoute) return;
-        uint64 allowedAt = messagingStorage.formerReceiptRoutes[chainKey].acceptedUntil;
+        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
+        bool keepsAFormerPair = former.bridge != address(0);
+        if (!keepsAFormerPair) return;
+        uint64 allowedAt = _formerPairEndsAt(chainKey, former);
         require(block.timestamp >= allowedAt, ErrorsLib.RouteChangedTooRecently(chainKey, allowedAt));
     }
 
@@ -673,17 +684,24 @@ library TREXMessagingLib {
         if (currentBridge == address(0)) return;
 
         bytes memory currentPeer = peerFor(chainKey);
-        uint64 acceptedUntil = uint64(block.timestamp) + _changeWindowOf(chainKey);
         FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
         former.bridge = currentBridge;
-        former.acceptedUntil = acceptedUntil;
+        former.changedAt = uint64(block.timestamp);
         former.peer = currentPeer;
         former.awayReceiptBridge = messagingStorage.awayReceiptBridges[chainKey];
 
-        emit EventsLib.FormerRouteKept(chainKey, currentBridge, keccak256(currentPeer), acceptedUntil);
+        emit EventsLib.FormerRouteKept(
+            chainKey, currentBridge, keccak256(currentPeer), _formerPairEndsAt(chainKey, former)
+        );
     }
 
-    /// @dev Four waiting times of the away chain, read from the compliance at the change: the compliance owns the
+    /// @dev Until when `former` is taken: four of the chain's waiting times after its change, the waiting time read
+    ///  as it is now, so changing it moves the end of a window already running.
+    function _formerPairEndsAt(bytes32 chainKey, FormerRoute storage former) private view returns (uint64) {
+        return former.changedAt + _changeWindowOf(chainKey);
+    }
+
+    /// @dev Four waiting times of the away chain, read from the compliance on every use: the compliance owns the
     ///  waiting time, so it is never copied here.
     function _changeWindowOf(bytes32 chainKey) private view returns (uint64) {
         address compliance = address(IERC3643(address(this)).compliance());

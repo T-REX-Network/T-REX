@@ -126,7 +126,7 @@ abstract contract TREXMessaging is ITREXMessaging, ERC7786Recipient {
 
     /// @inheritdoc ITREXMessaging
     function hostileChangeEndsAt(bytes32 chainKey) public view returns (uint64) {
-        return TREXMessagingLib.layout().hostileChangeEndsAt[chainKey];
+        return TREXMessagingLib.hostileChangeEndsAt(chainKey);
     }
 
     /// @inheritdoc ITREXMessaging

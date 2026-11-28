@@ -208,7 +208,8 @@ home's clock ends them: the away chain may still have minted or burned. The oper
 
 A planned change (`setReceiptRoute` on an open route, or `setPeer`) is made on home first. Home keeps the route and
 peer the chain had as its former pair and takes every receipt from it for four waiting times of that away chain
-(`FormerRouteKept`, the waiting time read from the compliance at the change). The Lite switches only after home's
+(`FormerRouteKept`): home keeps the time of the change and reads the waiting time from the compliance on every use,
+so changing the waiting time moves the end of a window already running, and of a hostile change's freeze too. The Lite switches only after home's
 change is final, early enough that its last receipts on the old pair land inside those four waiting times. A second
 change of route or peer on that chain inside the window is refused while its route is open
 (`RouteChangedTooRecently`): it would drop the former pair. A closed route keeps no new pair, so its peer and route

@@ -157,10 +157,12 @@ library EventsLib {
     event TicketRouteSet(bytes32 indexed chainKey, address indexed gateway);
     event PeerSet(bytes32 indexed chainKey, bytes peer);
     /// @notice Emitted when a planned change keeps the route and peer `chainKey` had as its former pair, taken for
-    ///  every receipt until `acceptedUntil`.
+    ///  every receipt until `acceptedUntil`, with the waiting time as it is at the change: a later change of the
+    ///  waiting time moves that end.
     event FormerRouteKept(bytes32 indexed chainKey, address indexed bridge, bytes32 peerKey, uint64 acceptedUntil);
     /// @notice Emitted when the peer of `chainKey` is replaced as hostile: no former pair is kept, and asks, ticket
-    ///  sends and cancels for that away chain wait until `endsAt`.
+    ///  sends and cancels for that away chain wait until `endsAt`, with the waiting time as it is at the change: a
+    ///  later change of the waiting time moves that end, see {ITREXMessaging-hostileChangeEndsAt}.
     event HostilePeerReplaced(bytes32 indexed chainKey, bytes peer, uint64 endsAt);
     /// @notice Emitted when the half `halfKey` toward `chainKey` is pinned to `gateway`, the chain's receipt route
     ///         when it left, and to the peer it went to, whichever route carried it out. Half 0's key is the ticket

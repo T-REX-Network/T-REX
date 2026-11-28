@@ -159,6 +159,36 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the change passes once the window ends");
     }
 
+    /// @notice The window is four of the chain's waiting times after the change, the waiting time read as it is at
+    ///         each use: lengthening it after the change keeps the former pair, and holds a second change, longer.
+    function test_receiveReceipt_acceptsTheFormerRoute_untilTheEndTheLongerWaitingTimeGives() public {
+        uint64 changedAt = uint64(block.timestamp);
+        uint64 longerWaitingTime = 2 * POLYGON_WINDOW;
+        uint64 endBeforeTheChange = changedAt + 4 * POLYGON_WINDOW;
+        uint64 endAfterTheChange = changedAt + 4 * longerWaitingTime;
+        _changeRoute();
+        bytes32 answeredLate = _ask(10, 50);
+        uint256 index = _formerLiteSends(polygonBridge, _receipt(answeredLate, 40));
+        vm.prank(deployer);
+        boundCompliance.setWaitingTime(polygon, longerWaitingTime);
+
+        vm.warp(endBeforeTheChange);
+        polygonBridge.relay(index);
+        assertEq(uint8(boundCompliance.statusOf(answeredLate)), uint8(ITickets.TicketStatus.Done), "still taken");
+
+        ERC7786GatewayMock thirdBridge = _newReceiptBridge(POLYGON);
+        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.RouteChangedTooRecently.selector, polygon, endAfterTheChange));
+        vm.prank(deployer);
+        token.setReceiptRoute(
+            chainType, chainReference, address(thirdBridge), _awayChainSelector(POLYGON), _awayReceiptBridge(POLYGON)
+        );
+
+        vm.warp(endAfterTheChange);
+        _openEvmChain(token, POLYGON, address(thirdBridge));
+        assertEq(token.receiptRouteFor(polygon), address(thirdBridge), "the change passes at the new end");
+    }
+
     /// @notice A closed route has no pair a change could drop: inside the window of an earlier change, its peer and
     ///         its route are set again at once, and the former pair kept by that earlier change still lands receipts.
     function test_setReceiptRoute_setsAClosedRouteAgain_insideTheWindowOfAnEarlierChange() public {
