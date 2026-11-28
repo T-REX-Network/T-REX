@@ -674,14 +674,15 @@ interface ITickets {
     ///
     /// Requirements:
     /// - Each id must have been issued; otherwise reverts with `UnknownTicket`.
-    /// - A move sent nowhere, `WaitingForApproval` or opened by the approver and never sent, may be cancelled by
-    ///   anyone once its `validUntil` passed, since nothing was sent for it; otherwise reverts with `CancelNotDue`.
-    ///   Of the rules below, only the token's stop, the block of its away chain, a hostile change and, for an away
-    ///   sender, the open route of its away chain apply to it: a copy from a dropped home block may be held there.
-    /// - Each other id must be a move stored `Open`; otherwise reverts with `TicketNotCancellable`. A bring home is
-    ///   never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
-    /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` more than one waiting time past
-    ///   that ask; otherwise reverts with `CancelNotDue`.
+    /// - A move `WaitingForApproval` may be cancelled by anyone once its `validUntil` passed, since nothing was sent
+    ///   for it; otherwise reverts with `CancelNotDue`. Of the rules below, only the token's stop, the block of its
+    ///   away chain, a hostile change and, for an away sender, the open route of its away chain apply to it: a copy
+    ///   from a dropped home block may be held there.
+    /// - Each other id must be a move stored `Open`, sent or not; otherwise reverts with `TicketNotCancellable`. A
+    ///   bring home is never cancelled: its half may still burn, and `sendSecondHalf` asks for its receipt.
+    /// - An ask for its receipt sent at or after `waitingEndsAt`, and `block.timestamp` at least one waiting time past
+    ///   that ask; otherwise reverts with `CancelNotDue`. A ticket the approver opened and nobody sent has no ask
+    ///   until its first send, made at or after `waitingEndsAt`, counts as one.
     /// - The token not paused; otherwise reverts with `TokenPaused`: every receipt waits under the pause, so the
     ///   one that answers the ticket may be among them. This holds for a ticket `WaitingForApproval` too.
     /// - The sender's away chain not blocked; otherwise reverts with `AwayChainBlocked`: its receipts wait, and may
@@ -706,27 +707,29 @@ interface ITickets {
     /// the ticket was asked with; otherwise reverts with `ValidationBodyMismatch`.
     ///
     /// The first send of a ticket the approver opened, toward the chain its first message goes to, read from the
-    /// record: the sender's, or the receiver's for a home `from`. Before its `validUntil`, otherwise
-    /// `ValidationExpired`; the token not paused and that chain open as at a request (`TokenPaused`,
-    /// `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a receiver's other away chain as at a
-    /// request (`AwayChainBlocked`, `HostileChangeNotOver`, `ChainNotOpen`); no receipt waiting for the ticket, otherwise
-    /// `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove` does with no approval module, or, for a home
-    /// `from`, burns onto hold and sends the `MOVE_OUT`; its maximum must still fit in the wallet's unfrozen balance,
-    /// as at the ask, otherwise `RequestAboveBalance`.
+    /// record: the sender's, or the receiver's for a home `from`. At any time: the token not paused and that chain
+    /// open as at a request (`TokenPaused`, `AwayChainBlocked`, `HostileChangeNotOver`, `WaitingTimeNotSet`), and a
+    /// receiver's other away chain as at a request (`AwayChainBlocked`, `HostileChangeNotOver`, `ChainNotOpen`); no
+    /// receipt waiting for the ticket, otherwise `ApplyWaitingReceiptFirst`. Emits `TicketWritten`, as `askToMove`
+    /// does with no approval module, and `ReceiptAsked` before it when sent at or after `waitingEndsAt`: that first
+    /// send is also the first ask for the receipt. For a home `from`, burns onto hold and sends the `MOVE_OUT`
+    /// instead; its maximum must still fit in the wallet's unfrozen balance, as at the ask, otherwise
+    /// `RequestAboveBalance`.
     ///
-    /// Otherwise an ask for the receipt of an open ticket: sends the ticket again, byte for byte, through the bridge
-    /// the first send pinned. The away token answers a later copy with the receipt it stored, a zero receipt when the
-    /// ticket expired unexecuted, or a still open answer. `MAX_RECEIPT_ASKS` asks at most, one per waiting time: the
-    /// first at `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), each
-    /// next one also at least one waiting time after the last send. The ask goes to the sender's chain, read from the
-    /// record.
+    /// Otherwise a copy of an open ticket that left: sends the ticket again, byte for byte, through the bridge the
+    /// first send pinned. Before `validUntil`, a resend of a lost ticket, which counts as no ask. At or after
+    /// `waitingEndsAt` (the later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time), an ask for the
+    /// receipt, `MAX_RECEIPT_ASKS` at most: the away token answers a later copy with the receipt it stored, a zero
+    /// receipt when the ticket expired unexecuted, or a still open answer. One send per waiting time either way. The
+    /// copy goes to the sender's chain, read from the record.
     ///
-    /// Requirements of an ask:
+    /// Requirements of a copy sent again:
     /// - `ticketId` must have been issued; otherwise reverts with `UnknownTicket`.
     /// - It must be a move stored `Open`; otherwise reverts with `ValidationNotResendable`. A bring home is sent
     ///   again with `sendSecondHalf`.
-    /// - Fewer than `MAX_RECEIPT_ASKS` asks standing; otherwise reverts with `NoAsksLeft`.
-    /// - `block.timestamp` at or after the next ask's time; otherwise reverts with `SendNotDue`.
+    /// - `block.timestamp` before `validUntil` or at or after `waitingEndsAt`, and at least one waiting time after the
+    ///   last send; otherwise reverts with `SendNotDue`.
+    /// - For an ask, fewer than `MAX_RECEIPT_ASKS` asks standing; otherwise reverts with `NoAsksLeft`.
     /// - The token must not be paused; otherwise reverts with `TokenPaused`.
     /// - The sender's chain must not be blocked; otherwise reverts with `AwayChainBlocked`.
     /// - No hostile change may run on the sender's chain; otherwise reverts with `HostileChangeNotOver`.
@@ -738,7 +741,7 @@ interface ITickets {
     /// The ask goes to the pinned pair while it is the chain's current pair or its former pair inside the window of a
     /// planned change, and to the current pair otherwise.
     ///
-    /// Emits `ReceiptAsked`, then the token's `ProtocolMessageSent`.
+    /// Emits `ReceiptAsked` for an ask, then the token's `ProtocolMessageSent`.
     /// @param ticketId The ticket sent again.
     /// @param to ERC-7930 interoperable address of the recipient, as issued.
     /// @param spender ERC-7930 address of the spender, as issued, or empty.

@@ -274,19 +274,31 @@ contract TicketsDiscardUnitTest is ModularComplianceBaseUnitTest {
         mc.cancelTickets(_ids(bytes32(uint256(7))));
     }
 
-    /// @notice The answer to the ask may land in the last second of its waiting time, so the cancel comes after.
+    /// @notice The cancel is due one waiting time after the ask, at that very second, never before.
     function test_cancelTickets_reverts_when_theAskIsStillInsideItsWaitingTime() public {
         bytes32 id = _issue();
         vm.warp(FIRST_ASK_DUE_AT);
         mc.sendTicket(id, toSat, "");
         uint64 dueAt = FIRST_ASK_DUE_AT + POLYGON_WINDOW;
 
-        vm.warp(dueAt);
+        vm.warp(dueAt - 1);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, dueAt));
         mc.cancelTickets(_ids(id));
 
         assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Open));
+    }
+
+    function test_cancelTickets_cancels_exactlyOneWaitingTimeAfterTheAsk() public {
+        bytes32 id = _issue();
+        vm.warp(FIRST_ASK_DUE_AT);
+        mc.sendTicket(id, toSat, "");
+
+        vm.warp(FIRST_ASK_DUE_AT + POLYGON_WINDOW);
+        vm.prank(stranger);
+        mc.cancelTickets(_ids(id));
+
+        assertEq(uint8(mc.statusOf(id)), uint8(ITickets.TicketStatus.Cancelled));
     }
 
     function test_cancelTickets_RevertWhen_AlreadyDiscarded() public {

@@ -589,8 +589,8 @@ library TicketLib {
     }
 
     /// @dev Sends a ticket, for anyone, see {ITickets-sendTicket}: the first send of a ticket the approver opened,
-    ///  or an ask for the receipt of a ticket that left. Either way the caller supplies the two envelopes again, which
-    ///  must be the ones it was asked with, and the ticket travels the route chosen at its ask.
+    ///  or a copy of a ticket that left. Either way the caller supplies the two envelopes again, which must be the
+    ///  ones it was asked with, and the ticket travels the route chosen at its ask.
     /// @param token the token the compliance is bound to
     function sendTicket(bytes32 ticketId, bytes calldata to, bytes calldata spender, address token) external {
         ValidationStorage storage store = layout();
@@ -602,13 +602,14 @@ library TicketLib {
             _sendTheApprovedTicket(store, ticket, ticketId, to, token);
             return;
         }
-        _askForTheReceipt(ticket, ticketId, to, spender, token);
+        _sendAgain(ticket, ticketId, to, spender, token);
     }
 
-    /// @dev The first send of a ticket the approver opened, before its valid until, toward the chain its first
-    ///  message goes to, which must be open as at a request. No receipt may wait for it: one that came before the
-    ///  send answers no copy home sent, and is booked on hold once it can be. A home wallet's move out is burned
-    ///  onto hold and sent instead, as at a request with no approval module.
+    /// @dev The first send of a ticket the approver opened, at any time, toward the chain its first message goes to,
+    ///  which must be open as at a request. Sent at or after {waitingEndsAtOf}, it is also the first ask for the
+    ///  receipt, so the ticket is cancelled only once that ask went unanswered. No receipt may wait for it: one that
+    ///  came before the send answers no copy home sent, and is booked on hold once it can be. A home wallet's move out
+    ///  is burned onto hold and sent instead, as at a request with no approval module.
     function _sendTheApprovedTicket(
         ValidationStorage storage store,
         ITickets.Ticket storage ticket,
@@ -616,7 +617,6 @@ library TicketLib {
         bytes calldata to,
         address token
     ) private {
-        require(block.timestamp < ticket.validUntil, ErrorsLib.ValidationExpired(ticketId, ticket.validUntil));
         (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
         bytes32 chainKey = ticket.fromChainKey;
         if (fromHome) chainKey = ticket.toChainKey;
@@ -628,6 +628,11 @@ library TicketLib {
         if (fromHome) {
             SecondHalfLib.moveOutFromHome(ticketId, to, token);
             return;
+        }
+        bool anAsk = block.timestamp >= waitingEndsAtOf(ticket);
+        if (anAsk) {
+            ticket.asksForReceipt = 1;
+            emit EventsLib.ReceiptAsked(ticketId, 1);
         }
         bytes memory body = _issueRecorded(
             ticketId,
@@ -648,11 +653,13 @@ library TicketLib {
         _dispatch(token, ticketId, chainKey, ticket.validUntil, body);
     }
 
-    /// @dev Asks the away token for the ticket's receipt: the ticket rebuilt from its record and the two envelopes,
-    ///  sent byte for byte, ask block hash included. At most one ask per waiting time, see
-    ///  {_requireReceiptCanBeAsked}, and at most `MAX_RECEIPT_ASKS` times. A blocked sender's chain refuses an ask as it refuses an ask to move, and so do a hostile
-    ///  change running on it, see {requireNoHostileChange}, and the token's own pause, see {requireTokenRunning}.
-    function _askForTheReceipt(
+    /// @dev Sends a ticket that left again: the ticket rebuilt from its record and the two envelopes, byte for byte,
+    ///  ask block hash included. Before its valid until, a resend of a lost ticket, counted as no ask; from
+    ///  {waitingEndsAtOf}, an ask for the receipt, at most `MAX_RECEIPT_ASKS` times; one send per waiting time either
+    ///  way, see {_requireCanBeSentAgain}. A blocked sender's chain refuses it as it refuses an ask to move, and so do
+    ///  a hostile change running on it, see {requireNoHostileChange}, and the token's own pause, see
+    ///  {requireTokenRunning}.
+    function _sendAgain(
         ITickets.Ticket storage ticket,
         bytes32 ticketId,
         bytes calldata to,
@@ -660,7 +667,7 @@ library TicketLib {
         address token
     ) private {
         bytes32 chainKey = ticket.fromChainKey;
-        _requireReceiptCanBeAsked(ticket, ticketId);
+        bool anAsk = _requireCanBeSentAgain(ticket, ticketId);
         requireTokenRunning(token);
         requireAwayChainNotBlocked(chainKey);
         requireNoHostileChange(token, chainKey);
@@ -680,9 +687,11 @@ library TicketLib {
             askBlockHash: ticket.askBlockHash
         });
 
-        ticket.asksForReceipt += 1;
+        if (anAsk) {
+            ticket.asksForReceipt += 1;
+            emit EventsLib.ReceiptAsked(ticketId, ticket.asksForReceipt);
+        }
         ticket.lastSentAt = uint64(block.timestamp);
-        emit EventsLib.ReceiptAsked(ticketId, ticket.asksForReceipt);
 
         _sendOnItsRoute(token, ticket.onReceiptRoute, ticketId, chainKey, abi.encode(rebuilt));
     }
@@ -706,21 +715,30 @@ library TicketLib {
         require(waiting.bodyHash == bytes32(0), ErrorsLib.ApplyWaitingReceiptFirst(ticketId, waiting.chainKey));
     }
 
-    /// @dev Whether the ticket's receipt may be asked for now: see {sendTicket}. The first ask once the receipt is
-    ///  overdue, at {waitingEndsAtOf}; each next one also a waiting time after the last send, so a late caller cannot
-    ///  send two asks at once. A bring home has no ticket to send: its half is asked for with
-    ///  {SecondHalfLib-sendSecondHalf}.
-    function _requireReceiptCanBeAsked(ITickets.Ticket storage ticket, bytes32 ticketId) private view {
+    /// @dev Whether a ticket that left may be sent again now, see {sendTicket}, and whether this send is an ask for its
+    ///  receipt: before its valid until a resend, from {waitingEndsAtOf} an ask, never in between; and one waiting
+    ///  time after the last send either way, so a late caller cannot send two at once. A bring home has no ticket to
+    ///  send: its half is sent again with {SecondHalfLib-sendSecondHalf}.
+    /// @return anAsk whether the send is an ask for the receipt
+    function _requireCanBeSentAgain(ITickets.Ticket storage ticket, bytes32 ticketId)
+        private
+        view
+        returns (bool anAsk)
+    {
         ITickets.TicketStatus status = ticket.status;
         require(status == ITickets.TicketStatus.Open, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
         bool aMove = ticket.kind == ITickets.TicketKind.MOVE;
         require(aMove, ErrorsLib.ValidationNotResendable(ticketId, uint8(status)));
-        require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
-        uint64 dueAt = waitingEndsAtOf(ticket);
-        bool askedBefore = ticket.asksForReceipt != 0;
+        uint64 waitingEndsAt = waitingEndsAtOf(ticket);
+        anAsk = block.timestamp >= waitingEndsAt;
+        bool aResend = block.timestamp < ticket.validUntil;
+        require(anAsk || aResend, ErrorsLib.SendNotDue(ticketId, waitingEndsAt));
         uint64 oneWaitingTimeAfterTheLastSend = ticket.lastSentAt + ticket.waitingTime;
-        if (askedBefore && oneWaitingTimeAfterTheLastSend > dueAt) dueAt = oneWaitingTimeAfterTheLastSend;
-        require(block.timestamp >= dueAt, ErrorsLib.SendNotDue(ticketId, dueAt));
+        require(
+            block.timestamp >= oneWaitingTimeAfterTheLastSend,
+            ErrorsLib.SendNotDue(ticketId, oneWaitingTimeAfterTheLastSend)
+        );
+        if (anAsk) require(ticket.asksForReceipt < MAX_RECEIPT_ASKS, ErrorsLib.NoAsksLeft(ticketId));
     }
 
     /// @dev The later of `validUntil` and `seenValidUntil`, plus the ticket's waiting time: from then on the receipt
@@ -940,9 +958,9 @@ library TicketLib {
         }
     }
 
-    /// @dev Discards a move sent nowhere once its deadline passed, for anyone, see {ITickets-cancelTickets}: one
-    ///  still `WaitingForApproval`, or one the approver opened that nobody sent in time. Nothing was sent for it, so
-    ///  no honest receipt can be in flight. The reservation comes back.
+    /// @dev Discards a move still `WaitingForApproval` once its deadline passed, for anyone, see
+    ///  {ITickets-cancelTickets}. Nothing was sent for it, so no honest receipt can be in flight. The reservation comes
+    ///  back. A ticket the approver opened is cancelled only once an ask for its receipt went unanswered.
     /// @param token the token the compliance is bound to
     function discardUnanswered(bytes32 ticketId, address token) internal {
         ITickets.Ticket storage ticket = layout().validations[ticketId];

@@ -168,13 +168,13 @@ contract ValidationDiscardTest is InteropSuiteTest {
         assertEq(IComplianceLedger(address(boundCompliance)).pendingInOf(address(bobIdentity)), CAP);
     }
 
-    /// @notice The answer to an ask may land in the last second of its waiting time, so the cancel comes after.
+    /// @notice The cancel is due one waiting time after the ask, never before.
     function test_cancelTickets_reverts_when_theAskIsStillInsideItsWaitingTime() public {
         uint64 askedAt = uint64(issuedAt) + VALIDITY_WINDOW + POLYGON_WINDOW;
         vm.warp(askedAt);
         boundCompliance.sendTicket(id, bobSat, "");
 
-        vm.warp(askedAt + POLYGON_WINDOW);
+        vm.warp(askedAt + POLYGON_WINDOW - 1);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, askedAt + POLYGON_WINDOW));
         boundCompliance.cancelTickets(_ids(id));
     }

@@ -11,10 +11,9 @@ import { MessageTypesLib } from "contracts/libraries/MessageTypesLib.sol";
 import { InteropSuiteTest } from "test/integration/helpers/InteropSuiteTest.sol";
 import { ERC7786GatewayMock } from "test/integration/mocks/ERC7786GatewayMock.sol";
 
-/// @dev The clock of one ticket: when its receipt may be asked for, three asks at most at fixed times, when an
-///      unanswered ask lets anyone cancel it, the still open answers that move its valid until up to a cap, and the
-///      waiting time it keeps from its ask. Every edge is strict: the away token executes strictly before valid until,
-///      and an answer may land in the last second of a waiting time.
+/// @dev The clock of one ticket: when a lost ticket may be sent again and when its receipt may be asked for, three
+///      asks at most, one send per waiting time, when an unanswered ask lets anyone cancel it, the still open answers
+///      that move its valid until up to a cap, and the waiting time it keeps from its ask.
 contract TicketClockTest is InteropSuiteTest {
 
     uint256 internal constant ALICE_AWAY_BALANCE = 1000;
@@ -83,21 +82,58 @@ contract TicketClockTest is InteropSuiteTest {
         boundCompliance.sendTicket(id, bobSat, "");
     }
 
+    /// @notice Before its valid until a lost ticket is sent again once a waiting time passed since the last send,
+    ///         and that resend counts as no ask. Possible only with a validity window longer than the waiting time.
+    function test_sendTicket_resendsALostTicketBeforeValidUntil_withoutCountingAnAsk() public {
+        vm.prank(deployer);
+        boundCompliance.setValidityWindows(1 days, 1 days);
+        bytes32 longTicket = _requestValidation(address(aliceIdentity), aliceSat, bobSat, 10, ASKED_MAX);
+        uint64 firstSentAt = uint64(block.timestamp);
+        uint64 resendDueAt = firstSentAt + POLYGON_WINDOW;
+        uint256 sentSoFar = polygonBridge.queueLength();
+
+        vm.warp(resendDueAt - 1);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, longTicket, resendDueAt));
+        boundCompliance.sendTicket(longTicket, bobSat, "");
+
+        vm.warp(resendDueAt);
+        vm.recordLogs();
+        vm.prank(stranger);
+        boundCompliance.sendTicket(longTicket, bobSat, "");
+
+        assertEq(polygonBridge.queueLength(), sentSoFar + 1, "the same ticket left again");
+        assertEq(boundCompliance.ticketOf(longTicket).asksForReceipt, 0, "a resend is not an ask");
+        assertEq(boundCompliance.ticketOf(longTicket).lastSentAt, resendDueAt);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != EventsLib.ReceiptAsked.selector, "no ReceiptAsked");
+        }
+    }
+
+    /// @notice Between valid until and the end of the waiting time a sent ticket is neither resent nor asked for.
+    function test_sendTicket_reverts_when_aSentTicketIsPastValidUntilButBeforeTheAsk() public {
+        vm.warp(validUntil);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.SendNotDue.selector, id, firstAskDueAt));
+        boundCompliance.sendTicket(id, bobSat, "");
+    }
+
     /* ----- The cancel after an unanswered ask ----- */
 
-    /// @notice An ask at T is answered at the latest at T plus one waiting time, so the cancel comes strictly after.
+    /// @notice An ask at T is answered before T plus one waiting time, so the cancel comes at that time, not before.
     function test_cancelTickets_reverts_before_theSeenValidUntilPlusOneWaitingTime() public {
         uint64 askedAt = firstAskDueAt;
         uint64 cancelDueAt = askedAt + POLYGON_WINDOW;
         vm.warp(askedAt);
         boundCompliance.sendTicket(id, bobSat, "");
 
-        vm.warp(cancelDueAt);
+        vm.warp(cancelDueAt - 1);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, id, cancelDueAt));
         boundCompliance.cancelTickets(_ids(id));
 
-        vm.warp(cancelDueAt + 1);
+        vm.warp(cancelDueAt);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.TicketCancelled(id);
         vm.prank(stranger);

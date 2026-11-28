@@ -688,9 +688,8 @@ library ReceiptLib {
 
     /* ----- Cancel ----- */
 
-    /// @dev Anyone may cancel: an `Open` ticket once an ask for its receipt went unanswered, see {_cancelDueAt}; a
-    ///  move sent nowhere, waiting for approval or approved and never sent, once past `validUntil`. One refused id
-    ///  reverts the whole batch.
+    /// @dev Anyone may cancel: an `Open` ticket, sent or not, once an ask for its receipt went unanswered, see
+    ///  {_cancelDueAt}; a move waiting for approval once past `validUntil`. One refused id reverts the whole batch.
     ///  No ticket is cancelled while the away chain that owes its receipt is blocked, its peer was replaced as hostile
     ///  less than four waiting times ago, or the token is stopped, a ticket waiting for approval included: its receipt
     ///  may be waiting or on its way, see {TicketLib-requireTicketCanBeDecided}. Nor while that away chain cannot
@@ -704,11 +703,12 @@ library ReceiptLib {
             require(TicketLib.isRecorded(store, ticketId), ErrorsLib.UnknownTicket(ticketId));
             ITickets.Ticket storage ticket = store.validations[ticketId];
             TicketLib.requireTicketCanBeDecided(token, ticket);
-            // Nothing was sent for a move waiting for approval, or opened by the approver and never sent: anyone may
-            // cancel it once its deadline passed, and the reservation comes back. A copy from a home block a reorg
-            // dropped may still be held by the sender's away chain, so on a closed route only a read of that chain
-            // decides it, see {closeByHand}.
-            if (TicketLib.neverSent(ticket)) {
+            // Nothing was sent for a move waiting for approval: anyone may cancel it once its deadline passed, and the
+            // reservation comes back. A copy from a home block a reorg dropped may still be held by the sender's away
+            // chain, so on a closed route only a read of that chain decides it, see {closeByHand}. Once the approver
+            // opened a ticket, it is cancelled only after an unanswered ask, as any open move is.
+            bool waitingForApproval = ticket.status == ITickets.TicketStatus.WaitingForApproval;
+            if (waitingForApproval) {
                 (bool fromHome,) = WalletKeyLib.isReferenceChain(ticket.fromWallet);
                 if (!fromHome) _requireReceiptRouteOpen(token, ticket.fromChainKey);
                 TicketLib.discardUnanswered(ticketId, token);
@@ -719,7 +719,7 @@ library ReceiptLib {
             require(anOpenMove, ErrorsLib.TicketNotCancellable(ticketId, uint8(ticket.status)));
             (bool askedAfterTheReceiptWasDue, uint64 dueAt) = _cancelDueAt(ticket);
             require(askedAfterTheReceiptWasDue, ErrorsLib.CancelNotDue(ticketId, dueAt));
-            require(block.timestamp > dueAt, ErrorsLib.CancelNotDue(ticketId, dueAt));
+            require(block.timestamp >= dueAt, ErrorsLib.CancelNotDue(ticketId, dueAt));
             _requireReceiptRouteOpen(token, ticket.fromChainKey);
             _requireNoWaitingReceiptToApply(store, ticketId, ticket, token);
 
@@ -776,7 +776,7 @@ library ReceiptLib {
     }
 
     /// @dev When an open ticket may be cancelled: one waiting time after an ask for its receipt sent at or after
-    ///  {TicketLib-waitingEndsAtOf}, strictly after, since the answer may land in that very second. An ask a still
+    ///  {TicketLib-waitingEndsAtOf}; the waiting time is sized strictly above the answer's way back. An ask a still
     ///  open answer gave back, or one sent before the valid until moved, does not count: until a new one is out,
     ///  `dueAt` is the earliest a cancel could come.
     function _cancelDueAt(ITickets.Ticket storage ticket)

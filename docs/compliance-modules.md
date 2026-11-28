@@ -184,12 +184,13 @@ chain: the receipt route's validity window is sized off chain to cover it.
 Only the module answers, with `answerApproval(bytes32 ticketId, approvedMax)`, before the deadline. An approval
 lowers the maximum when the answer is lower, releases the difference and opens the ticket; no rule runs again,
 since every rule ran and the room was reserved at the request. Nothing is sent by the answer: anyone makes the
-first send with `sendTicket(ticketId, to, spender)` before the deadline, and that send checks the token
+first send with `sendTicket(ticketId, to, spender)`, at any time, and that send checks the token
 and the chain again, as either may have been stopped while the request waited. A zero answer is a refusal,
 which releases the reservation and ends the validation `Cancelled`; any other answer must lie inside
-`[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered,
-or an approved ticket nobody sent, is discarded past its deadline with `cancelTickets`, by anyone, since nothing was
-sent for it. A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
+`[amountMin, amountMax]`, or it reverts with `EmptyValidationRange`. A request nobody answered is discarded past its
+deadline with `cancelTickets`, by anyone, since nothing was sent for it. An approved ticket is cancelled only once an
+ask for its receipt went unanswered, as any open ticket: a first send made at or after `waitingEndsAt` is that ask.
+A receipt for a ticket that was never sent (still waiting, approved and not sent, refused or
 unanswered) answers no copy home sent: it is put on hold with no destination and reversed, never applied as the
 ticket's move. Home's own copy is the only honest one of an approved ticket: a first-half receipt on any other ask
 block hash breaks its terms and blocks its away chain. Neither stops the token.

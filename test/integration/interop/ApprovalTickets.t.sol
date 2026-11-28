@@ -147,14 +147,32 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         assertEq(ticketBridge.queueLength(), 0, "never on the ticket bridge");
     }
 
-    /// @notice The first send is refused at valid until: the away token would refuse it there.
-    function test_sendTicket_reverts_when_theFirstSendIsAtValidUntil() public {
+    /// @notice The first send has no deadline. Between valid until and the end of the waiting time it is a plain
+    ///         send, counted as no ask: the away token answers that it expired.
+    function test_sendTicket_sendsTheApprovedTicketAtValidUntil_countedAsNoAsk() public {
         bytes32 ticketId = _askAndApprove(bobSat, 50);
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
         vm.warp(validUntil);
 
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.ValidationExpired.selector, ticketId, validUntil));
         boundCompliance.sendTicket(ticketId, bobSat, "");
+
+        assertEq(receiptBridge.queueLength(), 1, "the first send left");
+        assertEq(boundCompliance.ticketOf(ticketId).asksForReceipt, 0, "no ask counted");
+        assertEq(boundCompliance.ticketOf(ticketId).lastSentAt, validUntil);
+    }
+
+    /// @notice A first send at or after the end of the waiting time is also the first ask for the receipt.
+    function test_sendTicket_countsALateFirstSendAsTheFirstAsk() public {
+        bytes32 ticketId = _askAndApprove(bobSat, 50);
+        uint64 waitingEndsAt = boundCompliance.ticketOf(ticketId).validUntil + POLYGON_WINDOW;
+        vm.warp(waitingEndsAt);
+
+        vm.expectEmit(true, false, false, true, address(boundCompliance));
+        emit EventsLib.ReceiptAsked(ticketId, 1);
+        boundCompliance.sendTicket(ticketId, bobSat, "");
+
+        assertEq(boundCompliance.ticketOf(ticketId).asksForReceipt, 1, "the first send is the first ask");
+        assertTrue(boundCompliance.ticketOf(ticketId).askBlockHash != bytes32(0), "the ticket left");
     }
 
     function test_sendTicket_reverts_when_theTokenIsStoppedAtTheFirstSend() public {
@@ -247,21 +265,50 @@ contract ApprovalTicketsTest is InteropSuiteTest {
 
     /* ----- Cancel of a ticket never sent ----- */
 
-    /// @notice An approved ticket nobody sent is cancelled by anyone from its valid until, not a second before.
-    function test_cancelTickets_cancelsAnApprovedTicketNeverSent_fromItsValidUntil() public {
+    /// @notice Once the approver answered, a ticket nobody sent is not cancelled at its valid until: a reorg that
+    ///         dropped only the send could leave a copy on the away chain. It is cancelled only once its late first
+    ///         send, which is the ask, went unanswered for one waiting time.
+    function test_cancelTickets_cancelsAnApprovedTicketSentLate_onlyOnceItsAskWentUnanswered() public {
         bytes32 ticketId = _askAndApprove(bobSat, 50);
         uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
-
-        vm.warp(validUntil - 1);
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, validUntil));
-        boundCompliance.cancelTickets(_ids(ticketId));
+        uint64 waitingEndsAt = validUntil + POLYGON_WINDOW;
 
         vm.warp(validUntil);
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, waitingEndsAt + POLYGON_WINDOW)
+        );
+        boundCompliance.cancelTickets(_ids(ticketId));
+
+        vm.warp(waitingEndsAt);
+        boundCompliance.sendTicket(ticketId, bobSat, "");
+        uint64 cancelDueAt = waitingEndsAt + POLYGON_WINDOW;
+
+        vm.warp(cancelDueAt - 1);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, cancelDueAt));
+        boundCompliance.cancelTickets(_ids(ticketId));
+
+        vm.warp(cancelDueAt);
         vm.expectEmit(true, false, false, true, address(boundCompliance));
         emit EventsLib.TicketCancelled(ticketId);
         vm.prank(stranger);
         boundCompliance.cancelTickets(_ids(ticketId));
+        assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
+    }
+
+    /// @notice An approved ticket sent after its valid until is answered by the away token that it expired: the zero
+    ///         receipt ends it with nothing moved, before any cancel.
+    function test_receiveReceipt_endsAnApprovedTicketSentAfterItsValidUntil_withTheExpiredAnswer() public {
+        bytes32 ticketId = _askAndApprove(bobSat, 50);
+        vm.warp(boundCompliance.ticketOf(ticketId).validUntil + POLYGON_WINDOW);
+        boundCompliance.sendTicket(ticketId, bobSat, "");
+        MessageTypesLib.ReceiptMessage memory expired = _settlement(ticketId, aliceSat, bobSat, 0);
+        expired.answer = MessageTypesLib.ReceiptAnswer.Expired;
+
+        receiptBridge.relay(_liteSettles(receiptBridge, token, expired));
+
+        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Done));
         assertEq(token.reservedOf(aliceSat), 0, "the reservation is back");
     }
 
@@ -295,7 +342,7 @@ contract ApprovalTicketsTest is InteropSuiteTest {
     /* ----- A home wallet's move out ----- */
 
     /// @notice A home wallet's move out waits for the approver with nothing burned; the first send burns it onto hold
-    ///         and sends the move out. Unsent, it is cancelled at valid until with nothing burned.
+    ///         and sends the move out.
     function test_sendTicket_burnsAHomeWalletOntoHold_atTheFirstSendAfterTheYes() public {
         uint256 homeAmount = 100;
         bytes32 ticketId = _askFromAliceHome(homeAmount);
@@ -311,16 +358,23 @@ contract ApprovalTicketsTest is InteropSuiteTest {
         assertEq(uint8(messageType), uint8(MessageTypesLib.Message.MOVE_OUT));
     }
 
-    function test_cancelTickets_burnsNothing_whenAnApprovedHomeMoveOutWasNeverSent() public {
+    /// @notice A home wallet's move out the approver opened has no deadline for its first send: past its valid
+    ///         until it is not cancelled, and the first send still burns it onto hold and sends the move out.
+    function test_sendTicket_movesOutAnApprovedHomeWallet_afterItsValidUntil() public {
         uint256 homeAmount = 100;
         bytes32 ticketId = _askFromAliceHome(homeAmount);
         _approve(ticketId, homeAmount);
-        vm.warp(boundCompliance.ticketOf(ticketId).validUntil);
+        uint64 validUntil = boundCompliance.ticketOf(ticketId).validUntil;
+        vm.warp(validUntil + POLYGON_WINDOW);
 
+        vm.expectRevert(
+            abi.encodeWithSelector(ErrorsLib.CancelNotDue.selector, ticketId, validUntil + 2 * POLYGON_WINDOW)
+        );
         boundCompliance.cancelTickets(_ids(ticketId));
-
-        assertEq(uint8(boundCompliance.statusOf(ticketId)), uint8(ITickets.TicketStatus.Cancelled));
         assertEq(token.balanceOf(alice), homeAmount, "nothing was burned");
+
+        boundCompliance.sendTicket(ticketId, bobSat, "");
+        assertEq(token.onHoldOf(ticketId), homeAmount, "burned onto hold at the first send");
     }
 
     /// @notice The home wallet's tokens are burned at the first send, not reserved at the ask: a holder that spent
