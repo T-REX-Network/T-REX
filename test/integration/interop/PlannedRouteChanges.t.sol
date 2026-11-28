@@ -384,6 +384,20 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
         polygonBridge.relay(index);
     }
 
+    /// @notice A half pinned to a bridge older than the former pair is answered through it, and that bridge's
+    ///         receiving policy is asked about the away side it was set with, not the chain's current one.
+    function test_receiveReceipt_readsThePinnedBridgesOwnAwaySide_afterTwoChanges() public {
+        bytes32 pinnedToTheFirstBridge = _ask(10, 50);
+        uint256 index = _formerLiteSends(polygonBridge, _receipt(pinnedToTheFirstBridge, 40));
+        _changeRouteWithItsAwaySide(abi.encode(makeAddr("second away receipt bridge")));
+        vm.warp(block.timestamp + 4 * POLYGON_WINDOW);
+        _changeRouteWithItsAwaySide(abi.encode(makeAddr("third away receipt bridge")));
+
+        polygonBridge.relay(index);
+
+        assertEq(uint8(boundCompliance.statusOf(pinnedToTheFirstBridge)), uint8(ITickets.TicketStatus.Done));
+    }
+
     /// @notice The route check run again on a kept receipt judges the former pair at the receipt's arrival.
     function test_checkReceiptOrigin_judgesTheFormerPair_atTheArrival() public {
         uint64 changedAt = uint64(block.timestamp);
@@ -553,6 +567,18 @@ contract PlannedRouteChangesTest is InteropSuiteTest {
     function _changeRoute() private returns (ERC7786GatewayMock nextBridge) {
         nextBridge = _newReceiptBridge(POLYGON);
         _openEvmChain(token, POLYGON, address(nextBridge));
+    }
+
+    /// @dev A planned change of Polygon's receipt route to a new bridge whose receiving policy admits
+    ///  `awayReceiptBridge` only, the peer kept.
+    function _changeRouteWithItsAwaySide(bytes memory awayReceiptBridge) private {
+        uint64 awayChainSelector = _awayChainSelector(POLYGON);
+        ERC7786GatewayMock nextBridge = new ERC7786GatewayMock(POLYGON);
+        nextBridge.setReceivingPolicy(awayChainSelector, awayReceiptBridge, FULL_FINALITY);
+        trustedGatewayRegistry.setTrustedGateway(address(nextBridge), true, 0);
+        (bytes2 chainType, bytes memory chainReference) = _evmChain(POLYGON);
+        vm.prank(deployer);
+        token.setReceiptRoute(chainType, chainReference, address(nextBridge), awayChainSelector, awayReceiptBridge);
     }
 
     /// @dev A planned change of Polygon's peer, the route kept.

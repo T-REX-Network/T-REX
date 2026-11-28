@@ -100,7 +100,7 @@ interface ITREXMessaging {
     /// (move out, bring home) to that chain at full finality, and every receipt from it into this token.
     ///
     /// The token asks `bridge` for its receiving policy toward the away chain's receipt bridge, here and again on
-    /// every receipt, and requires full finality: on CCIP the sending bridge picks a message's finality and only
+    /// every receipt `bridge` delivers, whichever pair the receipt came on, and requires full finality: on CCIP the sending bridge picks a message's finality and only
     /// the receiving policy checks it, so the token reads that policy rather than a label. A receipt route is
     /// never set to zero; `closeReceiptRoute` closes it. Changing the bridge is one call to this setter.
     ///

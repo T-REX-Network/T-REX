@@ -226,14 +226,12 @@ contract NamespaceFieldsTest is Test {
         messagingStorage.pins[KEY].bridge = address(0x3);
         messagingStorage.pins[KEY].peerKey = bytes32(uint256(0x4));
         messagingStorage.ticketRoutes[KEY] = address(0x5);
-        messagingStorage.awayReceiptBridges[KEY].chainSelector = 0x6;
-        messagingStorage.awayReceiptBridges[KEY].bridge = hex"07";
+        messagingStorage.awayReceiptBridges[KEY][ALICE].chainSelector = 0x6;
+        messagingStorage.awayReceiptBridges[KEY][ALICE].bridge = hex"07";
         TREXMessagingLib.FormerRoute storage formerRoute = messagingStorage.formerReceiptRoutes[KEY];
         formerRoute.bridge = address(0x8);
         formerRoute.changedAt = 0x9;
         formerRoute.peer = hex"0a";
-        formerRoute.awayReceiptBridge.chainSelector = 0xb;
-        formerRoute.awayReceiptBridge.bridge = hex"0c";
         messagingStorage.hostileChangedAt[KEY] = 0xd;
 
         assertEq(_word(_field(base, 0)), 0x1, "registry");
@@ -251,15 +249,13 @@ contract NamespaceFieldsTest is Test {
         bytes32 pin = _entry(_field(base, 9), KEY);
         assertEq(_word(_field(pin, 0)), 0x3, "pins.bridge");
         assertEq(_word(_field(pin, 1)), 0x4, "pins.peerKey");
-        bytes32 awaySide = _entry(_field(base, 10), KEY);
+        bytes32 awaySide = _entry(_entry(_field(base, 10), KEY), _key(ALICE));
         assertEq(_word(_field(awaySide, 0)), 0x6, "awayReceiptBridges.chainSelector");
         assertEq(_slot(_field(awaySide, 1)), _shortBytes(0x07), "awayReceiptBridges.bridge");
         bytes32 former = _entry(_field(base, 11), KEY);
         // bridge fills bytes 0 to 19, changedAt bytes 20 to 27.
         assertEq(_word(_field(former, 0)), 0x8 | (0x9 << 160), "formerReceiptRoutes.bridge and changedAt");
         assertEq(_slot(_field(former, 1)), _shortBytes(0x0a), "formerReceiptRoutes.peer");
-        assertEq(_word(_field(former, 2)), 0xb, "formerReceiptRoutes.awayReceiptBridge.chainSelector");
-        assertEq(_slot(_field(former, 3)), _shortBytes(0x0c), "formerReceiptRoutes.awayReceiptBridge.bridge");
         assertEq(_word(_entry(_field(base, 12), KEY)), 0xd, "hostileChangedAt");
     }
 

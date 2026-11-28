@@ -113,13 +113,12 @@ library TREXMessagingLib {
 
     /// @dev The receipt route and peer an away chain had before a planned change, still taken for every receipt
     ///  until four of the chain's waiting times after `changedAt`, the waiting time read as it is then: the away
-    ///  token switches after home, and its receipts sent before it switched arrive on this pair. The peer is kept whole so an ask can still reach it, and the away side so the former bridge's
-    ///  receiving policy is asked about its own sender.
+    ///  token switches after home, and its receipts sent before it switched arrive on this pair. The peer is kept
+    ///  whole so an ask can still reach it.
     struct FormerRoute {
         address bridge;
         uint64 changedAt;
         bytes peer;
-        AwayReceiptBridge awayReceiptBridge;
     }
 
     /// @custom:storage-location erc7201:erc3643.storage.TREXMessaging
@@ -157,8 +156,9 @@ library TREXMessagingLib {
         /// The receipt route and peer each half left through, written when it first leaves and never rewritten.
         mapping(bytes32 halfKey => Pin pin) pins;
 
-        /// The away side of each receipt route, read back on every receipt to ask the receiving policy again.
-        mapping(bytes32 chainKey => AwayReceiptBridge awayReceiptBridge) awayReceiptBridges;
+        /// The away side each bridge was set with as an away chain's receipt route, read back on every receipt that
+        /// bridge delivers, so its receiving policy is asked about the receipt's own sender, whichever pair it is.
+        mapping(bytes32 chainKey => mapping(address bridge => AwayReceiptBridge awayReceiptBridge)) awayReceiptBridges;
 
         /// The pair each away chain had before its last planned change of route or peer. Deleted by a hostile change.
         mapping(bytes32 chainKey => FormerRoute formerRoute) formerReceiptRoutes;
@@ -258,7 +258,7 @@ library TREXMessagingLib {
 
         _keepTheFormerRoute(messagingStorage, chainKey);
         messagingStorage.receiptRoutes[chainKey] = bridge;
-        AwayReceiptBridge storage awaySide = messagingStorage.awayReceiptBridges[chainKey];
+        AwayReceiptBridge storage awaySide = messagingStorage.awayReceiptBridges[chainKey][bridge];
         awaySide.chainSelector = awayChainSelector;
         awaySide.bridge = awayReceiptBridge;
 
@@ -271,7 +271,6 @@ library TREXMessagingLib {
         require(messagingStorage.receiptRoutes[chainKey] != address(0), ErrorsLib.ChainNotOpen(chainKey));
 
         delete messagingStorage.receiptRoutes[chainKey];
-        delete messagingStorage.awayReceiptBridges[chainKey];
 
         emit EventsLib.ReceiptRouteClosed(chainKey);
     }
@@ -412,7 +411,7 @@ library TREXMessagingLib {
         _requireExpectedOrigin(messagingStorage, gateway, chainKey, sender, _halfKeyOf(body));
 
         // Everything a token receives reports value that moved, so the bridge must still wait for full finality.
-        AwayReceiptBridge storage awaySide = _awaySideOf(messagingStorage, gateway, chainKey);
+        AwayReceiptBridge storage awaySide = messagingStorage.awayReceiptBridges[chainKey][gateway];
         _requireFullFinality(gateway, chainKey, awaySide.chainSelector, awaySide.bridge);
     }
 
@@ -449,7 +448,7 @@ library TREXMessagingLib {
             _requireCurrentRoute(messagingStorage, bridge, chainKey);
         }
 
-        AwayReceiptBridge storage awaySide = _awaySideOf(messagingStorage, bridge, chainKey);
+        AwayReceiptBridge storage awaySide = messagingStorage.awayReceiptBridges[chainKey][bridge];
         _requireFullFinality(bridge, chainKey, awaySide.chainSelector, awaySide.bridge);
     }
 
@@ -649,20 +648,6 @@ library TREXMessagingLib {
         return pinnedToTheFormerPair && isReceiptBridge(pin.bridge);
     }
 
-    /// @dev The away side to ask `gateway`'s receiving policy about: the former one when the receipt came through the
-    ///  former bridge and that bridge is no longer the route, the current one otherwise.
-    function _awaySideOf(MessagingStorage storage messagingStorage, address gateway, bytes32 chainKey)
-        private
-        view
-        returns (AwayReceiptBridge storage)
-    {
-        FormerRoute storage former = messagingStorage.formerReceiptRoutes[chainKey];
-        bool throughTheFormerBridge = former.bridge == gateway;
-        bool formerBridgeReplaced = messagingStorage.receiptRoutes[chainKey] != gateway;
-        if (throughTheFormerBridge && formerBridgeReplaced) return former.awayReceiptBridge;
-        return messagingStorage.awayReceiptBridges[chainKey];
-    }
-
     /// @dev Changes of route or peer on one away chain stay a window apart: a second change would drop the former
     ///  pair while receipts sent on it may still be on their way. A closed route keeps no new pair, so it drops
     ///  nothing and may be set again at once (see `_keepTheFormerRoute`).
@@ -688,7 +673,6 @@ library TREXMessagingLib {
         former.bridge = currentBridge;
         former.changedAt = uint64(block.timestamp);
         former.peer = currentPeer;
-        former.awayReceiptBridge = messagingStorage.awayReceiptBridges[chainKey];
 
         emit EventsLib.FormerRouteKept(
             chainKey, currentBridge, keccak256(currentPeer), _formerPairEndsAt(chainKey, former)
